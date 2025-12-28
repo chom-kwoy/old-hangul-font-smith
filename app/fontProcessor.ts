@@ -1,3 +1,4 @@
+import { TComplexPathData } from "fabric";
 import opentype from "opentype.js";
 
 import { HANGUL_DATA, composeHangul } from "@/app/hangulData";
@@ -96,7 +97,7 @@ export class FontProcessor {
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
         console.log(jamo.canonical, glyph.name);
-        sets.canonical = glyph.path;
+        sets.canonical = this.toFabricPath(glyph.path);
       }
       if (jamo.leading !== null) {
         // set 1: 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
@@ -104,56 +105,56 @@ export class FontProcessor {
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet1 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
         // set 2: 받침없는 ㅗ ㅛ ㅡ
         syllable = composeHangul(jamo.leading, "ㅡ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet2 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
         // set 3: 받침없는 ㅜ ㅠ
         syllable = composeHangul(jamo.leading, "ㅜ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet3 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
         // set 4: 받침없는 ㅘ ㅙ ㅚ ㅢ
         syllable = composeHangul(jamo.leading, "ㅘ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet4 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
         // set 5: 받침없는 ㅝ ㅞ ㅟ
         syllable = composeHangul(jamo.leading, "ㅝ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet5 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
         // set 6: 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
         syllable = composeHangul(jamo.leading, "ㅏ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet6 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
         // set 7: 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
         syllable = composeHangul(jamo.leading, "ㅡ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet7 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
         // set 8: 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
         syllable = composeHangul(jamo.leading, "ㅘ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = glyph.path; // TODO: extract only the leading part
+          sets.leadingSet8 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
         }
       }
       if (jamo.trailing !== null) {
@@ -163,5 +164,56 @@ export class FontProcessor {
     }
 
     return result;
+  }
+
+  toFabricPath(path: opentype.Path) {
+    if (!this.font) {
+      throw new Error("Call loadFont() first.");
+    }
+    // Font metric scaling (Em units usually 1000 or 2048)
+    const unitsPerEm = this.font.unitsPerEm;
+    const descender = this.font.descender;
+    const scale = 1000 / unitsPerEm;
+    const data: TComplexPathData = [];
+    function tr_x(x: number) {
+      return x * scale;
+    }
+    function tr_y(y: number) {
+      return 1000 - (y - descender) * scale;
+    }
+    for (const cmd of path.commands) {
+      switch (cmd.type) {
+        case "C":
+          data.push([
+            "C",
+            tr_x(cmd.x1),
+            tr_y(cmd.y1),
+            tr_x(cmd.x2),
+            tr_y(cmd.y2),
+            tr_x(cmd.x),
+            tr_y(cmd.y),
+          ]);
+          break;
+        case "L":
+          data.push(["L", tr_x(cmd.x), tr_y(cmd.y)]);
+          break;
+        case "M":
+          data.push(["M", tr_x(cmd.x), tr_y(cmd.y)]);
+          break;
+        case "Q":
+          data.push([
+            "Q",
+            tr_x(cmd.x1),
+            tr_y(cmd.y1),
+            tr_x(cmd.x),
+            tr_y(cmd.y),
+          ]);
+          break;
+        case "Z":
+          data.push(["Z"]);
+          break;
+      }
+    }
+    return data;
   }
 }

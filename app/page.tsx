@@ -4,11 +4,11 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import Button from "@mui/material/Button";
 import { styled } from "@mui/system";
-import App from "next/app";
 import { useState } from "react";
 
+import { ReactFabricCanvas } from "@/app/fabric";
 import { FontProcessor } from "@/app/fontProcessor";
-import { FontMetadata } from "@/app/types";
+import { FontMetadata, HangulJamoSets } from "@/app/types";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -36,6 +36,7 @@ export default function Home() {
   const [fontProcessor] = useState(() => new FontProcessor());
   const [fontMetadata, setFontMetadata] = useState<FontMetadata | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [jamoSets, setJamoSets] = useState<HangulJamoSets | null>(null);
 
   async function handleFileChange(files: FileList | null) {
     if (!files || !files.length) {
@@ -48,7 +49,8 @@ export default function Home() {
     const metadata = await fontProcessor.loadFont(files[0]);
     setFontMetadata(metadata);
 
-    fontProcessor.analyzeJamoSets();
+    const jamoSets = fontProcessor.analyzeJamoSets();
+    setJamoSets(jamoSets);
 
     const sampleImage = fontProcessor.getSampleImage(
       "유월 활짝 편 배꽃들 밑에 요 콩새야",
@@ -180,6 +182,14 @@ export default function Home() {
                 <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
                   Jamos
                 </p>
+                <ReactFabricCanvas
+                  className="border border-slate-200 rounded-lg"
+                  width={480}
+                  height={480}
+                  path={
+                    jamoSets?.consonants?.get("KIYEOK")?.leadingSet1 ?? null
+                  }
+                />
               </div>
             </div>
           </section>
