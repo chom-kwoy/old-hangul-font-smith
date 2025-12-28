@@ -16,6 +16,7 @@ import { Box, styled } from "@mui/system";
 import { TComplexPathData } from "fabric";
 import React, { useState } from "react";
 
+import { downloadArrayBufferAsFile } from "@/app/download";
 import { ReactFabricCanvas } from "@/app/fabric";
 import { FontProcessor } from "@/app/fontProcessor";
 import { HANGUL_DATA } from "@/app/hangulData";
@@ -366,7 +367,12 @@ export default function Home() {
                   variant="contained"
                   startIcon={<DownloadIcon />}
                   onClick={() => {
-                    fontProcessor.addOldHangulSupport();
+                    const buffer = fontProcessor.addOldHangulSupport();
+                    downloadArrayBufferAsFile(
+                      buffer,
+                      "font.otf",
+                      "application/octet-stream",
+                    );
                   }}
                 >
                   Download Font

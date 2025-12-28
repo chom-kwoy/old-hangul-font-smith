@@ -1,5 +1,6 @@
 import { Bezier } from "bezier-js";
 import { TComplexPathData } from "fabric";
+// @ts-expect-error types package for opentype.js is outdated
 import opentype from "opentype.js";
 
 import { intersectBezier, toBezier, toPathData } from "@/app/bezier";
@@ -367,13 +368,29 @@ export class FontProcessor {
     this.font.tables.os2.ulUnicodeRange1 =
       (this.font.tables.os2.ulUnicodeRange1 | (1 << 28)) >>> 0;
 
-    if (this.font.tables.gsub === undefined) {
-      // make gsub table if not exists
-      opentype.Layout;
-    }
+    console.log(this.font.tables.cmap);
 
-    const buffer = this.font.toArrayBuffer();
-    downloadArrayBufferAsFile(buffer, "font.otf", "application/octet-stream");
+    // if (this.font.tables.gsub === undefined) {
+    //   // make gsub table if not exists
+    //   this.font.tables.gsub = {
+    //     version: 1,
+    //     scripts: {
+    //       tag: "DFLT",
+    //       script: {
+    //         defaultLangSys: {
+    //           reserved: 0,
+    //           reqFeatureIndex: 65535,
+    //           featureIndexes: [],
+    //         },
+    //         langSysRecords: [],
+    //       },
+    //     },
+    //     features: [],
+    //     lookups: [],
+    //   };
+    // }
+
+    return null; //this.font.toArrayBuffer();
   }
 
   toFabricPath(path: opentype.Path) {
@@ -469,30 +486,4 @@ function extractVowel(
     ]);
   }
   return extracted!;
-}
-
-function downloadArrayBufferAsFile(
-  arrayBuffer: ArrayBuffer,
-  filename: string,
-  mimeType: string,
-) {
-  // 1. Create a Blob from the ArrayBuffer
-  // The ArrayBuffer must be wrapped in an array
-  const blob = new Blob([arrayBuffer], { type: mimeType });
-
-  // 2. Create a URL for the Blob
-  const url = URL.createObjectURL(blob);
-
-  // 3. Create a temporary anchor element
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename; // Set the file name for the download
-
-  // 4. Append the anchor to the body, click it, and remove it
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-
-  // 5. Revoke the object URL to free up memory
-  URL.revokeObjectURL(url);
 }
