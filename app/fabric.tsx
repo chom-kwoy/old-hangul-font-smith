@@ -2,14 +2,18 @@ import * as fabric from "fabric";
 import { TComplexPathData } from "fabric";
 import React, { useEffect, useRef } from "react";
 
+import { pathBounds, toBezier } from "@/app/bezier";
+
 export function ReactFabricCanvas({
   width,
   height,
   path,
+  interactive,
   ...props
 }: {
   width: number;
   height: number;
+  interactive: boolean;
   path: TComplexPathData | null;
 } & React.ComponentProps<"canvas">) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -41,11 +45,15 @@ export function ReactFabricCanvas({
 
     // 2. Add an initial object
     if (path !== null) {
+      const bbox = pathBounds(toBezier(path));
+      const bbox_width = bbox.right - bbox.left;
+      const bbox_height = bbox.bottom - bbox.top;
       const pathObj = new fabric.Path(path, {
-        left: width / 2,
-        top: height / 2,
+        left: (bbox.left + bbox_width / 2) * (width / 1000),
+        top: (bbox.top + bbox_height / 2) * (height / 1000),
         scaleX: width / 1000,
         scaleY: height / 1000,
+        selectable: interactive,
       });
       fabricRef.current.add(pathObj);
     }
@@ -56,7 +64,7 @@ export function ReactFabricCanvas({
         fabricRef.current.dispose();
       }
     };
-  }, [width, height, path]);
+  }, [width, height, path, interactive]);
 
   return <canvas ref={canvasRef} {...props} />;
 }

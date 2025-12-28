@@ -22,12 +22,13 @@ export type VowelInfo = {
   vowel: string | null;
 };
 
-export type HangulJamoSets = {
+export type JamoVarsets = {
   consonants: Map<string, ConsonantSets>;
   vowel: Map<string, VowelSets>;
 };
 
 export type ConsonantSets = {
+  type: "consonant";
   canonical: TComplexPathData | null; // 단독꼴
   // leading
   leadingSet1: TComplexPathData | null; // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
@@ -46,6 +47,7 @@ export type ConsonantSets = {
 };
 
 export type VowelSets = {
+  type: "vowel";
   canonical: TComplexPathData | null; // 단독꼴
   set1: TComplexPathData | null; // 받침없는 [ㄱ ㅋ]과 결합
   set2: TComplexPathData | null; // 받침없는 [ㄱ ㅋ] 제외

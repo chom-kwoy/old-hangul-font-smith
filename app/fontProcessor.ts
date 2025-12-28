@@ -6,13 +6,12 @@ import { HANGUL_DATA, composeHangul } from "@/app/hangulData";
 import {
   ConsonantSets,
   FontMetadata,
-  HangulJamoSets,
+  JamoVarsets,
   VowelSets,
 } from "@/app/types";
 
 export class FontProcessor {
   font: opentype.Font | null = null;
-  jamoSets: HangulJamoSets | null = null;
 
   async loadFont(file: File): Promise<FontMetadata> {
     const buffer = await file.arrayBuffer();
@@ -65,7 +64,7 @@ export class FontProcessor {
     return canvas.toDataURL("image/png");
   }
 
-  analyzeJamoSets(): HangulJamoSets {
+  analyzeJamoVarsets(): JamoVarsets {
     if (!this.font) {
       throw new Error("Call loadFont() first.");
     }
@@ -78,6 +77,7 @@ export class FontProcessor {
 
     for (const jamo of consonantInfo.values()) {
       const sets: ConsonantSets = {
+        type: "consonant",
         canonical: null, // 단독꼴
         // leading
         leadingSet1: null, // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
@@ -158,7 +158,7 @@ export class FontProcessor {
           const jamo = intersectBezier(bezier, [
             {
               left: 0,
-              right: 500,
+              right: 600,
               top: 0,
               bottom: 500,
             },
@@ -174,7 +174,7 @@ export class FontProcessor {
           const jamo = intersectBezier(bezier, [
             {
               left: 0,
-              right: 500,
+              right: 600,
               top: 0,
               bottom: 500,
             },
@@ -222,7 +222,7 @@ export class FontProcessor {
           const jamo = intersectBezier(bezier, [
             {
               left: 0,
-              right: 500,
+              right: 600,
               top: 0,
               bottom: 300,
             },

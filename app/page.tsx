@@ -2,18 +2,27 @@
 
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import { FormControl, InputLabel, MenuItem, Select } from "@mui/material";
+import {
+  Autocomplete,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  TextField,
+} from "@mui/material";
 import Button from "@mui/material/Button";
-import { styled } from "@mui/system";
+import { Box, styled } from "@mui/system";
 import { TComplexPathData } from "fabric";
-import { useState } from "react";
+import { METHODS } from "node:http";
+import React, { useState } from "react";
 
 import { ReactFabricCanvas } from "@/app/fabric";
 import { FontProcessor } from "@/app/fontProcessor";
+import { HANGUL_DATA } from "@/app/hangulData";
 import {
   ConsonantSets,
   FontMetadata,
-  HangulJamoSets,
+  JamoVarsets,
   VowelSets,
 } from "@/app/types";
 
@@ -38,44 +47,79 @@ export enum AppState {
   ERROR,
 }
 
+function getVarset(varsets: ConsonantSets | VowelSets, varsetName: string) {
+  let varset: TComplexPathData | null = null;
+  if (varsets.type === "consonant") {
+    // prettier-ignore
+    switch (varsetName) {
+      case "canon": varset = varsets.canonical ?? null; break;
+      case "l1": varset = varsets.leadingSet1 ?? null; break;
+      case "l2": varset = varsets.leadingSet2 ?? null; break;
+      case "l3": varset = varsets.leadingSet3 ?? null; break;
+      case "l4": varset = varsets.leadingSet4 ?? null; break;
+      case "l5": varset = varsets.leadingSet5 ?? null; break;
+      case "l6": varset = varsets.leadingSet6 ?? null; break;
+      case "l7": varset = varsets.leadingSet7 ?? null; break;
+      case "l8": varset = varsets.leadingSet8 ?? null; break;
+      case "t1": varset = varsets.trailingSet1 ?? null; break;
+      case "t2": varset = varsets.trailingSet2 ?? null; break;
+      case "t3": varset = varsets.trailingSet3 ?? null; break;
+      case "t4": varset = varsets.trailingSet4 ?? null; break;
+    }
+  } else {
+    // prettier-ignore
+    switch (varsetName) {
+      case "canon": varset = varsets.canonical ?? null; break;
+      case "v1": varset = varsets.set1 ?? null; break;
+      case "v2": varset = varsets.set2 ?? null; break;
+      case "v3": varset = varsets.set3 ?? null; break;
+      case "v4": varset = varsets.set4 ?? null; break;
+    }
+  }
+  return varset;
+}
+
 export default function Home() {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [fontProcessor] = useState(() => new FontProcessor());
   const [fontMetadata, setFontMetadata] = useState<FontMetadata | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [jamoSets, setJamoSets] = useState<HangulJamoSets | null>(null);
-  const [curJamoName, setCurJamoName] = useState<string>("KIYEOK");
-  const [curJamoSetName, setCurJamoSetName] = useState<string>("l1");
+  const [varsets, setVarsets] = useState<JamoVarsets | null>(null);
 
-  let curJamoSets: ConsonantSets | VowelSets | undefined =
-    jamoSets?.consonants?.get(curJamoName);
-  let curJamoSet: TComplexPathData | null = null;
-  if (curJamoSets !== undefined) {
-    // prettier-ignore
-    switch (curJamoSetName) {
-      case "l1": curJamoSet = curJamoSets?.leadingSet1 ?? null; break;
-      case "l2": curJamoSet = curJamoSets?.leadingSet2 ?? null; break;
-      case "l3": curJamoSet = curJamoSets?.leadingSet3 ?? null; break;
-      case "l4": curJamoSet = curJamoSets?.leadingSet4 ?? null; break;
-      case "l5": curJamoSet = curJamoSets?.leadingSet5 ?? null; break;
-      case "l6": curJamoSet = curJamoSets?.leadingSet6 ?? null; break;
-      case "l7": curJamoSet = curJamoSets?.leadingSet7 ?? null; break;
-      case "l8": curJamoSet = curJamoSets?.leadingSet8 ?? null; break;
-      case "t1": curJamoSet = curJamoSets?.trailingSet1 ?? null; break;
-      case "t2": curJamoSet = curJamoSets?.trailingSet2 ?? null; break;
-      case "t3": curJamoSet = curJamoSets?.trailingSet3 ?? null; break;
-      case "t4": curJamoSet = curJamoSets?.trailingSet4 ?? null; break;
-    }
-  } else {
-    curJamoSets = jamoSets?.vowel?.get(curJamoName);
-    // prettier-ignore
-    switch (curJamoSetName) {
-      case "v1": curJamoSet = curJamoSets?.set1 ?? null; break;
-      case "v2": curJamoSet = curJamoSets?.set2 ?? null; break;
-      case "v3": curJamoSet = curJamoSets?.set3 ?? null; break;
-      case "v4": curJamoSet = curJamoSets?.set4 ?? null; break;
-    }
-  }
+  type JamoItem = { label: string; name: string; value: string };
+  const jamoList = React.useMemo(
+    () =>
+      [
+        ...HANGUL_DATA.consonantInfo.values(),
+        ...HANGUL_DATA.vowelInfo.values(),
+      ].map((info) => ({
+        label: `${info.unicode_name} (${info.canonical})`,
+        name: info.unicode_name,
+        value: info.canonical,
+      })),
+    [],
+  );
+  const [selectedJamo, setSelectedJamo] = useState<JamoItem>(jamoList[0]);
+  const [selectedVarsetName, setSelectedVarsetName] = useState<string>("canon");
+
+  const curVarsets =
+    varsets?.consonants?.get(selectedJamo.name) ??
+    varsets?.vowel?.get(selectedJamo.name);
+  const selectedVarset = curVarsets
+    ? getVarset(curVarsets, selectedVarsetName)
+    : null;
+
+  const varsetList = [
+    ["canon", "Canonical (단독형)"],
+    ["l1", "Leading 1 (받침없는 ㅏ ㅐ ...)"],
+    ["l2", "Leading 2 (받침없는 ㅗ ㅛ ㅡ)"],
+    ["l3", "Leading 3 (받침없는 ㅜ ㅠ)"],
+    ["l4", "Leading 4 (받침없는 ㅘ ㅙ ㅚ ㅢ)"],
+    ["l5", "Leading 5 (받침없는 ㅝ ㅞ ㅟ)"],
+    ["l6", "Leading 6 (받침있는 ㅏ ㅐ ...)"],
+    ["l7", "Leading 7 (받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ)"],
+    ["l8", "Leading 8 (받침있는 ㅘ ㅙ ...)"],
+  ];
 
   async function handleFileChange(files: FileList | null) {
     if (!files || !files.length) {
@@ -88,8 +132,8 @@ export default function Home() {
     const metadata = await fontProcessor.loadFont(files[0]);
     setFontMetadata(metadata);
 
-    const jamoSets = fontProcessor.analyzeJamoSets();
-    setJamoSets(jamoSets);
+    const varsets = fontProcessor.analyzeJamoVarsets();
+    setVarsets(varsets);
 
     const sampleImage = fontProcessor.getSampleImage(
       "유월 활짝 편 배꽃들 밑에 요 콩새야",
@@ -222,46 +266,75 @@ export default function Home() {
                   Jamos
                 </p>
 
-                <FormControl fullWidth>
-                  <InputLabel id="jamoset-select-label">Jamo Set</InputLabel>
-                  <Select
-                    labelId="jamoset-select-label"
-                    label={"Jamo Set"}
-                    value={curJamoSetName}
-                    onChange={(event) => {
-                      setCurJamoSetName(event.target.value);
-                    }}
-                  >
-                    <MenuItem value={"l1"}>
-                      Leading 1 (받침없는 ㅏ ㅐ ...)
-                    </MenuItem>
-                    <MenuItem value={"l2"}>
-                      Leading 2 (받침없는 ㅗ ㅛ ㅡ)
-                    </MenuItem>
-                    <MenuItem value={"l3"}>Leading 3 (받침없는 ㅜ ㅠ)</MenuItem>
-                    <MenuItem value={"l4"}>
-                      Leading 4 (받침없는 ㅘ ㅙ ㅚ ㅢ)
-                    </MenuItem>
-                    <MenuItem value={"l5"}>
-                      Leading 5 (받침없는 ㅝ ㅞ ㅟ)
-                    </MenuItem>
-                    <MenuItem value={"l6"}>
-                      Leading 6 (받침있는 ㅏ ㅐ ...)
-                    </MenuItem>
-                    <MenuItem value={"l7"}>
-                      Leading 7 (받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ)
-                    </MenuItem>
-                    <MenuItem value={"l8"}>
-                      Leading 8 (받침있는 ㅘ ㅙ ...)
-                    </MenuItem>
-                  </Select>
-                </FormControl>
+                <div className="flex">
+                  <div className="w-1/2 pe-2">
+                    <Autocomplete
+                      disablePortal
+                      options={jamoList}
+                      renderInput={(params) => (
+                        <TextField {...params} label="Jamo" />
+                      )}
+                      value={selectedJamo}
+                      onChange={(event, newValue) => {
+                        if (newValue !== null) {
+                          setSelectedJamo(newValue);
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="w-1/2 ps-2">
+                    <FormControl fullWidth>
+                      <InputLabel id="varset-select-label">
+                        Variant Set
+                      </InputLabel>
+                      <Select
+                        labelId="varset-select-label"
+                        label={"Variant Set"}
+                        value={selectedVarsetName}
+                        onChange={(event) => {
+                          setSelectedVarsetName(event.target.value);
+                        }}
+                        MenuProps={{
+                          PaperProps: {
+                            style: {
+                              maxHeight: 400, // Set a fixed max height in pixels
+                            },
+                          },
+                        }}
+                        renderValue={(value) => (
+                          <Box>
+                            {varsetList.find((item) => item[0] === value)![1]}
+                          </Box>
+                        )}
+                      >
+                        {curVarsets &&
+                          varsetList.map(([setName, description], i) => (
+                            <MenuItem
+                              key={i}
+                              value={setName}
+                              className="flex justify-between"
+                            >
+                              <span>{description}</span>
+                              <ReactFabricCanvas
+                                className="border border-slate-200 rounded-lg"
+                                width={100}
+                                height={100}
+                                path={getVarset(curVarsets, setName)}
+                                interactive={false}
+                              />
+                            </MenuItem>
+                          ))}
+                      </Select>
+                    </FormControl>
+                  </div>
+                </div>
 
                 <ReactFabricCanvas
                   className="border border-slate-200 rounded-lg"
                   width={480}
                   height={480}
-                  path={curJamoSet}
+                  path={selectedVarset}
+                  interactive={true}
                 />
               </div>
             </div>

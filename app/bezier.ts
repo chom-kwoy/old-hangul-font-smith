@@ -96,7 +96,7 @@ export function toPathData(shapes: Bezier[][]) {
   return path;
 }
 
-function pathBounds(path: Bezier[]): Bounds {
+export function pathBounds(path: Bezier[] | Bezier[][]): Bounds {
   const bounds = {
     left: Infinity,
     right: -Infinity,
@@ -104,11 +104,14 @@ function pathBounds(path: Bezier[]): Bounds {
     bottom: -Infinity,
   };
   for (const bezier of path) {
-    const bbox = bezier.bbox();
-    bounds.left = Math.min(bounds.left, bbox.x.min);
-    bounds.right = Math.max(bounds.right, bbox.x.max);
-    bounds.top = Math.min(bounds.top, bbox.y.min);
-    bounds.bottom = Math.max(bounds.bottom, bbox.y.max);
+    const shapes = Array.isArray(bezier) ? bezier : [bezier];
+    for (const shape of shapes) {
+      const bbox = shape.bbox();
+      bounds.left = Math.min(bounds.left, bbox.x.min);
+      bounds.right = Math.max(bounds.right, bbox.x.max);
+      bounds.top = Math.min(bounds.top, bbox.y.min);
+      bounds.bottom = Math.max(bounds.bottom, bbox.y.max);
+    }
   }
   return bounds;
 }
