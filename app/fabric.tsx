@@ -43,6 +43,36 @@ export function ReactFabricCanvas({
       backgroundColor: "white",
     });
 
+    // Add gridlines
+    fabricRef.current.add(
+      new fabric.Polyline(
+        [
+          { x: 0, y: 0 },
+          { x: 0, y: height },
+        ],
+        {
+          stroke: "red",
+          left: width / 2,
+          top: height / 2,
+          selectable: false,
+        },
+      ),
+    );
+    fabricRef.current.add(
+      new fabric.Polyline(
+        [
+          { x: 0, y: 0 },
+          { x: width, y: 0 },
+        ],
+        {
+          stroke: "red",
+          left: width / 2,
+          top: height / 2,
+          selectable: false,
+        },
+      ),
+    );
+
     // 2. Add an initial object
     if (path !== null) {
       const bbox = pathBounds(toBezier(path));

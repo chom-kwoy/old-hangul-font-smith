@@ -105,21 +105,35 @@ export default function Home() {
   const curVarsets =
     varsets?.consonants?.get(selectedJamo.name) ??
     varsets?.vowel?.get(selectedJamo.name);
+
+  const varsetList =
+    curVarsets?.type === "consonant"
+      ? [
+          ["canon", "Canonical (단독형)"],
+          ["l1", "Leading 1 (받침없는 ㅏ ㅐ ...)"],
+          ["l2", "Leading 2 (받침없는 ㅗ ㅛ ㅡ)"],
+          ["l3", "Leading 3 (받침없는 ㅜ ㅠ)"],
+          ["l4", "Leading 4 (받침없는 ㅘ ㅙ ㅚ ㅢ)"],
+          ["l5", "Leading 5 (받침없는 ㅝ ㅞ ㅟ)"],
+          ["l6", "Leading 6 (받침있는 ㅏ ㅐ ...)"],
+          ["l7", "Leading 7 (받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ)"],
+          ["l8", "Leading 8 (받침있는 ㅘ ㅙ ...)"],
+          ["t1", "Trailing 1 (중성 ㅏ ㅑ ㅘ 와 결합)"],
+          ["t2", "Trailing 2 (중성 ㅓ ㅕ ㅚ 등과 결합)"],
+          ["t3", "Trailing 3 (중성 ㅐ ㅒ ㅔ 등과 결합)"],
+          ["t4", "Trailing 4 (중성 ㅗ ㅛ ㅜ 등과 결합)"],
+        ]
+      : [
+          ["canon", "Canonical (단독형)"],
+          ["v1", "Vowel 1 (받침없는 [ㄱ ㅋ]과 결합)"],
+          ["v2", "Vowel 2 (받침없는 [ㄱ ㅋ] 제외)"],
+          ["v3", "Vowel 3 (받침있는 [ㄱ ㅋ]과 결합)"],
+          ["v4", "Vowel 4 (받침있는 [ㄱ ㅋ] 제외)"],
+        ];
+
   const selectedVarset = curVarsets
     ? getVarset(curVarsets, selectedVarsetName)
     : null;
-
-  const varsetList = [
-    ["canon", "Canonical (단독형)"],
-    ["l1", "Leading 1 (받침없는 ㅏ ㅐ ...)"],
-    ["l2", "Leading 2 (받침없는 ㅗ ㅛ ㅡ)"],
-    ["l3", "Leading 3 (받침없는 ㅜ ㅠ)"],
-    ["l4", "Leading 4 (받침없는 ㅘ ㅙ ㅚ ㅢ)"],
-    ["l5", "Leading 5 (받침없는 ㅝ ㅞ ㅟ)"],
-    ["l6", "Leading 6 (받침있는 ㅏ ㅐ ...)"],
-    ["l7", "Leading 7 (받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ)"],
-    ["l8", "Leading 8 (받침있는 ㅘ ㅙ ...)"],
-  ];
 
   async function handleFileChange(files: FileList | null) {
     if (!files || !files.length) {
@@ -278,6 +292,15 @@ export default function Home() {
                       onChange={(event, newValue) => {
                         if (newValue !== null) {
                           setSelectedJamo(newValue);
+                          // reset selected varset name if jamo type changes
+                          const newJamoType = HANGUL_DATA.consonantInfo.has(
+                            newValue.name,
+                          )
+                            ? "consonant"
+                            : "vowel";
+                          if (curVarsets?.type !== newJamoType) {
+                            setSelectedVarsetName("canon");
+                          }
                         }
                       }}
                     />

@@ -1,3 +1,4 @@
+import { Bezier } from "bezier-js";
 import { TComplexPathData } from "fabric";
 import opentype from "opentype.js";
 
@@ -110,7 +111,7 @@ export class FontProcessor {
           const jamo = intersectBezier(bezier, [
             {
               left: 0,
-              right: 500,
+              right: 600,
               top: 0,
               bottom: 1000,
             },
@@ -150,7 +151,7 @@ export class FontProcessor {
           sets.leadingSet3 = toPathData(jamo);
         }
         // set 4: 받침없는 ㅘ ㅙ ㅚ ㅢ
-        syllable = composeHangul(jamo.leading, "ㅘ", null)!;
+        syllable = composeHangul(jamo.leading, "ㅢ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
@@ -190,7 +191,7 @@ export class FontProcessor {
           const jamo = intersectBezier(bezier, [
             {
               left: 0,
-              right: 500,
+              right: 600,
               top: 0,
               bottom: 500,
             },
@@ -208,13 +209,13 @@ export class FontProcessor {
               left: 0,
               right: 1000,
               top: 0,
-              bottom: 300,
+              bottom: 400,
             },
           ]);
           sets.leadingSet7 = toPathData(jamo);
         }
         // set 8: 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-        syllable = composeHangul(jamo.leading, "ㅘ", "ㄱ")!;
+        syllable = composeHangul(jamo.leading, "ㅢ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
@@ -224,16 +225,130 @@ export class FontProcessor {
               left: 0,
               right: 600,
               top: 0,
-              bottom: 300,
+              bottom: 400,
             },
           ]);
           sets.leadingSet8 = toPathData(jamo);
         }
       }
       if (jamo.trailing !== null) {
-        // TODO
+        // set 1: 중성 ㅏ ㅑ ㅘ 와 결합
+        let syllable = composeHangul("ㅇ", "ㅏ", jamo.trailing)!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 1000,
+              top: 500,
+              bottom: 1000,
+            },
+          ]);
+          sets.trailingSet1 = toPathData(jamo);
+        }
+        // set 2: 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
+        syllable = composeHangul("ㅇ", "ㅓ", jamo.trailing)!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 1000,
+              top: 500,
+              bottom: 1000,
+            },
+          ]);
+          sets.trailingSet2 = toPathData(jamo);
+        }
+        // set 3: 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
+        syllable = composeHangul("ㅇ", "ㅐ", jamo.trailing)!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 1000,
+              top: 500,
+              bottom: 1000,
+            },
+          ]);
+          sets.trailingSet3 = toPathData(jamo);
+        }
+        // set 4: 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
+        syllable = composeHangul("ㄱ", "ㅗ", jamo.trailing)!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 1000,
+              top: 500,
+              bottom: 1000,
+            },
+          ]);
+          sets.trailingSet4 = toPathData(jamo);
+        }
       }
       result.consonants.set(jamo.unicode_name, sets);
+    }
+    for (const jamo of vowelInfo.values()) {
+      const sets: VowelSets = {
+        type: "vowel",
+        canonical: null, // 단독꼴
+        set1: null, // 받침없는 [ㄱ ㅋ]과 결합
+        set2: null, // 받침없는 [ㄱ ㅋ] 제외
+        set3: null, // 받침있는 [ㄱ ㅋ]과 결합
+        set4: null, // 받침있는 [ㄱ ㅋ] 제외
+      };
+      // canonical form
+      if (this.font.hasChar(jamo.canonical)) {
+        const glyph = this.font.charToGlyph(jamo.canonical);
+        console.log(jamo.canonical, glyph.name);
+        sets.canonical = this.toFabricPath(glyph.path);
+      }
+      if (jamo.vowel !== null) {
+        // set 1: 받침없는 [ㄱ ㅋ]과 결합
+        let syllable = composeHangul("ㅋ", jamo.vowel, null)!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          sets.set1 = toPathData(extractVowel(bezier, jamo.position, false));
+        }
+        // set 2: 받침없는 [ㄱ ㅋ] 제외
+        syllable = composeHangul("ㅂ", jamo.vowel, null)!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          sets.set2 = toPathData(extractVowel(bezier, jamo.position, false));
+        }
+        // set 3: 받침있는 [ㄱ ㅋ]과 결합
+        syllable = composeHangul("ㅋ", jamo.vowel, "ㄱ")!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          sets.set3 = toPathData(extractVowel(bezier, jamo.position, true));
+        }
+        // set 4: 받침있는 [ㄱ ㅋ] 제외
+        syllable = composeHangul("ㅂ", jamo.vowel, "ㄱ")!;
+        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
+          const glyph = this.font.charToGlyph(syllable);
+          console.log(syllable, glyph.name);
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          sets.set4 = toPathData(extractVowel(bezier, jamo.position, true));
+        }
+      }
+      result.vowel.set(jamo.unicode_name, sets);
     }
 
     return result;
@@ -245,7 +360,7 @@ export class FontProcessor {
     }
     // Font metric scaling (Em units usually 1000 or 2048)
     const unitsPerEm = this.font.unitsPerEm;
-    const descender = this.font.descender;
+    const descender = this.font.tables.os2.sTypoDescender;
     const scale = 1000 / unitsPerEm;
     const data: TComplexPathData = [];
     function tr_x(x: number) {
@@ -289,4 +404,47 @@ export class FontProcessor {
     }
     return data;
   }
+}
+
+function extractVowel(
+  bezier: Bezier[][],
+  position: "right" | "under" | "mixed",
+  hasTrailing: boolean,
+) {
+  let extracted;
+  if (position === "right") {
+    extracted = intersectBezier(bezier, [
+      {
+        left: 500,
+        right: 1000,
+        top: 0,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+    ]);
+  } else if (position === "under") {
+    extracted = intersectBezier(bezier, [
+      {
+        left: 0,
+        right: 1000,
+        top: hasTrailing ? 400 : 500,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+    ]);
+  } else if (position === "mixed") {
+    extracted = intersectBezier(bezier, [
+      {
+        left: 500,
+        right: 1000,
+        top: 0,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+      {
+        left: 0,
+        right: 1000,
+        top: hasTrailing ? 400 : 500,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+    ]);
+  }
+  return extracted!;
 }

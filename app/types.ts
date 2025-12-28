@@ -20,6 +20,7 @@ export type VowelInfo = {
   canonical: string;
   compat: string | null;
   vowel: string | null;
+  position: "right" | "under" | "mixed";
 };
 
 export type JamoVarsets = {
