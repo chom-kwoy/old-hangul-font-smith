@@ -368,29 +368,27 @@ export class FontProcessor {
     this.font.tables.os2.ulUnicodeRange1 =
       (this.font.tables.os2.ulUnicodeRange1 | (1 << 28)) >>> 0;
 
-    console.log(this.font.tables.cmap);
+    if (this.font.tables.gsub === undefined) {
+      // make gsub table if not exists
+      this.font.tables.gsub = {
+        version: 1,
+        scripts: {
+          tag: "DFLT",
+          script: {
+            defaultLangSys: {
+              reserved: 0,
+              reqFeatureIndex: 65535,
+              featureIndexes: [],
+            },
+            langSysRecords: [],
+          },
+        },
+        features: [],
+        lookups: [],
+      };
+    }
 
-    // if (this.font.tables.gsub === undefined) {
-    //   // make gsub table if not exists
-    //   this.font.tables.gsub = {
-    //     version: 1,
-    //     scripts: {
-    //       tag: "DFLT",
-    //       script: {
-    //         defaultLangSys: {
-    //           reserved: 0,
-    //           reqFeatureIndex: 65535,
-    //           featureIndexes: [],
-    //         },
-    //         langSysRecords: [],
-    //       },
-    //     },
-    //     features: [],
-    //     lookups: [],
-    //   };
-    // }
-
-    return null; //this.font.toArrayBuffer();
+    return this.font.toArrayBuffer();
   }
 
   toFabricPath(path: opentype.Path) {
