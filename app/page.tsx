@@ -2,13 +2,20 @@
 
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
+import { FormControl, InputLabel, MenuItem, Select } from "@mui/material";
 import Button from "@mui/material/Button";
 import { styled } from "@mui/system";
+import { TComplexPathData } from "fabric";
 import { useState } from "react";
 
 import { ReactFabricCanvas } from "@/app/fabric";
 import { FontProcessor } from "@/app/fontProcessor";
-import { FontMetadata, HangulJamoSets } from "@/app/types";
+import {
+  ConsonantSets,
+  FontMetadata,
+  HangulJamoSets,
+  VowelSets,
+} from "@/app/types";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -37,6 +44,38 @@ export default function Home() {
   const [fontMetadata, setFontMetadata] = useState<FontMetadata | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [jamoSets, setJamoSets] = useState<HangulJamoSets | null>(null);
+  const [curJamoName, setCurJamoName] = useState<string>("KIYEOK");
+  const [curJamoSetName, setCurJamoSetName] = useState<string>("l1");
+
+  let curJamoSets: ConsonantSets | VowelSets | undefined =
+    jamoSets?.consonants?.get(curJamoName);
+  let curJamoSet: TComplexPathData | null = null;
+  if (curJamoSets !== undefined) {
+    // prettier-ignore
+    switch (curJamoSetName) {
+      case "l1": curJamoSet = curJamoSets?.leadingSet1 ?? null; break;
+      case "l2": curJamoSet = curJamoSets?.leadingSet2 ?? null; break;
+      case "l3": curJamoSet = curJamoSets?.leadingSet3 ?? null; break;
+      case "l4": curJamoSet = curJamoSets?.leadingSet4 ?? null; break;
+      case "l5": curJamoSet = curJamoSets?.leadingSet5 ?? null; break;
+      case "l6": curJamoSet = curJamoSets?.leadingSet6 ?? null; break;
+      case "l7": curJamoSet = curJamoSets?.leadingSet7 ?? null; break;
+      case "l8": curJamoSet = curJamoSets?.leadingSet8 ?? null; break;
+      case "t1": curJamoSet = curJamoSets?.trailingSet1 ?? null; break;
+      case "t2": curJamoSet = curJamoSets?.trailingSet2 ?? null; break;
+      case "t3": curJamoSet = curJamoSets?.trailingSet3 ?? null; break;
+      case "t4": curJamoSet = curJamoSets?.trailingSet4 ?? null; break;
+    }
+  } else {
+    curJamoSets = jamoSets?.vowel?.get(curJamoName);
+    // prettier-ignore
+    switch (curJamoSetName) {
+      case "v1": curJamoSet = curJamoSets?.set1 ?? null; break;
+      case "v2": curJamoSet = curJamoSets?.set2 ?? null; break;
+      case "v3": curJamoSet = curJamoSets?.set3 ?? null; break;
+      case "v4": curJamoSet = curJamoSets?.set4 ?? null; break;
+    }
+  }
 
   async function handleFileChange(files: FileList | null) {
     if (!files || !files.length) {
@@ -182,13 +221,47 @@ export default function Home() {
                 <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
                   Jamos
                 </p>
+
+                <FormControl fullWidth>
+                  <InputLabel id="jamoset-select-label">Jamo Set</InputLabel>
+                  <Select
+                    labelId="jamoset-select-label"
+                    label={"Jamo Set"}
+                    value={curJamoSetName}
+                    onChange={(event) => {
+                      setCurJamoSetName(event.target.value);
+                    }}
+                  >
+                    <MenuItem value={"l1"}>
+                      Leading 1 (받침없는 ㅏ ㅐ ...)
+                    </MenuItem>
+                    <MenuItem value={"l2"}>
+                      Leading 2 (받침없는 ㅗ ㅛ ㅡ)
+                    </MenuItem>
+                    <MenuItem value={"l3"}>Leading 3 (받침없는 ㅜ ㅠ)</MenuItem>
+                    <MenuItem value={"l4"}>
+                      Leading 4 (받침없는 ㅘ ㅙ ㅚ ㅢ)
+                    </MenuItem>
+                    <MenuItem value={"l5"}>
+                      Leading 5 (받침없는 ㅝ ㅞ ㅟ)
+                    </MenuItem>
+                    <MenuItem value={"l6"}>
+                      Leading 6 (받침있는 ㅏ ㅐ ...)
+                    </MenuItem>
+                    <MenuItem value={"l7"}>
+                      Leading 7 (받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ)
+                    </MenuItem>
+                    <MenuItem value={"l8"}>
+                      Leading 8 (받침있는 ㅘ ㅙ ...)
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+
                 <ReactFabricCanvas
                   className="border border-slate-200 rounded-lg"
                   width={480}
                   height={480}
-                  path={
-                    jamoSets?.consonants?.get("KIYEOK")?.leadingSet1 ?? null
-                  }
+                  path={curJamoSet}
                 />
               </div>
             </div>

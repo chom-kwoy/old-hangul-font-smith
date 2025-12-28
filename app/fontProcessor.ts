@@ -1,6 +1,7 @@
 import { TComplexPathData } from "fabric";
 import opentype from "opentype.js";
 
+import { intersectBezier, toBezier, toPathData } from "@/app/bezier";
 import { HANGUL_DATA, composeHangul } from "@/app/hangulData";
 import {
   ConsonantSets,
@@ -105,56 +106,128 @@ export class FontProcessor {
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet1 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 500,
+              top: 0,
+              bottom: 1000,
+            },
+          ]);
+          sets.leadingSet1 = toPathData(jamo);
         }
         // set 2: 받침없는 ㅗ ㅛ ㅡ
         syllable = composeHangul(jamo.leading, "ㅡ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet2 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 1000,
+              top: 0,
+              bottom: 500,
+            },
+          ]);
+          sets.leadingSet2 = toPathData(jamo);
         }
         // set 3: 받침없는 ㅜ ㅠ
         syllable = composeHangul(jamo.leading, "ㅜ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet3 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 1000,
+              top: 0,
+              bottom: 500,
+            },
+          ]);
+          sets.leadingSet3 = toPathData(jamo);
         }
         // set 4: 받침없는 ㅘ ㅙ ㅚ ㅢ
         syllable = composeHangul(jamo.leading, "ㅘ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet4 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 500,
+              top: 0,
+              bottom: 500,
+            },
+          ]);
+          sets.leadingSet4 = toPathData(jamo);
         }
         // set 5: 받침없는 ㅝ ㅞ ㅟ
         syllable = composeHangul(jamo.leading, "ㅝ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet5 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 500,
+              top: 0,
+              bottom: 500,
+            },
+          ]);
+          sets.leadingSet5 = toPathData(jamo);
         }
         // set 6: 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
         syllable = composeHangul(jamo.leading, "ㅏ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet6 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 500,
+              top: 0,
+              bottom: 500,
+            },
+          ]);
+          sets.leadingSet6 = toPathData(jamo);
         }
         // set 7: 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
         syllable = composeHangul(jamo.leading, "ㅡ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet7 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 1000,
+              top: 0,
+              bottom: 300,
+            },
+          ]);
+          sets.leadingSet7 = toPathData(jamo);
         }
         // set 8: 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
         syllable = composeHangul(jamo.leading, "ㅘ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           console.log(syllable, glyph.name);
-          sets.leadingSet8 = this.toFabricPath(glyph.path); // TODO: extract only the leading part
+          const bezier = toBezier(this.toFabricPath(glyph.path));
+          const jamo = intersectBezier(bezier, [
+            {
+              left: 0,
+              right: 500,
+              top: 0,
+              bottom: 300,
+            },
+          ]);
+          sets.leadingSet8 = toPathData(jamo);
         }
       }
       if (jamo.trailing !== null) {
@@ -183,7 +256,22 @@ export class FontProcessor {
     }
     for (const cmd of path.commands) {
       switch (cmd.type) {
-        case "C":
+        case "M": // move to
+          data.push(["M", tr_x(cmd.x), tr_y(cmd.y)]);
+          break;
+        case "L": // line to
+          data.push(["L", tr_x(cmd.x), tr_y(cmd.y)]);
+          break;
+        case "Q": // quadratic bezier curve
+          data.push([
+            "Q",
+            tr_x(cmd.x1),
+            tr_y(cmd.y1),
+            tr_x(cmd.x),
+            tr_y(cmd.y),
+          ]);
+          break;
+        case "C": // cubic bezier curve
           data.push([
             "C",
             tr_x(cmd.x1),
@@ -194,22 +282,7 @@ export class FontProcessor {
             tr_y(cmd.y),
           ]);
           break;
-        case "L":
-          data.push(["L", tr_x(cmd.x), tr_y(cmd.y)]);
-          break;
-        case "M":
-          data.push(["M", tr_x(cmd.x), tr_y(cmd.y)]);
-          break;
-        case "Q":
-          data.push([
-            "Q",
-            tr_x(cmd.x1),
-            tr_y(cmd.y1),
-            tr_x(cmd.x),
-            tr_y(cmd.y),
-          ]);
-          break;
-        case "Z":
+        case "Z": // close path
           data.push(["Z"]);
           break;
       }

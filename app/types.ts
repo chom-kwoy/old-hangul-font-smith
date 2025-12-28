@@ -52,3 +52,10 @@ export type VowelSets = {
   set3: TComplexPathData | null; // 받침있는 [ㄱ ㅋ]과 결합
   set4: TComplexPathData | null; // 받침있는 [ㄱ ㅋ] 제외
 };
+
+export type Bounds = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
