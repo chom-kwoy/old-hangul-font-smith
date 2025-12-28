@@ -1,6 +1,7 @@
 "use client";
 
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import DownloadIcon from "@mui/icons-material/Download";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
   Autocomplete,
@@ -13,7 +14,6 @@ import {
 import Button from "@mui/material/Button";
 import { Box, styled } from "@mui/system";
 import { TComplexPathData } from "fabric";
-import { METHODS } from "node:http";
 import React, { useState } from "react";
 
 import { ReactFabricCanvas } from "@/app/fabric";
@@ -359,6 +359,18 @@ export default function Home() {
                   path={selectedVarset}
                   interactive={true}
                 />
+              </div>
+
+              <div className="text-center">
+                <Button
+                  variant="contained"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => {
+                    fontProcessor.addOldHangulSupport();
+                  }}
+                >
+                  Download Font
+                </Button>
               </div>
             </div>
           </section>

@@ -40,7 +40,11 @@ export class FontProcessor {
 
   // Renders sample text to a canvas and returns base64 image for AI analysis
   getSampleImage(sampleText: string): string {
-    if (!this.font) throw new Error("Font not loaded");
+    if (!this.font) {
+      throw new Error("Font not loaded");
+    }
+    console.log(this.font.tables.os2);
+    console.log(this.font.tables.gsub);
 
     const canvas = document.createElement("canvas");
     canvas.width = 1400;
@@ -98,7 +102,7 @@ export class FontProcessor {
       // canonical form
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
-        console.log(jamo.canonical, glyph.name);
+        // console.log(jamo.canonical, glyph.name);
         sets.canonical = this.toFabricPath(glyph.path);
       }
       if (jamo.leading !== null) {
@@ -106,7 +110,7 @@ export class FontProcessor {
         let syllable = composeHangul(jamo.leading, "ㅏ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -122,7 +126,7 @@ export class FontProcessor {
         syllable = composeHangul(jamo.leading, "ㅡ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -138,7 +142,7 @@ export class FontProcessor {
         syllable = composeHangul(jamo.leading, "ㅜ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -154,7 +158,7 @@ export class FontProcessor {
         syllable = composeHangul(jamo.leading, "ㅢ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -170,7 +174,7 @@ export class FontProcessor {
         syllable = composeHangul(jamo.leading, "ㅝ", null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -186,7 +190,7 @@ export class FontProcessor {
         syllable = composeHangul(jamo.leading, "ㅏ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -202,7 +206,7 @@ export class FontProcessor {
         syllable = composeHangul(jamo.leading, "ㅡ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -218,7 +222,7 @@ export class FontProcessor {
         syllable = composeHangul(jamo.leading, "ㅢ", "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -236,7 +240,7 @@ export class FontProcessor {
         let syllable = composeHangul("ㅇ", "ㅏ", jamo.trailing)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -252,7 +256,7 @@ export class FontProcessor {
         syllable = composeHangul("ㅇ", "ㅓ", jamo.trailing)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -268,7 +272,7 @@ export class FontProcessor {
         syllable = composeHangul("ㅇ", "ㅐ", jamo.trailing)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -284,7 +288,7 @@ export class FontProcessor {
         syllable = composeHangul("ㄱ", "ㅗ", jamo.trailing)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           const jamo = intersectBezier(bezier, [
             {
@@ -311,7 +315,7 @@ export class FontProcessor {
       // canonical form
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
-        console.log(jamo.canonical, glyph.name);
+        // console.log(jamo.canonical, glyph.name);
         sets.canonical = this.toFabricPath(glyph.path);
       }
       if (jamo.vowel !== null) {
@@ -319,7 +323,7 @@ export class FontProcessor {
         let syllable = composeHangul("ㅋ", jamo.vowel, null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           sets.set1 = toPathData(extractVowel(bezier, jamo.position, false));
         }
@@ -327,7 +331,7 @@ export class FontProcessor {
         syllable = composeHangul("ㅂ", jamo.vowel, null)!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           sets.set2 = toPathData(extractVowel(bezier, jamo.position, false));
         }
@@ -335,7 +339,7 @@ export class FontProcessor {
         syllable = composeHangul("ㅋ", jamo.vowel, "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           sets.set3 = toPathData(extractVowel(bezier, jamo.position, true));
         }
@@ -343,7 +347,7 @@ export class FontProcessor {
         syllable = composeHangul("ㅂ", jamo.vowel, "ㄱ")!;
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
-          console.log(syllable, glyph.name);
+          // console.log(syllable, glyph.name);
           const bezier = toBezier(this.toFabricPath(glyph.path));
           sets.set4 = toPathData(extractVowel(bezier, jamo.position, true));
         }
@@ -352,6 +356,24 @@ export class FontProcessor {
     }
 
     return result;
+  }
+
+  addOldHangulSupport() {
+    if (!this.font) {
+      throw new Error("Call loadFont() first.");
+    }
+
+    // Set bit for Hangul Jamo support
+    this.font.tables.os2.ulUnicodeRange1 =
+      (this.font.tables.os2.ulUnicodeRange1 | (1 << 28)) >>> 0;
+
+    if (this.font.tables.gsub === undefined) {
+      // make gsub table if not exists
+      opentype.Layout;
+    }
+
+    const buffer = this.font.toArrayBuffer();
+    downloadArrayBufferAsFile(buffer, "font.otf", "application/octet-stream");
   }
 
   toFabricPath(path: opentype.Path) {
@@ -447,4 +469,30 @@ function extractVowel(
     ]);
   }
   return extracted!;
+}
+
+function downloadArrayBufferAsFile(
+  arrayBuffer: ArrayBuffer,
+  filename: string,
+  mimeType: string,
+) {
+  // 1. Create a Blob from the ArrayBuffer
+  // The ArrayBuffer must be wrapped in an array
+  const blob = new Blob([arrayBuffer], { type: mimeType });
+
+  // 2. Create a URL for the Blob
+  const url = URL.createObjectURL(blob);
+
+  // 3. Create a temporary anchor element
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename; // Set the file name for the download
+
+  // 4. Append the anchor to the body, click it, and remove it
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  // 5. Revoke the object URL to free up memory
+  URL.revokeObjectURL(url);
 }
