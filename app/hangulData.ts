@@ -334,12 +334,18 @@ function getHangulData(): {
   const vowelMap = new Map<string, VowelInfo>();
   for (const datum of VOWEL_DATA) {
     const [name, canon, compat, vowel, position] = datum;
+    const parts = name.split("-");
     const info: VowelInfo = {
       unicode_name: name,
       canonical: canon,
       compat,
       vowel,
       position,
+      pokingDown: parts.some((part) => ["U", "YU"].includes(part)),
+      pokingRight: parts.some((part) => ["A", "YA"].includes(part)),
+      doubleVertical: parts.some((part) =>
+        ["E", "AE", "YE", "YAE"].includes(part),
+      ),
     };
     vowelInfo.set(name, info);
     for (const item of datum) {
@@ -358,20 +364,45 @@ function getHangulData(): {
 
 export const HANGUL_DATA = getHangulData();
 
+export function getLeading(jamoName: string): string | null {
+  return HANGUL_DATA.consonantMap.get(jamoName)?.leading ?? null;
+}
+export function getVowel(jamoName: string): string | null {
+  return HANGUL_DATA.vowelMap.get(jamoName)?.vowel ?? null;
+}
+export function getTrailing(jamoName: string): string | null {
+  if (jamoName === "") {
+    return "";
+  }
+  return HANGUL_DATA.consonantMap.get(jamoName)?.trailing ?? null;
+}
+export function getName(jamo: string): string | null {
+  if (jamo === "") {
+    return "";
+  }
+  return (
+    HANGUL_DATA.consonantMap.get(jamo)?.unicode_name ??
+    HANGUL_DATA.vowelMap.get(jamo)?.unicode_name ??
+    null
+  );
+}
+
 export function composeHangul(
   leading: string,
   vowel: string,
-  trailing: string | null,
-) {
-  const realLeading = HANGUL_DATA.consonantMap.get(leading)?.leading;
-  const realVowel = HANGUL_DATA.vowelMap.get(vowel)?.vowel;
-  const realTrailing = trailing
-    ? HANGUL_DATA.consonantMap.get(trailing)?.trailing
-    : "";
+  trailing: string | null = null,
+  precompose: boolean = true,
+): string {
+  const realLeading = getLeading(leading);
+  const realVowel = getVowel(vowel);
+  const realTrailing = trailing ? getTrailing(trailing) : "";
   if (realLeading === null || realVowel === null || realTrailing === null) {
-    return null;
+    throw new Error("Invalid composition.");
   }
   let result = `${realLeading}${realVowel}${realTrailing}`;
-  result = result.normalize("NFC");
+  if (precompose) {
+    // TODO: convert to PUA
+    result = result.normalize("NFC");
+  }
   return result;
 }

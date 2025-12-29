@@ -13,19 +13,14 @@ import {
 } from "@mui/material";
 import Button from "@mui/material/Button";
 import { Box, styled } from "@mui/system";
-import { TComplexPathData } from "fabric";
 import React, { useState } from "react";
 
 import { downloadArrayBufferAsFile } from "@/app/download";
 import { ReactFabricCanvas } from "@/app/fabric";
 import { FontProcessor } from "@/app/fontProcessor";
 import { HANGUL_DATA } from "@/app/hangulData";
-import {
-  ConsonantSets,
-  FontMetadata,
-  JamoVarsets,
-  VowelSets,
-} from "@/app/types";
+import { getExampleEnvPaths, getVarset } from "@/app/jamos";
+import { FontMetadata, JamoVarsets } from "@/app/types";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -46,38 +41,6 @@ export enum AppState {
   GENERATING,
   COMPLETED,
   ERROR,
-}
-
-function getVarset(varsets: ConsonantSets | VowelSets, varsetName: string) {
-  let varset: TComplexPathData | null = null;
-  if (varsets.type === "consonant") {
-    // prettier-ignore
-    switch (varsetName) {
-      case "canon": varset = varsets.canonical ?? null; break;
-      case "l1": varset = varsets.leadingSet1 ?? null; break;
-      case "l2": varset = varsets.leadingSet2 ?? null; break;
-      case "l3": varset = varsets.leadingSet3 ?? null; break;
-      case "l4": varset = varsets.leadingSet4 ?? null; break;
-      case "l5": varset = varsets.leadingSet5 ?? null; break;
-      case "l6": varset = varsets.leadingSet6 ?? null; break;
-      case "l7": varset = varsets.leadingSet7 ?? null; break;
-      case "l8": varset = varsets.leadingSet8 ?? null; break;
-      case "t1": varset = varsets.trailingSet1 ?? null; break;
-      case "t2": varset = varsets.trailingSet2 ?? null; break;
-      case "t3": varset = varsets.trailingSet3 ?? null; break;
-      case "t4": varset = varsets.trailingSet4 ?? null; break;
-    }
-  } else {
-    // prettier-ignore
-    switch (varsetName) {
-      case "canon": varset = varsets.canonical ?? null; break;
-      case "v1": varset = varsets.set1 ?? null; break;
-      case "v2": varset = varsets.set2 ?? null; break;
-      case "v3": varset = varsets.set3 ?? null; break;
-      case "v4": varset = varsets.set4 ?? null; break;
-    }
-  }
-  return varset;
 }
 
 export default function Home() {
@@ -134,6 +97,12 @@ export default function Home() {
 
   const selectedVarset = curVarsets
     ? getVarset(curVarsets, selectedVarsetName)
+    : null;
+
+  const bgPaths = varsets
+    ? getExampleEnvPaths(varsets, selectedJamo.name, selectedVarsetName, 10)
+        .flat()
+        .filter((path) => path !== null)
     : null;
 
   async function handleFileChange(files: FileList | null) {
@@ -252,87 +221,89 @@ export default function Home() {
         {/* Step 2: Analysis & Generate */}
         {(appState === AppState.READY_TO_GENERATE ||
           appState === AppState.GENERATING ||
-          appState === AppState.COMPLETED) && (
-          <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
-            <div className="flex items-center gap-3 mb-6">
-              <h2 className="text-xl font-bold text-slate-900">
-                Style Analysis & Generation
-              </h2>
-            </div>
-
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
-                  Input Sample
-                </p>
-                <div className="border border-slate-200 rounded-lg p-4 bg-white overflow-hidden">
-                  {previewImage && (
-                    <img
-                      src={previewImage}
-                      alt="Font Preview"
-                      className="h-16 object-contain opacity-80"
-                    />
-                  )}
-                </div>
+          appState === AppState.COMPLETED) &&
+          varsets &&
+          curVarsets &&
+          bgPaths && (
+            <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
+              <div className="flex items-center gap-3 mb-6">
+                <h2 className="text-xl font-bold text-slate-900">
+                  Style Analysis & Generation
+                </h2>
               </div>
 
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
-                  Jamos
-                </p>
-
-                <div className="flex">
-                  <div className="w-1/2 pe-2">
-                    <Autocomplete
-                      disablePortal
-                      options={jamoList}
-                      renderInput={(params) => (
-                        <TextField {...params} label="Jamo" />
-                      )}
-                      value={selectedJamo}
-                      onChange={(event, newValue) => {
-                        if (newValue !== null) {
-                          setSelectedJamo(newValue);
-                          // reset selected varset name if jamo type changes
-                          const newJamoType = HANGUL_DATA.consonantInfo.has(
-                            newValue.name,
-                          )
-                            ? "consonant"
-                            : "vowel";
-                          if (curVarsets?.type !== newJamoType) {
-                            setSelectedVarsetName("canon");
-                          }
-                        }
-                      }}
-                    />
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
+                    Input Sample
+                  </p>
+                  <div className="border border-slate-200 rounded-lg p-4 bg-white overflow-hidden">
+                    {previewImage && (
+                      <img
+                        src={previewImage}
+                        alt="Font Preview"
+                        className="h-16 object-contain opacity-80"
+                      />
+                    )}
                   </div>
-                  <div className="w-1/2 ps-2">
-                    <FormControl fullWidth>
-                      <InputLabel id="varset-select-label">
-                        Variant Set
-                      </InputLabel>
-                      <Select
-                        labelId="varset-select-label"
-                        label={"Variant Set"}
-                        value={selectedVarsetName}
-                        onChange={(event) => {
-                          setSelectedVarsetName(event.target.value);
-                        }}
-                        MenuProps={{
-                          PaperProps: {
-                            style: {
-                              maxHeight: 400, // Set a fixed max height in pixels
-                            },
-                          },
-                        }}
-                        renderValue={(value) => (
-                          <Box>
-                            {varsetList.find((item) => item[0] === value)![1]}
-                          </Box>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
+                    Jamos
+                  </p>
+
+                  <div className="flex">
+                    <div className="w-1/2 pe-2">
+                      <Autocomplete
+                        disablePortal
+                        options={jamoList}
+                        renderInput={(params) => (
+                          <TextField {...params} label="Jamo" />
                         )}
-                      >
-                        {curVarsets &&
-                          varsetList.map(([setName, description], i) => (
+                        value={selectedJamo}
+                        onChange={(event, newValue) => {
+                          if (newValue !== null) {
+                            setSelectedJamo(newValue);
+                            // reset selected varset name if jamo type changes
+                            const newJamoType = HANGUL_DATA.consonantInfo.has(
+                              newValue.name,
+                            )
+                              ? "consonant"
+                              : "vowel";
+                            if (curVarsets?.type !== newJamoType) {
+                              setSelectedVarsetName("canon");
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="w-1/2 ps-2">
+                      <FormControl fullWidth>
+                        <InputLabel id="varset-select-label">
+                          Variant Set
+                        </InputLabel>
+                        <Select
+                          labelId="varset-select-label"
+                          label={"Variant Set"}
+                          value={selectedVarsetName}
+                          onChange={(event) => {
+                            setSelectedVarsetName(event.target.value);
+                          }}
+                          MenuProps={{
+                            PaperProps: {
+                              style: {
+                                maxHeight: 400, // Set a fixed max height in pixels
+                              },
+                            },
+                          }}
+                          renderValue={(value) => (
+                            <Box>
+                              {varsetList.find((item) => item[0] === value)![1]}
+                            </Box>
+                          )}
+                        >
+                          {varsetList.map(([setName, description], i) => (
                             <MenuItem
                               key={i}
                               value={setName}
@@ -344,43 +315,45 @@ export default function Home() {
                                 width={100}
                                 height={100}
                                 path={getVarset(curVarsets, setName)}
+                                bgPaths={[]}
                                 interactive={false}
                               />
                             </MenuItem>
                           ))}
-                      </Select>
-                    </FormControl>
+                        </Select>
+                      </FormControl>
+                    </div>
                   </div>
+
+                  <ReactFabricCanvas
+                    className="border border-slate-200 rounded-lg"
+                    width={480}
+                    height={480}
+                    path={selectedVarset}
+                    bgPaths={bgPaths}
+                    interactive={true}
+                  />
                 </div>
 
-                <ReactFabricCanvas
-                  className="border border-slate-200 rounded-lg"
-                  width={480}
-                  height={480}
-                  path={selectedVarset}
-                  interactive={true}
-                />
+                <div className="text-center">
+                  <Button
+                    variant="contained"
+                    startIcon={<DownloadIcon />}
+                    onClick={() => {
+                      const buffer = fontProcessor.addOldHangulSupport();
+                      downloadArrayBufferAsFile(
+                        buffer,
+                        "font.otf",
+                        "application/octet-stream",
+                      );
+                    }}
+                  >
+                    Download Font
+                  </Button>
+                </div>
               </div>
-
-              <div className="text-center">
-                <Button
-                  variant="contained"
-                  startIcon={<DownloadIcon />}
-                  onClick={() => {
-                    const buffer = fontProcessor.addOldHangulSupport();
-                    downloadArrayBufferAsFile(
-                      buffer,
-                      "font.otf",
-                      "application/octet-stream",
-                    );
-                  }}
-                >
-                  Download Font
-                </Button>
-              </div>
-            </div>
-          </section>
-        )}
+            </section>
+          )}
       </main>
     </div>
   );

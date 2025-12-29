@@ -21,6 +21,9 @@ export type VowelInfo = {
   compat: string | null;
   vowel: string | null;
   position: "right" | "under" | "mixed";
+  pokingDown: boolean; // e.g. ㅜ ㅠ ㅝ ㅞ ㅟ
+  pokingRight: boolean; // e.g. ㅏ ㅑ ㅘ
+  doubleVertical: boolean; // e.g. ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ
 };
 
 export type JamoVarsets = {
@@ -62,3 +65,21 @@ export type Bounds = {
   top: number;
   bottom: number;
 };
+
+export type VarsetType =
+  | "l1"
+  | "l2"
+  | "l3"
+  | "l4"
+  | "l5"
+  | "l6"
+  | "l7"
+  | "l8"
+  | "v1"
+  | "v2"
+  | "v3"
+  | "v4"
+  | "t1"
+  | "t2"
+  | "t3"
+  | "t4";

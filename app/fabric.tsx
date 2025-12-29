@@ -8,6 +8,7 @@ export function ReactFabricCanvas({
   width,
   height,
   path,
+  bgPaths,
   interactive,
   ...props
 }: {
@@ -15,6 +16,7 @@ export function ReactFabricCanvas({
   height: number;
   interactive: boolean;
   path: TComplexPathData | null;
+  bgPaths: TComplexPathData[];
 } & React.ComponentProps<"canvas">) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
@@ -36,7 +38,7 @@ export function ReactFabricCanvas({
       borderScaleFactor: 1.2,
     };
 
-    // 1. Initialize the Fabric canvas
+    // Initialize the Fabric canvas
     fabricRef.current = new fabric.Canvas(canvasRef.current, {
       width: width,
       height: height,
@@ -55,6 +57,7 @@ export function ReactFabricCanvas({
           left: width / 2,
           top: height / 2,
           selectable: false,
+          evented: false,
         },
       ),
     );
@@ -69,32 +72,57 @@ export function ReactFabricCanvas({
           left: width / 2,
           top: height / 2,
           selectable: false,
+          evented: false,
         },
       ),
     );
 
-    // 2. Add an initial object
-    if (path !== null) {
-      const bbox = pathBounds(toBezier(path));
-      const bbox_width = bbox.right - bbox.left;
-      const bbox_height = bbox.bottom - bbox.top;
-      const pathObj = new fabric.Path(path, {
-        left: (bbox.left + bbox_width / 2) * (width / 1000),
-        top: (bbox.top + bbox_height / 2) * (height / 1000),
-        scaleX: width / 1000,
-        scaleY: height / 1000,
-        selectable: interactive,
-      });
-      fabricRef.current.add(pathObj);
+    for (const path of bgPaths) {
+      fabricRef.current.add(
+        toFabricPath(path, width, height, {
+          selectable: false,
+          evented: false,
+          strokeWidth: 2,
+          stroke: "grey",
+          fill: "transparent",
+        }),
+      );
     }
 
-    // 3. Clean up on unmount to prevent memory leaks
+    if (path !== null) {
+      fabricRef.current.add(
+        toFabricPath(path, width, height, {
+          selectable: interactive,
+          evented: interactive,
+        }),
+      );
+    }
+
+    // Clean up on unmount to prevent memory leaks
     return () => {
       if (fabricRef.current) {
         fabricRef.current.dispose();
       }
     };
-  }, [width, height, path, interactive]);
+  }, [width, height, path, bgPaths, interactive]);
 
   return <canvas ref={canvasRef} {...props} />;
+}
+
+function toFabricPath(
+  path: TComplexPathData,
+  width: number,
+  height: number,
+  options: Partial<fabric.PathProps> = {},
+): fabric.Path {
+  const bbox = pathBounds(toBezier(path));
+  const bbox_width = bbox.right - bbox.left;
+  const bbox_height = bbox.bottom - bbox.top;
+  return new fabric.Path(path, {
+    ...options,
+    left: (bbox.left + bbox_width / 2) * (width / 1000),
+    top: (bbox.top + bbox_height / 2) * (height / 1000),
+    scaleX: width / 1000,
+    scaleY: height / 1000,
+  });
 }

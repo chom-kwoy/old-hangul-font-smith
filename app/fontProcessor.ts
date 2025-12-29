@@ -44,8 +44,6 @@ export class FontProcessor {
     if (!this.font) {
       throw new Error("Font not loaded");
     }
-    console.log(this.font.tables.os2);
-    console.log(this.font.tables.gsub);
 
     const canvas = document.createElement("canvas");
     canvas.width = 1400;
@@ -108,7 +106,7 @@ export class FontProcessor {
       }
       if (jamo.leading !== null) {
         // set 1: 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        let syllable = composeHangul(jamo.leading, "ㅏ", null)!;
+        let syllable = composeHangul(jamo.leading, "ㅏ", null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -124,7 +122,7 @@ export class FontProcessor {
           sets.leadingSet1 = toPathData(jamo);
         }
         // set 2: 받침없는 ㅗ ㅛ ㅡ
-        syllable = composeHangul(jamo.leading, "ㅡ", null)!;
+        syllable = composeHangul(jamo.leading, "ㅡ", null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -140,7 +138,7 @@ export class FontProcessor {
           sets.leadingSet2 = toPathData(jamo);
         }
         // set 3: 받침없는 ㅜ ㅠ
-        syllable = composeHangul(jamo.leading, "ㅜ", null)!;
+        syllable = composeHangul(jamo.leading, "ㅜ", null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -156,7 +154,7 @@ export class FontProcessor {
           sets.leadingSet3 = toPathData(jamo);
         }
         // set 4: 받침없는 ㅘ ㅙ ㅚ ㅢ
-        syllable = composeHangul(jamo.leading, "ㅢ", null)!;
+        syllable = composeHangul(jamo.leading, "ㅢ", null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -172,7 +170,7 @@ export class FontProcessor {
           sets.leadingSet4 = toPathData(jamo);
         }
         // set 5: 받침없는 ㅝ ㅞ ㅟ
-        syllable = composeHangul(jamo.leading, "ㅝ", null)!;
+        syllable = composeHangul(jamo.leading, "ㅝ", null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -188,7 +186,7 @@ export class FontProcessor {
           sets.leadingSet5 = toPathData(jamo);
         }
         // set 6: 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        syllable = composeHangul(jamo.leading, "ㅏ", "ㄱ")!;
+        syllable = composeHangul(jamo.leading, "ㅏ", "ㄱ");
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -204,7 +202,7 @@ export class FontProcessor {
           sets.leadingSet6 = toPathData(jamo);
         }
         // set 7: 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
-        syllable = composeHangul(jamo.leading, "ㅡ", "ㄱ")!;
+        syllable = composeHangul(jamo.leading, "ㅡ", "ㄱ");
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -220,7 +218,7 @@ export class FontProcessor {
           sets.leadingSet7 = toPathData(jamo);
         }
         // set 8: 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-        syllable = composeHangul(jamo.leading, "ㅢ", "ㄱ")!;
+        syllable = composeHangul(jamo.leading, "ㅢ", "ㄱ");
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -238,7 +236,7 @@ export class FontProcessor {
       }
       if (jamo.trailing !== null) {
         // set 1: 중성 ㅏ ㅑ ㅘ 와 결합
-        let syllable = composeHangul("ㅇ", "ㅏ", jamo.trailing)!;
+        let syllable = composeHangul("ㅇ", "ㅏ", jamo.trailing);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -254,7 +252,7 @@ export class FontProcessor {
           sets.trailingSet1 = toPathData(jamo);
         }
         // set 2: 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-        syllable = composeHangul("ㅇ", "ㅓ", jamo.trailing)!;
+        syllable = composeHangul("ㅇ", "ㅓ", jamo.trailing);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -270,7 +268,7 @@ export class FontProcessor {
           sets.trailingSet2 = toPathData(jamo);
         }
         // set 3: 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-        syllable = composeHangul("ㅇ", "ㅐ", jamo.trailing)!;
+        syllable = composeHangul("ㅇ", "ㅐ", jamo.trailing);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -286,7 +284,7 @@ export class FontProcessor {
           sets.trailingSet3 = toPathData(jamo);
         }
         // set 4: 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
-        syllable = composeHangul("ㄱ", "ㅗ", jamo.trailing)!;
+        syllable = composeHangul("ㄱ", "ㅗ", jamo.trailing);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -321,7 +319,7 @@ export class FontProcessor {
       }
       if (jamo.vowel !== null) {
         // set 1: 받침없는 [ㄱ ㅋ]과 결합
-        let syllable = composeHangul("ㅋ", jamo.vowel, null)!;
+        let syllable = composeHangul("ㅋ", jamo.vowel, null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -329,7 +327,7 @@ export class FontProcessor {
           sets.set1 = toPathData(extractVowel(bezier, jamo.position, false));
         }
         // set 2: 받침없는 [ㄱ ㅋ] 제외
-        syllable = composeHangul("ㅂ", jamo.vowel, null)!;
+        syllable = composeHangul("ㅂ", jamo.vowel, null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -337,7 +335,7 @@ export class FontProcessor {
           sets.set2 = toPathData(extractVowel(bezier, jamo.position, false));
         }
         // set 3: 받침있는 [ㄱ ㅋ]과 결합
-        syllable = composeHangul("ㅋ", jamo.vowel, "ㄱ")!;
+        syllable = composeHangul("ㅋ", jamo.vowel, "ㄱ");
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
@@ -345,7 +343,7 @@ export class FontProcessor {
           sets.set3 = toPathData(extractVowel(bezier, jamo.position, true));
         }
         // set 4: 받침있는 [ㄱ ㅋ] 제외
-        syllable = composeHangul("ㅂ", jamo.vowel, "ㄱ")!;
+        syllable = composeHangul("ㅂ", jamo.vowel, "ㄱ");
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);
