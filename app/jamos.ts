@@ -73,9 +73,9 @@ function getJamoForm(
     // vowel
     if (KIYEOK_LIKE.includes(leading)) {
       if (trailing === "") return "v1";
-      else return "v2";
+      else return "v3";
     } else {
-      if (trailing === "") return "v3";
+      if (trailing === "") return "v2";
       else return "v4";
     }
   }
@@ -326,66 +326,49 @@ export function getExampleEnvPaths(
   jamoName: string,
   varsetName: string,
   numExamples: number,
-): (TComplexPathData | null)[][] {
-  const syllables = getSyllablesFor(jamoName, varsetName, false);
-  const rng = seedrandom(`${jamoName}/${varsetName}`);
-  const sampledSyllables = partialSample(syllables, numExamples, rng);
+): TComplexPathData[][] {
   const varsetType = varsetName[0].slice(0, 1) as "l" | "v" | "t";
-
-  const result: (TComplexPathData | null)[][] = [];
-  for (const syllable of sampledSyllables) {
-    const leading = getName(syllable.slice(0, 1))!;
-    const vowel = getName(syllable.slice(1, 2))!;
-    const trailing = getName(syllable.slice(2, 3))!;
-    const combination = [];
-    if (varsetType === "l") {
-      combination.push(
-        getVarset(
-          varsets.vowel.get(vowel)!,
-          getJamoForm("v", leading, vowel, trailing),
-        ),
-      );
-      if (trailing !== "") {
-        combination.push(
-          getVarset(
-            varsets.consonants.get(trailing)!,
-            getJamoForm("t", leading, vowel, trailing),
-          ),
-        );
-      }
-      result.push(combination);
-    } else if (varsetType === "v") {
-      combination.push(
-        getVarset(
+  const syllables = getSyllablesFor(jamoName, varsetName, false)
+    .map((syllable) => {
+      const leading = getName(syllable.slice(0, 1))!;
+      const vowel = getName(syllable.slice(1, 2))!;
+      const trailing = getName(syllable.slice(2, 3))!;
+      const combination: TComplexPathData[] = [];
+      if (varsetType !== "l") {
+        const varset = getVarset(
           varsets.consonants.get(leading)!,
           getJamoForm("l", leading, vowel, trailing),
-        ),
-      );
-      if (trailing !== "") {
-        combination.push(
-          getVarset(
-            varsets.consonants.get(trailing)!,
-            getJamoForm("t", leading, vowel, trailing),
-          ),
         );
+        if (varset === null) {
+          return null;
+        }
+        combination.push(varset);
       }
-      result.push(combination);
-    } else {
-      combination.push(
-        getVarset(
-          varsets.consonants.get(leading)!,
-          getJamoForm("l", leading, vowel, trailing),
-        ),
-      );
-      combination.push(
-        getVarset(
+      if (varsetType !== "v") {
+        const varset = getVarset(
           varsets.vowel.get(vowel)!,
           getJamoForm("v", leading, vowel, trailing),
-        ),
-      );
-    }
-  }
-  return result;
+        );
+        if (varset === null) {
+          return null;
+        }
+        combination.push(varset);
+      }
+      if (varsetType !== "t" && trailing !== "") {
+        const varset = getVarset(
+          varsets.consonants.get(trailing)!,
+          getJamoForm("t", leading, vowel, trailing),
+        );
+        if (varset === null) {
+          return null;
+        }
+        combination.push(varset);
+      }
+      return combination;
+    })
+    .filter((syllable) => syllable !== null);
+  const rng = seedrandom(`${jamoName}/${varsetName}`);
+  return partialSample(syllables, numExamples, rng);
 }
 
 function partialSample<T>(array: T[], n: number, rng: () => number): T[] {

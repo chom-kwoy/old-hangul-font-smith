@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import Button from "@mui/material/Button";
 import { Box, styled } from "@mui/system";
+import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
 import React, { useState } from "react";
 
 import { downloadArrayBufferAsFile } from "@/app/download";
@@ -20,7 +21,12 @@ import { ReactFabricCanvas } from "@/app/fabric";
 import { FontProcessor } from "@/app/fontProcessor";
 import { HANGUL_DATA } from "@/app/hangulData";
 import { getExampleEnvPaths, getVarset } from "@/app/jamos";
-import { FontMetadata, JamoVarsets } from "@/app/types";
+import {
+  ConsonantInfo,
+  FontMetadata,
+  JamoVarsets,
+  VowelInfo,
+} from "@/app/types";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -41,6 +47,43 @@ export enum AppState {
   GENERATING,
   COMPLETED,
   ERROR,
+}
+
+function getAvailableVarsetList(
+  selectedJamoInfo: ConsonantInfo | VowelInfo | undefined,
+): [string, string][] {
+  const varsetList: [string, string][] = [["canon", "단독형"]];
+  if (selectedJamoInfo) {
+    if (
+      selectedJamoInfo.type === "consonant" &&
+      selectedJamoInfo.leading !== null
+    ) {
+      varsetList.push(["l1", "초성 1벌 (받침없는 ㅏ ㅐ ...)"]);
+      varsetList.push(["l2", "초성 2벌 (받침없는 ㅗ ㅛ ㅡ)"]);
+      varsetList.push(["l3", "초성 3벌 (받침없는 ㅜ ㅠ)"]);
+      varsetList.push(["l4", "초성 4벌 (받침없는 ㅘ ㅙ ㅚ ㅢ)"]);
+      varsetList.push(["l5", "초성 5벌 (받침없는 ㅝ ㅞ ㅟ)"]);
+      varsetList.push(["l6", "초성 6벌 (받침있는 ㅏ ㅐ ...)"]);
+      varsetList.push(["l7", "초성 7벌 (받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ)"]);
+      varsetList.push(["l8", "초성 8벌 (받침있는 ㅘ ㅙ ...)"]);
+    }
+    if (
+      selectedJamoInfo.type === "consonant" &&
+      selectedJamoInfo.trailing !== null
+    ) {
+      varsetList.push(["t1", "종성 1벌 (중성 ㅏ ㅑ ㅘ 와 결합)"]);
+      varsetList.push(["t2", "종성 2벌 (중성 ㅓ ㅕ ㅚ 등과 결합)"]);
+      varsetList.push(["t3", "종성 3벌 (중성 ㅐ ㅒ ㅔ 등과 결합)"]);
+      varsetList.push(["t4", "종성 4벌 (중성 ㅗ ㅛ ㅜ 등과 결합)"]);
+    }
+    if (selectedJamoInfo.type === "vowel" && selectedJamoInfo.vowel !== null) {
+      varsetList.push(["v1", "중성 1벌 (받침없는 [ㄱ ㅋ]과 결합)"]);
+      varsetList.push(["v2", "중성 2벌 (받침없는 [ㄱ ㅋ] 제외)"]);
+      varsetList.push(["v3", "중성 3벌 (받침있는 [ㄱ ㅋ]과 결합)"]);
+      varsetList.push(["v4", "중성 4벌 (받침있는 [ㄱ ㅋ] 제외)"]);
+    }
+  }
+  return varsetList;
 }
 
 export default function Home() {
@@ -66,43 +109,25 @@ export default function Home() {
   const [selectedJamo, setSelectedJamo] = useState<JamoItem>(jamoList[0]);
   const [selectedVarsetName, setSelectedVarsetName] = useState<string>("canon");
 
+  const selectedJamoInfo =
+    HANGUL_DATA.consonantInfo.get(selectedJamo.name) ??
+    HANGUL_DATA.vowelInfo.get(selectedJamo.name);
+  const varsetList = getAvailableVarsetList(selectedJamoInfo);
+
   const curVarsets =
     varsets?.consonants?.get(selectedJamo.name) ??
     varsets?.vowel?.get(selectedJamo.name);
-
-  const varsetList =
-    curVarsets?.type === "consonant"
-      ? [
-          ["canon", "Canonical (단독형)"],
-          ["l1", "Leading 1 (받침없는 ㅏ ㅐ ...)"],
-          ["l2", "Leading 2 (받침없는 ㅗ ㅛ ㅡ)"],
-          ["l3", "Leading 3 (받침없는 ㅜ ㅠ)"],
-          ["l4", "Leading 4 (받침없는 ㅘ ㅙ ㅚ ㅢ)"],
-          ["l5", "Leading 5 (받침없는 ㅝ ㅞ ㅟ)"],
-          ["l6", "Leading 6 (받침있는 ㅏ ㅐ ...)"],
-          ["l7", "Leading 7 (받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ)"],
-          ["l8", "Leading 8 (받침있는 ㅘ ㅙ ...)"],
-          ["t1", "Trailing 1 (중성 ㅏ ㅑ ㅘ 와 결합)"],
-          ["t2", "Trailing 2 (중성 ㅓ ㅕ ㅚ 등과 결합)"],
-          ["t3", "Trailing 3 (중성 ㅐ ㅒ ㅔ 등과 결합)"],
-          ["t4", "Trailing 4 (중성 ㅗ ㅛ ㅜ 등과 결합)"],
-        ]
-      : [
-          ["canon", "Canonical (단독형)"],
-          ["v1", "Vowel 1 (받침없는 [ㄱ ㅋ]과 결합)"],
-          ["v2", "Vowel 2 (받침없는 [ㄱ ㅋ] 제외)"],
-          ["v3", "Vowel 3 (받침있는 [ㄱ ㅋ]과 결합)"],
-          ["v4", "Vowel 4 (받침있는 [ㄱ ㅋ] 제외)"],
-        ];
-
   const selectedVarset = curVarsets
     ? getVarset(curVarsets, selectedVarsetName)
     : null;
 
   const bgPaths = varsets
-    ? getExampleEnvPaths(varsets, selectedJamo.name, selectedVarsetName, 10)
-        .flat()
-        .filter((path) => path !== null)
+    ? getExampleEnvPaths(
+        varsets,
+        selectedJamo.name,
+        selectedVarsetName,
+        10,
+      ).flat()
     : null;
 
   async function handleFileChange(files: FileList | null) {
@@ -120,7 +145,7 @@ export default function Home() {
     setVarsets(varsets);
 
     const sampleImage = fontProcessor.getSampleImage(
-      "유월 활짝 편 배꽃들 밑에 요 콩새야",
+      "유월 활짝 편 배꽃들 밑에 요 콩새야,",
     );
     setPreviewImage(sampleImage);
 
@@ -128,24 +153,24 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-stone-50 flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+      <header className="bg-white border-b border-stone-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-md">
+            <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-md">
               옛
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 leading-tight">
+              <h1 className="text-xl font-bold text-stone-900 leading-tight">
                 Old Hangul Font Smith
               </h1>
-              <p className="text-xs text-slate-500 font-medium">
-                AI-Powered Typography
+              <p className="text-xs text-stone-500 font-medium">
+                Typographic Hell
               </p>
             </div>
           </div>
-          <div className="text-xs font-mono bg-slate-100 px-3 py-1 rounded text-slate-500">
+          <div className="text-xs font-mono bg-stone-100 px-3 py-1 rounded text-stone-500">
             v1.0.0
           </div>
         </div>
@@ -157,20 +182,20 @@ export default function Home() {
         <section
           className={`transition-all duration-500 ${appState === AppState.IDLE ? "opacity-100" : "opacity-100"}`}
         >
-          <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 text-center">
+          <div className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200 text-center">
             {(appState === AppState.IDLE ||
               appState === AppState.PROCESSING_FONT) && (
               <div className="max-w-md mx-auto space-y-4">
-                <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
                   <UploadFileIcon />
                 </div>
-                <h2 className="text-2xl font-bold text-slate-900">
+                <h2 className="text-2xl font-bold text-stone-900">
                   Upload Modern Hangul Font
                 </h2>
-                <p className="text-slate-600">
+                <p className="text-stone-600">
                   Select a{" "}
-                  <code className="bg-slate-100 px-1 rounded">.ttf</code> or{" "}
-                  <code className="bg-slate-100 px-1 rounded">.otf</code> file.
+                  <code className="bg-stone-100 px-1 rounded">.ttf</code> or{" "}
+                  <code className="bg-stone-100 px-1 rounded">.otf</code> file.
                   We will analyze its style to generate Old Hangul characters.
                 </p>
                 <div className="relative">
@@ -198,10 +223,10 @@ export default function Home() {
                     <CheckCircleIcon />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg text-slate-900">
+                    <h3 className="font-bold text-lg text-stone-900">
                       {fontMetadata.name}
                     </h3>
-                    <p className="text-sm text-slate-500">
+                    <p className="text-sm text-stone-500">
                       {fontMetadata.family} • {fontMetadata.style} •{" "}
                       {fontMetadata.numGlyphs} Glyphs
                     </p>
@@ -209,7 +234,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => setAppState(AppState.IDLE)}
-                  className="text-sm text-slate-500 hover:text-slate-800 underline"
+                  className="text-sm text-stone-500 hover:text-stone-800 underline"
                 >
                   Change Font
                 </button>
@@ -225,19 +250,19 @@ export default function Home() {
           varsets &&
           curVarsets &&
           bgPaths && (
-            <section className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
+            <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
               <div className="flex items-center gap-3 mb-6">
-                <h2 className="text-xl font-bold text-slate-900">
+                <h2 className="text-xl font-bold text-stone-900">
                   Style Analysis & Generation
                 </h2>
               </div>
 
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
+                  <p className="text-sm font-medium text-stone-700 uppercase tracking-wide">
                     Input Sample
                   </p>
-                  <div className="border border-slate-200 rounded-lg p-4 bg-white overflow-hidden">
+                  <div className="border border-stone-200 rounded-lg p-4 bg-white overflow-hidden">
                     {previewImage && (
                       <img
                         src={previewImage}
@@ -249,8 +274,8 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-slate-700 uppercase tracking-wide">
-                    Jamos
+                  <p className="text-sm font-medium text-stone-700 uppercase tracking-wide">
+                    Design
                   </p>
 
                   <div className="flex">
@@ -265,17 +290,21 @@ export default function Home() {
                         onChange={(event, newValue) => {
                           if (newValue !== null) {
                             setSelectedJamo(newValue);
-                            // reset selected varset name if jamo type changes
-                            const newJamoType = HANGUL_DATA.consonantInfo.has(
-                              newValue.name,
-                            )
-                              ? "consonant"
-                              : "vowel";
-                            if (curVarsets?.type !== newJamoType) {
+                            const newSelectedJamoInfo =
+                              HANGUL_DATA.consonantInfo.get(newValue.name) ??
+                              HANGUL_DATA.vowelInfo.get(newValue.name);
+                            const newJamoHasCurVarset = getAvailableVarsetList(
+                              newSelectedJamoInfo,
+                            ).some(
+                              ([varsetName]) =>
+                                varsetName == selectedVarsetName,
+                            );
+                            if (!newJamoHasCurVarset) {
                               setSelectedVarsetName("canon");
                             }
                           }
                         }}
+                        disableClearable={true}
                       />
                     </div>
                     <div className="w-1/2 ps-2">
@@ -283,7 +312,7 @@ export default function Home() {
                         <InputLabel id="varset-select-label">
                           Variant Set
                         </InputLabel>
-                        <Select
+                        <AdaptiveSelect
                           labelId="varset-select-label"
                           label={"Variant Set"}
                           value={selectedVarsetName}
@@ -304,29 +333,29 @@ export default function Home() {
                           )}
                         >
                           {varsetList.map(([setName, description], i) => (
-                            <MenuItem
+                            <AdaptiveSelectItem
                               key={i}
                               value={setName}
                               className="flex justify-between"
                             >
                               <span>{description}</span>
                               <ReactFabricCanvas
-                                className="border border-slate-200 rounded-lg"
+                                className="border border-stone-200 rounded-lg"
                                 width={100}
                                 height={100}
                                 path={getVarset(curVarsets, setName)}
                                 bgPaths={[]}
                                 interactive={false}
                               />
-                            </MenuItem>
+                            </AdaptiveSelectItem>
                           ))}
-                        </Select>
+                        </AdaptiveSelect>
                       </FormControl>
                     </div>
                   </div>
 
                   <ReactFabricCanvas
-                    className="border border-slate-200 rounded-lg"
+                    className="border border-stone-200 rounded-lg"
                     width={480}
                     height={480}
                     path={selectedVarset}

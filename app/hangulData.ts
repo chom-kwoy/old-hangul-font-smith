@@ -317,6 +317,7 @@ function getHangulData(): {
   for (const datum of CONS_DATA) {
     const [name, canon, compat, leading, trailing] = datum;
     const info: ConsonantInfo = {
+      type: "consonant",
       unicode_name: name,
       canonical: canon,
       compat,
@@ -336,6 +337,7 @@ function getHangulData(): {
     const [name, canon, compat, vowel, position] = datum;
     const parts = name.split("-");
     const info: VowelInfo = {
+      type: "vowel",
       unicode_name: name,
       canonical: canon,
       compat,

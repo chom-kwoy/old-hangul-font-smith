@@ -15,6 +15,7 @@
     "@mui/icons-material": "^7.3.6",
     "@mui/material": "^7.3.6",
     "@mui/material-nextjs": "^7.3.6",
+    "adaptive-material-ui": "^1.0.0-beta.7",
     "bezier-js": "^6.1.4",
     "fabric": "^7.0.0",
     "next": "16.1.1",

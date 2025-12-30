@@ -106,7 +106,7 @@ export class FontProcessor {
       }
       if (jamo.leading !== null) {
         // set 1: 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        let syllable = composeHangul(jamo.leading, "ㅏ", null);
+        let syllable = composeHangul(jamo.leading, "ㅒ", null);
         if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
           const glyph = this.font.charToGlyph(syllable);
           // console.log(syllable, glyph.name);

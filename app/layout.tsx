@@ -1,9 +1,8 @@
-import { ThemeProvider } from "@mui/material";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v15-appRouter";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
-import { theme } from "@/app/theme";
+import { AppWrapper } from "@/app/app";
 
 import "./globals.css";
 
@@ -33,7 +32,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AppRouterCacheProvider options={{ enableCssLayer: true }}>
-          <ThemeProvider theme={theme}>{children}</ThemeProvider>
+          <AppWrapper>{children}</AppWrapper>
         </AppRouterCacheProvider>
       </body>
     </html>
