@@ -69,6 +69,7 @@ export type Bounds = {
 };
 
 export type VarsetType =
+  | "canon"
   | "l1"
   | "l2"
   | "l3"

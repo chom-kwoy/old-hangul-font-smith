@@ -6,7 +6,7 @@ import { ConsonantSets, JamoVarsets, VarsetType, VowelSets } from "@/app/types";
 
 export function getVarset(
   varsets: ConsonantSets | VowelSets,
-  varsetName: string,
+  varsetName: VarsetType,
 ) {
   if (varsets.type === "consonant") {
     // prettier-ignore
