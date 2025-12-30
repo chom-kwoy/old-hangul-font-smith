@@ -476,7 +476,7 @@ function extractVowel(
       {
         left: 0,
         right: 1000,
-        top: hasTrailing ? 400 : 500,
+        top: hasTrailing ? 450 : 600,
         bottom: hasTrailing ? 600 : 1000,
       },
     ]);

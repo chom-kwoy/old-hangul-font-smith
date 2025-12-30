@@ -85,6 +85,7 @@ export function ReactFabricCanvas({
           strokeWidth: 2,
           stroke: "grey",
           fill: "transparent",
+          opacity: 0.7,
         }),
       );
     }

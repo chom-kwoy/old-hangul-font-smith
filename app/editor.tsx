@@ -10,10 +10,10 @@ import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
 import React, { useState } from "react";
 
+import { ReactFabricCanvas } from "@/app/canvas";
 import { downloadArrayBufferAsFile } from "@/app/download";
-import { ReactFabricCanvas } from "@/app/fabric";
 import { FontProcessor } from "@/app/fontProcessor";
-import { HANGUL_DATA } from "@/app/hangulData";
+import { HANGUL_DATA, unicodeNameToHangul } from "@/app/hangulData";
 import { getExampleEnvPaths, getVarset } from "@/app/jamos";
 import { ConsonantInfo, JamoVarsets, VarsetType, VowelInfo } from "@/app/types";
 
@@ -33,7 +33,7 @@ export function Editor({
         ...HANGUL_DATA.consonantInfo.values(),
         ...HANGUL_DATA.vowelInfo.values(),
       ].map((info) => ({
-        label: `${info.unicode_name} (${info.canonical})`,
+        label: `${unicodeNameToHangul(info.unicode_name)} (${info.canonical})`,
         name: info.unicode_name,
         value: info.canonical,
       })),

@@ -184,7 +184,10 @@ function getSyllablesFor(
     case "v1": // 받침없는 [ㄱ ㅋ]과 결합
       return HANGUL_DATA.consonantInfo
         .values()
-        .filter((info) => KIYEOK_LIKE.includes(info.unicode_name))
+        .filter(
+          (info) =>
+            info.leading !== null && KIYEOK_LIKE.includes(info.unicode_name),
+        )
         .map((info) =>
           composeHangul(info.unicode_name, jamoName, null, precompose),
         )
@@ -192,7 +195,10 @@ function getSyllablesFor(
     case "v2": // 받침없는 [ㄱ ㅋ] 제외
       return HANGUL_DATA.consonantInfo
         .values()
-        .filter((info) => !KIYEOK_LIKE.includes(info.unicode_name))
+        .filter(
+          (info) =>
+            info.leading !== null && !KIYEOK_LIKE.includes(info.unicode_name),
+        )
         .map((info) =>
           composeHangul(info.unicode_name, jamoName, null, precompose),
         )
@@ -200,7 +206,10 @@ function getSyllablesFor(
     case "v3": // 받침있는 [ㄱ ㅋ]과 결합
       return HANGUL_DATA.consonantInfo
         .values()
-        .filter((info) => KIYEOK_LIKE.includes(info.unicode_name))
+        .filter(
+          (info) =>
+            info.leading !== null && KIYEOK_LIKE.includes(info.unicode_name),
+        )
         .flatMap((linfo) =>
           HANGUL_DATA.consonantInfo
             .values()
@@ -218,7 +227,10 @@ function getSyllablesFor(
     case "v4": // 받침있는 [ㄱ ㅋ] 제외
       return HANGUL_DATA.consonantInfo
         .values()
-        .filter((info) => !KIYEOK_LIKE.includes(info.unicode_name))
+        .filter(
+          (info) =>
+            info.leading !== null && !KIYEOK_LIKE.includes(info.unicode_name),
+        )
         .flatMap((linfo) =>
           HANGUL_DATA.consonantInfo
             .values()
