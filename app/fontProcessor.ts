@@ -300,7 +300,7 @@ export class FontProcessor {
           sets.trailingSet4 = toPathData(jamo);
         }
       }
-      result.consonants.set(jamo.unicode_name, sets);
+      result.consonants.set(jamo.name, sets);
     }
     for (const jamo of vowelInfo.values()) {
       const sets: VowelSets = {
@@ -351,7 +351,7 @@ export class FontProcessor {
           sets.set4 = toPathData(extractVowel(bezier, jamo.position, true));
         }
       }
-      result.vowel.set(jamo.unicode_name, sets);
+      result.vowel.set(jamo.name, sets);
     }
 
     return result;
@@ -398,38 +398,32 @@ export class FontProcessor {
     const descender = this.font.tables.os2.sTypoDescender;
     const scale = 1000 / unitsPerEm;
     const data: TComplexPathData = [];
-    function tr_x(x: number) {
+    function trX(x: number) {
       return x * scale;
     }
-    function tr_y(y: number) {
+    function trY(y: number) {
       return 1000 - (y - descender) * scale;
     }
     for (const cmd of path.commands) {
       switch (cmd.type) {
         case "M": // move to
-          data.push(["M", tr_x(cmd.x), tr_y(cmd.y)]);
+          data.push(["M", trX(cmd.x), trY(cmd.y)]);
           break;
         case "L": // line to
-          data.push(["L", tr_x(cmd.x), tr_y(cmd.y)]);
+          data.push(["L", trX(cmd.x), trY(cmd.y)]);
           break;
         case "Q": // quadratic bezier curve
-          data.push([
-            "Q",
-            tr_x(cmd.x1),
-            tr_y(cmd.y1),
-            tr_x(cmd.x),
-            tr_y(cmd.y),
-          ]);
+          data.push(["Q", trX(cmd.x1), trY(cmd.y1), trX(cmd.x), trY(cmd.y)]);
           break;
         case "C": // cubic bezier curve
           data.push([
             "C",
-            tr_x(cmd.x1),
-            tr_y(cmd.y1),
-            tr_x(cmd.x2),
-            tr_y(cmd.y2),
-            tr_x(cmd.x),
-            tr_y(cmd.y),
+            trX(cmd.x1),
+            trY(cmd.y1),
+            trX(cmd.x2),
+            trY(cmd.y2),
+            trX(cmd.x),
+            trY(cmd.y),
           ]);
           break;
         case "Z": // close path

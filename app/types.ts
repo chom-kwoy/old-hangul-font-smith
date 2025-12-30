@@ -9,7 +9,7 @@ export type FontMetadata = {
 
 export type ConsonantInfo = {
   type: "consonant";
-  unicode_name: string;
+  name: string;
   canonical: string;
   compat: string | null;
   leading: string | null;
@@ -18,7 +18,7 @@ export type ConsonantInfo = {
 
 export type VowelInfo = {
   type: "vowel";
-  unicode_name: string;
+  name: string;
   canonical: string;
   compat: string | null;
   vowel: string | null;

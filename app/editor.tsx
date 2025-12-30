@@ -10,12 +10,13 @@ import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
 import React, { useState } from "react";
 
-import { ReactFabricCanvas } from "@/app/canvas";
+import { GlyphView, VarsetMapView } from "@/app/canvas";
 import { downloadArrayBufferAsFile } from "@/app/download";
 import { FontProcessor } from "@/app/fontProcessor";
 import { HANGUL_DATA, unicodeNameToHangul } from "@/app/hangulData";
 import { getExampleEnvPaths, getVarset } from "@/app/jamos";
 import { ConsonantInfo, JamoVarsets, VarsetType, VowelInfo } from "@/app/types";
+import useComponentSize from "@/app/useComponentSize";
 
 export function Editor({
   fontProcessor,
@@ -26,36 +27,47 @@ export function Editor({
   previewImage: string;
   varsets: JamoVarsets;
 }) {
+  const [leftDivRef, leftDivSize] = useComponentSize<HTMLDivElement>();
+  const [rightDivRef, rightDivSize] = useComponentSize<HTMLDivElement>();
+
   type JamoItem = { label: string; name: string; value: string };
   const JAMO_LIST = React.useMemo(
     () =>
-      [
-        ...HANGUL_DATA.consonantInfo.values(),
-        ...HANGUL_DATA.vowelInfo.values(),
-      ].map((info) => ({
-        label: `${unicodeNameToHangul(info.unicode_name)} (${info.canonical})`,
-        name: info.unicode_name,
-        value: info.canonical,
-      })),
+      new Map<string, JamoItem>(
+        [
+          ...HANGUL_DATA.consonantInfo.values(),
+          ...HANGUL_DATA.vowelInfo.values(),
+        ].map((info) => [
+          info.name,
+          {
+            label: `${unicodeNameToHangul(info.name)} (${info.canonical})`,
+            name: info.name,
+            value: info.canonical,
+          },
+        ]),
+      ),
     [],
   );
 
-  const [selectedJamo, setSelectedJamo] = useState<JamoItem>(JAMO_LIST[0]);
+  const [selectedJamoName, setSelectedJamoName] = useState<string>(
+    JAMO_LIST.keys().toArray()[0],
+  );
+  const selectedJamo = JAMO_LIST.get(selectedJamoName)!;
   const [selectedVarsetName, setSelectedVarsetName] =
     useState<VarsetType>("canon");
 
   const selectedJamoInfo =
-    HANGUL_DATA.consonantInfo.get(selectedJamo.name) ??
-    HANGUL_DATA.vowelInfo.get(selectedJamo.name);
+    HANGUL_DATA.consonantInfo.get(selectedJamoName) ??
+    HANGUL_DATA.vowelInfo.get(selectedJamoName);
   const varsetList = getAvailableVarsetList(selectedJamoInfo);
 
-  const curVarsets = (varsets.consonants.get(selectedJamo.name) ??
-    varsets.vowel.get(selectedJamo.name))!;
+  const curVarsets = (varsets.consonants.get(selectedJamoName) ??
+    varsets.vowel.get(selectedJamoName))!;
   const selectedVarset = getVarset(curVarsets, selectedVarsetName);
 
   const bgPaths = getExampleEnvPaths(
     varsets,
-    selectedJamo.name,
+    selectedJamoName,
     selectedVarsetName,
     10,
   ).flat();
@@ -90,15 +102,15 @@ export function Editor({
           </p>
 
           <div className="flex">
-            <div className="w-1/2 pe-2">
+            <div className="w-1/2 pe-1">
               <Autocomplete
                 disablePortal
-                options={JAMO_LIST}
+                options={JAMO_LIST.values().toArray()}
                 renderInput={(params) => <TextField {...params} label="Jamo" />}
                 value={selectedJamo}
                 onChange={(event, newValue) => {
                   if (newValue !== null) {
-                    setSelectedJamo(newValue);
+                    setSelectedJamoName(newValue.name);
                     const newSelectedJamoInfo =
                       HANGUL_DATA.consonantInfo.get(newValue.name) ??
                       HANGUL_DATA.vowelInfo.get(newValue.name);
@@ -113,7 +125,7 @@ export function Editor({
                 disableClearable={true}
               />
             </div>
-            <div className="w-1/2 ps-2">
+            <div className="w-1/2 ps-1">
               <FormControl fullWidth>
                 <InputLabel id="varset-select-label">Variant Set</InputLabel>
                 <AdaptiveSelect
@@ -143,7 +155,7 @@ export function Editor({
                       className="flex justify-between"
                     >
                       <span>{description}</span>
-                      <ReactFabricCanvas
+                      <GlyphView
                         className="border border-stone-200 rounded-lg"
                         width={100}
                         height={100}
@@ -158,14 +170,31 @@ export function Editor({
             </div>
           </div>
 
-          <ReactFabricCanvas
-            className="border border-stone-200 rounded-lg"
-            width={480}
-            height={480}
-            path={selectedVarset}
-            bgPaths={bgPaths}
-            interactive={true}
-          />
+          <div className="flex">
+            <div ref={leftDivRef} className="w-1/3 pe-1">
+              <GlyphView
+                className="border border-stone-200 rounded-lg"
+                width={leftDivSize.width}
+                height={leftDivSize.width}
+                path={selectedVarset}
+                bgPaths={bgPaths}
+                interactive={true}
+              />
+            </div>
+            <div ref={rightDivRef} className="w-2/3 text-stone-700 ps-1">
+              <VarsetMapView
+                className="border border-stone-200 rounded-lg"
+                width={rightDivSize.width}
+                varsets={varsets}
+                onItemClick={(jamoInfo, varsetName) => {
+                  setSelectedJamoName(jamoInfo.name);
+                  setSelectedVarsetName(varsetName);
+                }}
+                selectedJamoName={selectedJamoName}
+                selectedVarsetName={selectedVarsetName}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="text-center">

@@ -4,6 +4,30 @@ import seedrandom from "seedrandom";
 import { HANGUL_DATA, composeHangul, getName } from "@/app/hangulData";
 import { ConsonantSets, JamoVarsets, VarsetType, VowelSets } from "@/app/types";
 
+export const CONSONANT_VARSET_NAMES: VarsetType[] = [
+  "canon",
+  "l1",
+  "l2",
+  "l3",
+  "l4",
+  "l5",
+  "l6",
+  "l7",
+  "l8",
+  "t1",
+  "t2",
+  "t3",
+  "t4",
+];
+
+export const VOWEL_VARSET_NAMES: VarsetType[] = [
+  "canon",
+  "v1",
+  "v2",
+  "v3",
+  "v4",
+];
+
 export function getVarset(
   varsets: ConsonantSets | VowelSets,
   varsetName: VarsetType,
@@ -81,7 +105,7 @@ function getJamoForm(
   }
 }
 
-function getSyllablesFor(
+export function getSyllablesFor(
   jamoName: string,
   varsetName: string,
   precompose: boolean = true,
@@ -91,41 +115,31 @@ function getSyllablesFor(
       return HANGUL_DATA.vowelInfo
         .values()
         .filter((info) => info.position === "right")
-        .map((info) =>
-          composeHangul(jamoName, info.unicode_name, null, precompose),
-        )
+        .map((info) => composeHangul(jamoName, info.name, null, precompose))
         .toArray();
     case "l2": // 받침없는 ㅗ ㅛ ㅡ
       return HANGUL_DATA.vowelInfo
         .values()
         .filter((info) => info.position === "under" && !info.pokingDown)
-        .map((info) =>
-          composeHangul(jamoName, info.unicode_name, null, precompose),
-        )
+        .map((info) => composeHangul(jamoName, info.name, null, precompose))
         .toArray();
     case "l3": // 받침없는 ㅜ ㅠ
       return HANGUL_DATA.vowelInfo
         .values()
         .filter((info) => info.position === "under" && info.pokingDown)
-        .map((info) =>
-          composeHangul(jamoName, info.unicode_name, null, precompose),
-        )
+        .map((info) => composeHangul(jamoName, info.name, null, precompose))
         .toArray();
     case "l4": // 받침없는 ㅘ ㅙ ㅚ ㅢ
       return HANGUL_DATA.vowelInfo
         .values()
         .filter((info) => info.position === "mixed" && !info.pokingDown)
-        .map((info) =>
-          composeHangul(jamoName, info.unicode_name, null, precompose),
-        )
+        .map((info) => composeHangul(jamoName, info.name, null, precompose))
         .toArray();
     case "l5": // 받침없는 ㅝ ㅞ ㅟ
       return HANGUL_DATA.vowelInfo
         .values()
         .filter((info) => info.position === "mixed" && info.pokingDown)
-        .map((info) =>
-          composeHangul(jamoName, info.unicode_name, null, precompose),
-        )
+        .map((info) => composeHangul(jamoName, info.name, null, precompose))
         .toArray();
     case "l6": // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
       return HANGUL_DATA.vowelInfo
@@ -136,12 +150,7 @@ function getSyllablesFor(
             .values()
             .filter((tinfo) => tinfo.trailing !== null)
             .map((tinfo) =>
-              composeHangul(
-                jamoName,
-                vinfo.unicode_name,
-                tinfo.unicode_name,
-                precompose,
-              ),
+              composeHangul(jamoName, vinfo.name, tinfo.name, precompose),
             ),
         )
         .toArray();
@@ -154,12 +163,7 @@ function getSyllablesFor(
             .values()
             .filter((tinfo) => tinfo.trailing !== null)
             .map((tinfo) =>
-              composeHangul(
-                jamoName,
-                vinfo.unicode_name,
-                tinfo.unicode_name,
-                precompose,
-              ),
+              composeHangul(jamoName, vinfo.name, tinfo.name, precompose),
             ),
         )
         .toArray();
@@ -172,12 +176,7 @@ function getSyllablesFor(
             .values()
             .filter((tinfo) => tinfo.trailing !== null)
             .map((tinfo) =>
-              composeHangul(
-                jamoName,
-                vinfo.unicode_name,
-                tinfo.unicode_name,
-                precompose,
-              ),
+              composeHangul(jamoName, vinfo.name, tinfo.name, precompose),
             ),
         )
         .toArray();
@@ -185,42 +184,30 @@ function getSyllablesFor(
       return HANGUL_DATA.consonantInfo
         .values()
         .filter(
-          (info) =>
-            info.leading !== null && KIYEOK_LIKE.includes(info.unicode_name),
+          (info) => info.leading !== null && KIYEOK_LIKE.includes(info.name),
         )
-        .map((info) =>
-          composeHangul(info.unicode_name, jamoName, null, precompose),
-        )
+        .map((info) => composeHangul(info.name, jamoName, null, precompose))
         .toArray();
     case "v2": // 받침없는 [ㄱ ㅋ] 제외
       return HANGUL_DATA.consonantInfo
         .values()
         .filter(
-          (info) =>
-            info.leading !== null && !KIYEOK_LIKE.includes(info.unicode_name),
+          (info) => info.leading !== null && !KIYEOK_LIKE.includes(info.name),
         )
-        .map((info) =>
-          composeHangul(info.unicode_name, jamoName, null, precompose),
-        )
+        .map((info) => composeHangul(info.name, jamoName, null, precompose))
         .toArray();
     case "v3": // 받침있는 [ㄱ ㅋ]과 결합
       return HANGUL_DATA.consonantInfo
         .values()
         .filter(
-          (info) =>
-            info.leading !== null && KIYEOK_LIKE.includes(info.unicode_name),
+          (info) => info.leading !== null && KIYEOK_LIKE.includes(info.name),
         )
         .flatMap((linfo) =>
           HANGUL_DATA.consonantInfo
             .values()
             .filter((tinfo) => tinfo.trailing !== null)
             .map((tinfo) =>
-              composeHangul(
-                linfo.unicode_name,
-                jamoName,
-                tinfo.unicode_name,
-                precompose,
-              ),
+              composeHangul(linfo.name, jamoName, tinfo.name, precompose),
             ),
         )
         .toArray();
@@ -228,20 +215,14 @@ function getSyllablesFor(
       return HANGUL_DATA.consonantInfo
         .values()
         .filter(
-          (info) =>
-            info.leading !== null && !KIYEOK_LIKE.includes(info.unicode_name),
+          (info) => info.leading !== null && !KIYEOK_LIKE.includes(info.name),
         )
         .flatMap((linfo) =>
           HANGUL_DATA.consonantInfo
             .values()
             .filter((tinfo) => tinfo.trailing !== null)
             .map((tinfo) =>
-              composeHangul(
-                linfo.unicode_name,
-                jamoName,
-                tinfo.unicode_name,
-                precompose,
-              ),
+              composeHangul(linfo.name, jamoName, tinfo.name, precompose),
             ),
         )
         .toArray();
@@ -259,12 +240,7 @@ function getSyllablesFor(
                 vinfo.pokingRight,
             )
             .map((vinfo) =>
-              composeHangul(
-                linfo.unicode_name,
-                vinfo.unicode_name,
-                jamoName,
-                precompose,
-              ),
+              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
             ),
         )
         .toArray();
@@ -282,12 +258,7 @@ function getSyllablesFor(
                 !vinfo.pokingRight,
             )
             .map((vinfo) =>
-              composeHangul(
-                linfo.unicode_name,
-                vinfo.unicode_name,
-                jamoName,
-                precompose,
-              ),
+              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
             ),
         )
         .toArray();
@@ -300,12 +271,7 @@ function getSyllablesFor(
             .values()
             .filter((vinfo) => vinfo.doubleVertical)
             .map((vinfo) =>
-              composeHangul(
-                linfo.unicode_name,
-                vinfo.unicode_name,
-                jamoName,
-                precompose,
-              ),
+              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
             ),
         )
         .toArray();
@@ -320,12 +286,7 @@ function getSyllablesFor(
               (vinfo) => !vinfo.doubleVertical && vinfo.position === "under",
             )
             .map((vinfo) =>
-              composeHangul(
-                linfo.unicode_name,
-                vinfo.unicode_name,
-                jamoName,
-                precompose,
-              ),
+              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
             ),
         )
         .toArray();

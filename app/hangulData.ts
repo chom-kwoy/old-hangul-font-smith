@@ -1,5 +1,5 @@
 import { ConsonantInfo, VowelInfo } from "@/app/types";
-import { uniToPua } from "@/app/utils/pua_uni_conv";
+import { uniToPua } from "@/app/utils/puaUniConv";
 
 function getHangulData(): {
   consonantInfo: Map<string, ConsonantInfo>;
@@ -319,7 +319,7 @@ function getHangulData(): {
     const [name, canon, compat, leading, trailing] = datum;
     const info: ConsonantInfo = {
       type: "consonant",
-      unicode_name: name,
+      name: name,
       canonical: canon,
       compat,
       leading,
@@ -339,7 +339,7 @@ function getHangulData(): {
     const parts = name.split("-");
     const info: VowelInfo = {
       type: "vowel",
-      unicode_name: name,
+      name: name,
       canonical: canon,
       compat,
       vowel,
@@ -384,8 +384,8 @@ export function getName(jamo: string): string | null {
     return "";
   }
   return (
-    HANGUL_DATA.consonantMap.get(jamo)?.unicode_name ??
-    HANGUL_DATA.vowelMap.get(jamo)?.unicode_name ??
+    HANGUL_DATA.consonantMap.get(jamo)?.name ??
+    HANGUL_DATA.vowelMap.get(jamo)?.name ??
     null
   );
 }
