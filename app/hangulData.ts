@@ -367,27 +367,28 @@ function getHangulData(): {
 
 export const HANGUL_DATA = getHangulData();
 
-export function getLeading(jamoName: string): string | null {
-  return HANGUL_DATA.consonantMap.get(jamoName)?.leading ?? null;
+export function getJamoInfo(
+  jamo: string,
+): ConsonantInfo | VowelInfo | undefined {
+  return HANGUL_DATA.consonantMap.get(jamo) ?? HANGUL_DATA.vowelMap.get(jamo);
 }
-export function getVowel(jamoName: string): string | null {
-  return HANGUL_DATA.vowelMap.get(jamoName)?.vowel ?? null;
+export function getLeading(jamo: string): string | null {
+  return HANGUL_DATA.consonantMap.get(jamo)?.leading ?? null;
 }
-export function getTrailing(jamoName: string): string | null {
-  if (jamoName === "") {
+export function getVowel(jamo: string): string | null {
+  return HANGUL_DATA.vowelMap.get(jamo)?.vowel ?? null;
+}
+export function getTrailing(jamo: string): string | null {
+  if (jamo === "") {
     return "";
   }
-  return HANGUL_DATA.consonantMap.get(jamoName)?.trailing ?? null;
+  return HANGUL_DATA.consonantMap.get(jamo)?.trailing ?? null;
 }
 export function getName(jamo: string): string | null {
   if (jamo === "") {
     return "";
   }
-  return (
-    HANGUL_DATA.consonantMap.get(jamo)?.name ??
-    HANGUL_DATA.vowelMap.get(jamo)?.name ??
-    null
-  );
+  return getJamoInfo(jamo)?.name ?? null;
 }
 
 export function composeHangul(

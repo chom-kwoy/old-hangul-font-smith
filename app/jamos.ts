@@ -1,8 +1,21 @@
 import { TComplexPathData } from "fabric";
 import seedrandom from "seedrandom";
 
-import { HANGUL_DATA, composeHangul, getName } from "@/app/hangulData";
-import { ConsonantSets, JamoVarsets, VarsetType, VowelSets } from "@/app/types";
+import {
+  HANGUL_DATA,
+  composeHangul,
+  getJamoInfo,
+  getLeading,
+  getName,
+} from "@/app/hangulData";
+import {
+  ConsonantInfo,
+  ConsonantSets,
+  JamoVarsets,
+  VarsetType,
+  VowelInfo,
+  VowelSets,
+} from "@/app/types";
 
 export const CONSONANT_VARSET_NAMES: VarsetType[] = [
   "canon",
@@ -107,11 +120,30 @@ function getJamoForm(
 
 export function* getSyllablesFor(
   jamoName: string,
-  varsetName: string,
+  varsetName: VarsetType,
   precompose: boolean = true,
+  {
+    leadingPref,
+    vowelPref,
+    trailingPref,
+  }: {
+    leadingPref?: string[];
+    vowelPref?: string[];
+    trailingPref?: string[];
+  } = {},
 ): Generator<string> {
-  const vowels = HANGUL_DATA.vowelInfo.values().toArray();
-  const consonants = HANGUL_DATA.consonantInfo.values().toArray();
+  const leadings = new Set([
+    ...(leadingPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
+    ...HANGUL_DATA.consonantInfo.values(),
+  ]) as Set<ConsonantInfo>;
+  const vowels = new Set([
+    ...(vowelPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
+    ...HANGUL_DATA.vowelInfo.values().toArray(),
+  ]) as Set<VowelInfo>;
+  const trailings = new Set([
+    ...(trailingPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
+    ...HANGUL_DATA.consonantInfo.values(),
+  ]) as Set<ConsonantInfo>;
 
   switch (varsetName) {
     case "l1": // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
@@ -157,7 +189,7 @@ export function* getSyllablesFor(
     case "l6": // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
       for (const vinfo of vowels) {
         if (vinfo.position === "right") {
-          for (const tinfo of consonants) {
+          for (const tinfo of trailings) {
             if (tinfo.trailing !== null) {
               yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
             }
@@ -169,7 +201,7 @@ export function* getSyllablesFor(
     case "l7": // 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
       for (const vinfo of vowels) {
         if (vinfo.position === "under") {
-          for (const tinfo of consonants) {
+          for (const tinfo of trailings) {
             if (tinfo.trailing !== null) {
               yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
             }
@@ -181,7 +213,7 @@ export function* getSyllablesFor(
     case "l8": // 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
       for (const vinfo of vowels) {
         if (vinfo.position === "mixed") {
-          for (const tinfo of consonants) {
+          for (const tinfo of trailings) {
             if (tinfo.trailing !== null) {
               yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
             }
@@ -191,7 +223,7 @@ export function* getSyllablesFor(
       break;
 
     case "v1": // 받침없는 [ㄱ ㅋ]과 결합
-      for (const info of consonants) {
+      for (const info of leadings) {
         if (info.leading !== null && KIYEOK_LIKE.includes(info.name)) {
           yield composeHangul(info.name, jamoName, null, precompose);
         }
@@ -199,7 +231,7 @@ export function* getSyllablesFor(
       break;
 
     case "v2": // 받침없는 [ㄱ ㅋ] 제외
-      for (const info of consonants) {
+      for (const info of leadings) {
         if (info.leading !== null && !KIYEOK_LIKE.includes(info.name)) {
           yield composeHangul(info.name, jamoName, null, precompose);
         }
@@ -207,9 +239,9 @@ export function* getSyllablesFor(
       break;
 
     case "v3": // 받침있는 [ㄱ ㅋ]과 결합
-      for (const linfo of consonants) {
+      for (const linfo of leadings) {
         if (linfo.leading !== null && KIYEOK_LIKE.includes(linfo.name)) {
-          for (const tinfo of consonants) {
+          for (const tinfo of trailings) {
             if (tinfo.trailing !== null) {
               yield composeHangul(linfo.name, jamoName, tinfo.name, precompose);
             }
@@ -219,9 +251,9 @@ export function* getSyllablesFor(
       break;
 
     case "v4": // 받침있는 [ㄱ ㅋ] 제외
-      for (const linfo of consonants) {
+      for (const linfo of leadings) {
         if (linfo.leading !== null && !KIYEOK_LIKE.includes(linfo.name)) {
-          for (const tinfo of consonants) {
+          for (const tinfo of trailings) {
             if (tinfo.trailing !== null) {
               yield composeHangul(linfo.name, jamoName, tinfo.name, precompose);
             }
@@ -231,7 +263,7 @@ export function* getSyllablesFor(
       break;
 
     case "t1": // 중성 ㅏ ㅑ ㅘ 와 결합
-      for (const linfo of consonants) {
+      for (const linfo of leadings) {
         if (linfo.leading !== null) {
           for (const vinfo of vowels) {
             if (
@@ -247,7 +279,7 @@ export function* getSyllablesFor(
       break;
 
     case "t2": // 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-      for (const linfo of consonants) {
+      for (const linfo of leadings) {
         if (linfo.leading !== null) {
           for (const vinfo of vowels) {
             if (
@@ -263,7 +295,7 @@ export function* getSyllablesFor(
       break;
 
     case "t3": // 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-      for (const linfo of consonants) {
+      for (const linfo of leadings) {
         if (linfo.leading !== null) {
           for (const vinfo of vowels) {
             if (vinfo.doubleVertical) {
@@ -275,7 +307,7 @@ export function* getSyllablesFor(
       break;
 
     case "t4": // 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
-      for (const linfo of consonants) {
+      for (const linfo of leadings) {
         if (linfo.leading !== null) {
           for (const vinfo of vowels) {
             if (!vinfo.doubleVertical && vinfo.position === "under") {
@@ -291,7 +323,7 @@ export function* getSyllablesFor(
 export function getExampleEnvPaths(
   varsets: JamoVarsets,
   jamoName: string,
-  varsetName: string,
+  varsetName: VarsetType,
   numExamples: number,
 ): TComplexPathData[][] {
   const varsetType = varsetName[0].slice(0, 1) as "l" | "v" | "t";

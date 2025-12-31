@@ -5,6 +5,7 @@ import opentype from "opentype.js";
 
 import { intersectBezier, toBezier, toPathData } from "@/app/bezier";
 import { HANGUL_DATA, composeHangul } from "@/app/hangulData";
+import { getSyllablesFor } from "@/app/jamos";
 import {
   ConsonantSets,
   FontMetadata,
@@ -106,198 +107,285 @@ export class FontProcessor {
       }
       if (jamo.leading !== null) {
         // set 1: 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        let syllable = composeHangul(jamo.leading, "ㅒ", null);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 600,
-              top: 0,
-              bottom: 1000,
-            },
-          ]);
-          sets.leadingSet1 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l1", true, {
+          vowelPref: ["ㅒ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 600,
+                top: 0,
+                bottom: 1000,
+              },
+            ]);
+            sets.leadingSet1 = toPathData(jamo);
+            break;
+          }
         }
         // set 2: 받침없는 ㅗ ㅛ ㅡ
-        syllable = composeHangul(jamo.leading, "ㅡ", null);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 1000,
-              top: 0,
-              bottom: 500,
-            },
-          ]);
-          sets.leadingSet2 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l2", true, {
+          vowelPref: ["ㅡ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 1000,
+                top: 0,
+                bottom: 500,
+              },
+            ]);
+            sets.leadingSet2 = toPathData(jamo);
+            break;
+          }
         }
         // set 3: 받침없는 ㅜ ㅠ
-        syllable = composeHangul(jamo.leading, "ㅜ", null);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 1000,
-              top: 0,
-              bottom: 500,
-            },
-          ]);
-          sets.leadingSet3 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l3", true, {
+          vowelPref: ["ㅜ"],
+        })) {
+          if (jamo.name === "KIYEOK") {
+            console.log(syllable);
+          }
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 1000,
+                top: 0,
+                bottom: 500,
+              },
+            ]);
+            sets.leadingSet3 = toPathData(jamo);
+            break;
+          }
         }
         // set 4: 받침없는 ㅘ ㅙ ㅚ ㅢ
-        syllable = composeHangul(jamo.leading, "ㅢ", null);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 600,
-              top: 0,
-              bottom: 500,
-            },
-          ]);
-          sets.leadingSet4 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l4", true, {
+          vowelPref: ["ㅢ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 600,
+                top: 0,
+                bottom: 500,
+              },
+            ]);
+            sets.leadingSet4 = toPathData(jamo);
+            break;
+          }
         }
         // set 5: 받침없는 ㅝ ㅞ ㅟ
-        syllable = composeHangul(jamo.leading, "ㅝ", null);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 600,
-              top: 0,
-              bottom: 500,
-            },
-          ]);
-          sets.leadingSet5 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l5", true, {
+          vowelPref: ["ㅝ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 600,
+                top: 0,
+                bottom: 500,
+              },
+            ]);
+            sets.leadingSet5 = toPathData(jamo);
+            break;
+          }
         }
         // set 6: 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        syllable = composeHangul(jamo.leading, "ㅏ", "ㄱ");
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 600,
-              top: 0,
-              bottom: 500,
-            },
-          ]);
-          sets.leadingSet6 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l6", true, {
+          vowelPref: ["ㅏ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 600,
+                top: 0,
+                bottom: 500,
+              },
+            ]);
+            sets.leadingSet6 = toPathData(jamo);
+            break;
+          }
         }
         // set 7: 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
-        syllable = composeHangul(jamo.leading, "ㅡ", "ㄱ");
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 1000,
-              top: 0,
-              bottom: 400,
-            },
-          ]);
-          sets.leadingSet7 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l7", true, {
+          vowelPref: ["ㅡ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 1000,
+                top: 0,
+                bottom: 400,
+              },
+            ]);
+            sets.leadingSet7 = toPathData(jamo);
+            break;
+          }
         }
         // set 8: 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-        syllable = composeHangul(jamo.leading, "ㅢ", "ㄱ");
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 600,
-              top: 0,
-              bottom: 400,
-            },
-          ]);
-          sets.leadingSet8 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.leading, "l8", true, {
+          vowelPref: ["ㅢ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 600,
+                top: 0,
+                bottom: 400,
+              },
+            ]);
+            sets.leadingSet8 = toPathData(jamo);
+            break;
+          }
         }
       }
       if (jamo.trailing !== null) {
         // set 1: 중성 ㅏ ㅑ ㅘ 와 결합
-        let syllable = composeHangul("ㅇ", "ㅏ", jamo.trailing);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 1000,
-              top: 500,
-              bottom: 1000,
-            },
-          ]);
-          sets.trailingSet1 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.trailing, "t1", true, {
+          vowelPref: ["ㅏ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 1000,
+                top: 500,
+                bottom: 1000,
+              },
+            ]);
+            sets.trailingSet1 = toPathData(jamo);
+            break;
+          }
         }
         // set 2: 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-        syllable = composeHangul("ㅇ", "ㅓ", jamo.trailing);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 1000,
-              top: 500,
-              bottom: 1000,
-            },
-          ]);
-          sets.trailingSet2 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.trailing, "t2", true, {
+          vowelPref: ["ㅓ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 1000,
+                top: 500,
+                bottom: 1000,
+              },
+            ]);
+            sets.trailingSet2 = toPathData(jamo);
+            break;
+          }
         }
         // set 3: 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-        syllable = composeHangul("ㅇ", "ㅐ", jamo.trailing);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 1000,
-              top: 500,
-              bottom: 1000,
-            },
-          ]);
-          sets.trailingSet3 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.trailing, "t3", true, {
+          vowelPref: ["ㅐ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 1000,
+                top: 500,
+                bottom: 1000,
+              },
+            ]);
+            sets.trailingSet3 = toPathData(jamo);
+            break;
+          }
         }
         // set 4: 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
-        syllable = composeHangul("ㄱ", "ㅗ", jamo.trailing);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          const jamo = intersectBezier(bezier, [
-            {
-              left: 0,
-              right: 1000,
-              top: 500,
-              bottom: 1000,
-            },
-          ]);
-          sets.trailingSet4 = toPathData(jamo);
+        for (const syllable of getSyllablesFor(jamo.trailing, "t4", true, {
+          vowelPref: ["ㅗ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            const jamo = intersectBezier(bezier, [
+              {
+                left: 0,
+                right: 1000,
+                top: 500,
+                bottom: 1000,
+              },
+            ]);
+            sets.trailingSet4 = toPathData(jamo);
+            break;
+          }
         }
       }
       result.consonants.set(jamo.name, sets);
@@ -319,36 +407,66 @@ export class FontProcessor {
       }
       if (jamo.vowel !== null) {
         // set 1: 받침없는 [ㄱ ㅋ]과 결합
-        let syllable = composeHangul("ㅋ", jamo.vowel, null);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          sets.set1 = toPathData(extractVowel(bezier, jamo.position, false));
+        for (const syllable of getSyllablesFor(jamo.vowel, "v1", true, {
+          leadingPref: ["ㅋ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            sets.set1 = toPathData(extractVowel(bezier, jamo.position, false));
+            break;
+          }
         }
         // set 2: 받침없는 [ㄱ ㅋ] 제외
-        syllable = composeHangul("ㅂ", jamo.vowel, null);
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          sets.set2 = toPathData(extractVowel(bezier, jamo.position, false));
+        for (const syllable of getSyllablesFor(jamo.vowel, "v2", true, {
+          leadingPref: ["ㅂ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            sets.set2 = toPathData(extractVowel(bezier, jamo.position, false));
+            break;
+          }
         }
         // set 3: 받침있는 [ㄱ ㅋ]과 결합
-        syllable = composeHangul("ㅋ", jamo.vowel, "ㄱ");
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          sets.set3 = toPathData(extractVowel(bezier, jamo.position, true));
+        for (const syllable of getSyllablesFor(jamo.vowel, "v3", true, {
+          leadingPref: ["ㅋ"],
+          trailingPref: ["ㄱ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            sets.set3 = toPathData(extractVowel(bezier, jamo.position, true));
+            break;
+          }
         }
         // set 4: 받침있는 [ㄱ ㅋ] 제외
-        syllable = composeHangul("ㅂ", jamo.vowel, "ㄱ");
-        if (Array.from(syllable).length === 1 && this.font.hasChar(syllable)) {
-          const glyph = this.font.charToGlyph(syllable);
-          // console.log(syllable, glyph.name);
-          const bezier = toBezier(this.toFabricPath(glyph.path));
-          sets.set4 = toPathData(extractVowel(bezier, jamo.position, true));
+        for (const syllable of getSyllablesFor(jamo.vowel, "v4", true, {
+          leadingPref: ["ㅂ"],
+          trailingPref: ["ㄱ"],
+        })) {
+          if (
+            Array.from(syllable).length === 1 &&
+            this.font.hasChar(syllable)
+          ) {
+            const glyph = this.font.charToGlyph(syllable);
+            // console.log(syllable, glyph.name);
+            const bezier = toBezier(this.toFabricPath(glyph.path));
+            sets.set4 = toPathData(extractVowel(bezier, jamo.position, true));
+            break;
+          }
         }
       }
       result.vowel.set(jamo.name, sets);
