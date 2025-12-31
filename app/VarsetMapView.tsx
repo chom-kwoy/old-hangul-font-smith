@@ -11,7 +11,7 @@ import React, {
   useState,
 } from "react";
 
-import { pathBounds, toBezier } from "@/app/bezier";
+import { toFabricPath } from "@/app/fabricUtils";
 import { HANGUL_DATA } from "@/app/hangulData";
 import {
   CONSONANT_VARSET_NAMES,
@@ -19,123 +19,6 @@ import {
   getVarset,
 } from "@/app/jamos";
 import { ConsonantInfo, JamoVarsets, VarsetType, VowelInfo } from "@/app/types";
-
-fabric.InteractiveFabricObject.ownDefaults = {
-  ...fabric.InteractiveFabricObject.ownDefaults,
-  cornerStrokeColor: "white",
-  cornerColor: "lightblue",
-  cornerStyle: "circle",
-  cornerSize: 12,
-  padding: 0,
-  transparentCorners: false,
-  borderColor: "grey",
-  borderScaleFactor: 1.2,
-};
-
-export function GlyphView({
-  width,
-  height,
-  path,
-  bgPaths,
-  interactive,
-  ...props
-}: {
-  width: number;
-  height: number;
-  interactive: boolean;
-  path: TComplexPathData | null;
-  bgPaths: TComplexPathData[];
-} & React.ComponentProps<"canvas">) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const fabricRef = useRef<fabric.Canvas | null>(null);
-
-  useEffect(() => {
-    if (canvasRef.current === null) {
-      return () => {};
-    }
-
-    // Initialize the Fabric canvas
-    fabricRef.current = new fabric.Canvas(canvasRef.current, {
-      width: width,
-      height: height,
-      backgroundColor: "white",
-    });
-
-    // Add gridlines
-    fabricRef.current.add(
-      new fabric.Polyline(
-        [
-          { x: 0, y: 0 },
-          { x: 0, y: height },
-        ],
-        {
-          stroke: "red",
-          left: width / 2,
-          top: height / 2,
-          selectable: false,
-          evented: false,
-        },
-      ),
-    );
-    fabricRef.current.add(
-      new fabric.Polyline(
-        [
-          { x: 0, y: 0 },
-          { x: width, y: 0 },
-        ],
-        {
-          stroke: "red",
-          left: width / 2,
-          top: height / 2,
-          selectable: false,
-          evented: false,
-        },
-      ),
-    );
-
-    for (const path of bgPaths) {
-      fabricRef.current.add(
-        toFabricPath(path, width, height, {
-          selectable: false,
-          evented: false,
-          strokeWidth: 2,
-          stroke: "grey",
-          fill: "transparent",
-          opacity: 0.7,
-        }),
-      );
-    }
-
-    if (path !== null) {
-      if (interactive) {
-        fabricRef.current.add(
-          toFabricPath(path, width, height, {
-            selectable: false,
-            evented: false,
-            fill: "blue",
-            opacity: 0.1,
-          }),
-        );
-      }
-
-      fabricRef.current.add(
-        toFabricPath(path, width, height, {
-          selectable: interactive,
-          evented: interactive,
-        }),
-      );
-    }
-
-    // Clean up on unmount to prevent memory leaks
-    return () => {
-      if (fabricRef.current) {
-        fabricRef.current.dispose();
-      }
-    };
-  });
-
-  return <canvas ref={canvasRef} {...props} />;
-}
 
 export function VarsetMapView({
   width,
@@ -504,28 +387,4 @@ export function VarsetMapView({
       />
     </Stack>
   );
-}
-
-function toFabricPath(
-  path: TComplexPathData,
-  width: number,
-  height: number,
-  {
-    offsetX,
-    offsetY,
-    ...options
-  }: { offsetX?: number; offsetY?: number } & Partial<fabric.PathProps> = {},
-): fabric.Path {
-  offsetX = offsetX || 0;
-  offsetY = offsetY || 0;
-  const bbox = pathBounds(toBezier(path));
-  const bboxWidth = bbox.right - bbox.left;
-  const bboxHeight = bbox.bottom - bbox.top;
-  return new fabric.Path(path, {
-    ...options,
-    left: offsetX + (bbox.left + bboxWidth / 2) * (width / 1000),
-    top: offsetY + (bbox.top + bboxHeight / 2) * (height / 1000),
-    scaleX: width / 1000,
-    scaleY: height / 1000,
-  });
 }

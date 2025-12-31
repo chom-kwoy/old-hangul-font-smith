@@ -10,7 +10,8 @@ import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
 import React, { useCallback, useState } from "react";
 
-import { GlyphView, VarsetMapView } from "@/app/canvas";
+import { GlyphView } from "@/app/GlyphView";
+import { VarsetMapView } from "@/app/VarsetMapView";
 import { downloadArrayBufferAsFile } from "@/app/download";
 import { FontProcessor } from "@/app/fontProcessor";
 import { HANGUL_DATA, unicodeNameToHangul } from "@/app/hangulData";
