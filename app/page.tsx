@@ -85,11 +85,9 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-8 space-y-8">
+      <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-8">
         {/* Step 1: Upload */}
-        <section
-          className={`transition-all duration-500 ${appState === AppState.IDLE ? "opacity-100" : "opacity-100"}`}
-        >
+        <section className={"transition-all duration-500 opacity-100"}>
           <div className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200 text-center">
             {(appState === AppState.IDLE ||
               appState === AppState.PROCESSING_FONT) && (

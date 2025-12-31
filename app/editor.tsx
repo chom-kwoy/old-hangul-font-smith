@@ -8,7 +8,7 @@ import {
 import Button from "@mui/material/Button";
 import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 
 import { GlyphView, VarsetMapView } from "@/app/canvas";
 import { downloadArrayBufferAsFile } from "@/app/download";
@@ -71,6 +71,14 @@ export function Editor({
     selectedVarsetName,
     10,
   ).flat();
+
+  const updateSelectedItem = useCallback(
+    (jamoInfo: ConsonantInfo | VowelInfo, varsetName: VarsetType) => {
+      setSelectedJamoName(jamoInfo.name);
+      setSelectedVarsetName(varsetName);
+    },
+    [],
+  );
 
   return (
     <>
@@ -186,10 +194,7 @@ export function Editor({
                 className="border border-stone-200 rounded-lg"
                 width={rightDivSize.width}
                 varsets={varsets}
-                onItemClick={(jamoInfo, varsetName) => {
-                  setSelectedJamoName(jamoInfo.name);
-                  setSelectedVarsetName(varsetName);
-                }}
+                onItemClick={updateSelectedItem}
                 selectedJamoName={selectedJamoName}
                 selectedVarsetName={selectedVarsetName}
               />

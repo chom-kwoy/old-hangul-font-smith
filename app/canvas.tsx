@@ -3,7 +3,13 @@ import Button from "@mui/material/Button";
 import { Stack } from "@mui/system";
 import * as fabric from "fabric";
 import { TComplexPathData } from "fabric";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { pathBounds, toBezier } from "@/app/bezier";
 import { HANGUL_DATA } from "@/app/hangulData";
@@ -107,7 +113,7 @@ export function GlyphView({
             selectable: false,
             evented: false,
             fill: "blue",
-            opacity: 0.3,
+            opacity: 0.1,
           }),
         );
       }
@@ -146,14 +152,33 @@ export function VarsetMapView({
     varsetName: VarsetType,
   ) => void;
   selectedJamoName?: string;
-  selectedVarsetName?: string;
-} & React.ComponentProps<"canvas">) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const fabricRef = useRef<fabric.Canvas | null>(null);
+  selectedVarsetName?: VarsetType;
+} & React.ComponentProps<"div">) {
   const [curPageNumState, setCurPageNum] = useState<number>(0);
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fabricRef = useRef<fabric.Canvas | null>(null);
+  const overlayFabricRef = useRef<fabric.Canvas | null>(null);
+
+  const lastSelectedRef = useRef<{
+    jamoName?: string;
+    varsetName?: VarsetType;
+  }>({
+    jamoName: selectedJamoName,
+    varsetName: selectedVarsetName,
+  });
+  type VarsetObjects = {
+    rect: fabric.Rect;
+    overlayRect: fabric.Rect;
+    zoomRect: fabric.Rect;
+  };
+  const lastSelectedObjRef = useRef<VarsetObjects | null>(null);
+  const rectMap = useRef(new Map<string, VarsetObjects>());
 
   const nCols = Math.max(Math.ceil(width / 25), 1);
   const cellSize = width / nCols;
+  const zoomSize = cellSize * 2;
   const height = cellSize * CONSONANT_VARSET_NAMES.length;
 
   const pages = useMemo(() => {
@@ -180,8 +205,26 @@ export function VarsetMapView({
 
   const curPageNum = curPageNumState < pages.length ? curPageNumState : 0;
 
+  const updateSelected = useCallback(() => {
+    if (fabricRef.current !== null && overlayFabricRef.current !== null) {
+      if (lastSelectedObjRef.current) {
+        overlayFabricRef.current.remove(lastSelectedObjRef.current.overlayRect);
+      }
+      const objects = rectMap.current.get(
+        `${lastSelectedRef.current.jamoName}/${lastSelectedRef.current.varsetName}`,
+      );
+      if (objects) {
+        objects.overlayRect.set("stroke", "red");
+        overlayFabricRef.current.add(objects.overlayRect);
+        overlayFabricRef.current.requestRenderAll();
+
+        lastSelectedObjRef.current = objects;
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    if (canvasRef.current === null) {
+    if (canvasRef.current === null || overlayCanvasRef.current === null) {
       return () => {};
     }
 
@@ -191,6 +234,15 @@ export function VarsetMapView({
       height: height,
       selection: false,
     });
+
+    overlayFabricRef.current = new fabric.Canvas(overlayCanvasRef.current, {
+      width: width + zoomSize,
+      height: height + zoomSize,
+      selection: false,
+    });
+
+    rectMap.current.clear();
+    lastSelectedObjRef.current = null;
 
     // Render background
     fabricRef.current.add(
@@ -208,34 +260,66 @@ export function VarsetMapView({
 
     function renderBox(
       canvas: fabric.Canvas,
+      overlayCanvas: fabric.Canvas,
+      jamoInfo: ConsonantInfo | VowelInfo,
+      varsetName: VarsetType,
       path: TComplexPathData | null,
-      isSelected: boolean,
       isInvalid: boolean,
       offX: number,
       offY: number,
     ) {
-      const objects = [];
-      objects.push(
-        new fabric.Rect({
-          left: offX * cellSize + cellSize / 2,
-          top: offY * cellSize + cellSize / 2,
-          width: cellSize,
-          height: cellSize,
-          fill: isInvalid
-            ? "oklch(86.9% 0.005 56.366)"
-            : path
-              ? "white"
-              : "oklch(89.2% 0.058 10.001)",
-          stroke: isSelected ? "red" : "grey",
-          strokeWidth: isSelected ? 1 : 0.3,
-          selectable: false,
-          evented: false,
-        }),
-      );
+      const fill = isInvalid
+        ? "oklch(86.9% 0.005 56.366)"
+        : path
+          ? "white"
+          : "oklch(89.2% 0.058 10.001)";
+      const rect = new fabric.Rect({
+        left: offX * cellSize + cellSize / 2,
+        top: offY * cellSize + cellSize / 2,
+        width: cellSize,
+        height: cellSize,
+        fill: fill,
+        stroke: "grey",
+        strokeWidth: 0.3,
+        selectable: false,
+        evented: false,
+      });
+      const overlayRect = new fabric.Rect({
+        left: offX * cellSize + cellSize / 2,
+        top: offY * cellSize + cellSize / 2,
+        width: cellSize,
+        height: cellSize,
+        fill: "#FFFFFF00",
+        stroke: "grey",
+        strokeWidth: 2,
+        selectable: false,
+        evented: false,
+      });
+      const zoomRect = new fabric.Rect({
+        left: (offX + 1) * cellSize + zoomSize / 2,
+        top: offY * cellSize + zoomSize / 2,
+        width: zoomSize,
+        height: zoomSize,
+        fill: fill,
+        stroke: "grey",
+        strokeWidth: 2,
+        selectable: false,
+        evented: false,
+      });
+      const objects: fabric.Object[] = [rect];
+      const overlayObjects: fabric.Object[] = [overlayRect, zoomRect];
       if (path !== null) {
         objects.push(
           toFabricPath(path, cellSize, cellSize, {
             offsetX: offX * cellSize,
+            offsetY: offY * cellSize,
+            selectable: false,
+            evented: false,
+          }),
+        );
+        overlayObjects.push(
+          toFabricPath(path, zoomSize, zoomSize, {
+            offsetX: (offX + 1) * cellSize,
             offsetY: offY * cellSize,
             selectable: false,
             evented: false,
@@ -247,20 +331,46 @@ export function VarsetMapView({
         evented: !isInvalid,
         hoverCursor: "pointer",
       });
+      const overlayGroup = new fabric.Group(overlayObjects, {
+        selectable: false,
+        evented: false,
+      });
+      rectMap.current.set(`${jamoInfo.name}/${varsetName}`, {
+        rect: rect,
+        overlayRect: overlayRect,
+        zoomRect: zoomRect,
+      });
+      group.on("mousedown", () => {
+        if (onItemClick) {
+          onItemClick(jamoInfo, varsetName);
+        }
+      });
+      group.on("mouseover", () => {
+        if (
+          lastSelectedRef.current.jamoName == jamoInfo.name &&
+          lastSelectedRef.current.varsetName === varsetName
+        ) {
+          overlayRect.set("stroke", "red");
+        } else {
+          overlayRect.set("stroke", "grey");
+        }
+        overlayCanvas.add(overlayGroup);
+        overlayCanvas.requestRenderAll();
+      });
+      group.on("mouseout", () => {
+        overlayCanvas.remove(overlayGroup);
+        overlayCanvas.requestRenderAll();
+      });
       canvas.add(group);
       return group;
     }
 
     const curPage = pages[curPageNum];
-    let selectedRect: fabric.Object | null = null;
     if (curPage.type === "consonant") {
       let offX = 0;
       let offY = 0;
       for (const varsetName of CONSONANT_VARSET_NAMES) {
         for (const consonant of curPage.jamos) {
-          const isSelected =
-            consonant.name === selectedJamoName &&
-            varsetName === selectedVarsetName;
           const isInvalid =
             (consonant.leading === null && varsetName.startsWith("l")) ||
             (consonant.trailing === null && varsetName.startsWith("t"));
@@ -269,22 +379,16 @@ export function VarsetMapView({
           const realOffX = offX % nCols;
           const realOffY =
             Math.floor(offX / nCols) * CONSONANT_VARSET_NAMES.length + offY;
-          const rect = renderBox(
+          renderBox(
             fabricRef.current,
+            overlayFabricRef.current,
+            consonant,
+            varsetName,
             path,
-            isSelected,
             isInvalid,
             realOffX,
             realOffY,
           );
-          if (isSelected) {
-            selectedRect = rect;
-          }
-          rect.on("mousedown", () => {
-            if (onItemClick) {
-              onItemClick(consonant, varsetName);
-            }
-          });
           offX += 1;
         }
         offX = 0;
@@ -295,52 +399,79 @@ export function VarsetMapView({
       let offY = 0;
       for (const varsetName of VOWEL_VARSET_NAMES) {
         for (const vowel of curPage.jamos) {
-          const isSelected =
-            vowel.name === selectedJamoName &&
-            varsetName === selectedVarsetName;
           const isInvalid = false;
           const curVarset = varsets.vowel.get(vowel.name)!;
           const path = getVarset(curVarset, varsetName);
           const realOffX = offX % nCols;
           const realOffY =
-            Math.floor(offX / nCols) * (VOWEL_VARSET_NAMES.length + 0.5) + offY;
-          const rect = renderBox(
+            Math.floor(offX / nCols) * (VOWEL_VARSET_NAMES.length + 1) + offY;
+          renderBox(
             fabricRef.current,
+            overlayFabricRef.current,
+            vowel,
+            varsetName,
             path,
-            isSelected,
             isInvalid,
             realOffX,
             realOffY,
           );
-          if (isSelected) {
-            selectedRect = rect;
-          }
-          rect.on("mousedown", () => {
-            if (onItemClick) {
-              onItemClick(vowel, varsetName);
-            }
-          });
           offX += 1;
         }
         offX = 0;
         offY += 1;
       }
     }
-    if (selectedRect) {
-      fabricRef.current.bringObjectToFront(selectedRect);
-    }
+
+    updateSelected();
 
     // Clean up on unmount to prevent memory leaks
     return () => {
       if (fabricRef.current) {
         fabricRef.current.dispose();
       }
+      if (overlayFabricRef.current) {
+        overlayFabricRef.current.dispose();
+      }
     };
-  });
+  }, [
+    width,
+    height,
+    nCols,
+    cellSize,
+    pages,
+    curPageNum,
+    onItemClick,
+    varsets.consonants,
+    varsets.vowel,
+    zoomSize,
+    updateSelected,
+  ]);
+
+  useEffect(() => {
+    lastSelectedRef.current = {
+      jamoName: selectedJamoName,
+      varsetName: selectedVarsetName,
+    };
+    updateSelected();
+  }, [selectedJamoName, selectedVarsetName, updateSelected]);
 
   return (
     <Stack>
-      <canvas ref={canvasRef} {...props} />
+      <div {...props} style={{ position: "relative" }}>
+        <canvas ref={canvasRef} />
+        {/* Overlay */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            pointerEvents: "none",
+            zIndex: 10000,
+          }}
+        >
+          <canvas ref={overlayCanvasRef} />
+        </div>
+      </div>
       <MobileStepper
         variant="dots"
         position="static"
