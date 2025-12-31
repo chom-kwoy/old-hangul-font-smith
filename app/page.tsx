@@ -64,7 +64,7 @@ export default function Home() {
     <div className="min-h-screen bg-stone-50 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b border-stone-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-md">
               옛
@@ -74,7 +74,7 @@ export default function Home() {
                 Old Hangul Font Smith
               </h1>
               <p className="text-xs text-stone-500 font-medium">
-                Typographic Hell
+                Create Old Hangul Fonts
               </p>
             </div>
           </div>
