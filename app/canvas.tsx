@@ -258,6 +258,13 @@ export function VarsetMapView({
       }),
     );
 
+    const zoomShadow = new fabric.Shadow({
+      color: "rgba(0,0,0,0.3)", // Shadow color
+      blur: 3, // Blur level
+      offsetX: 3, // Horizontal offset
+      offsetY: 3, // Vertical offset
+    });
+
     function renderBox(
       canvas: fabric.Canvas,
       overlayCanvas: fabric.Canvas,
@@ -303,6 +310,7 @@ export function VarsetMapView({
         fill: fill,
         stroke: "grey",
         strokeWidth: 2,
+        shadow: zoomShadow,
         selectable: false,
         evented: false,
       });
