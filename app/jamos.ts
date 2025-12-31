@@ -105,193 +105,187 @@ function getJamoForm(
   }
 }
 
-export function getSyllablesFor(
+export function* getSyllablesFor(
   jamoName: string,
   varsetName: string,
   precompose: boolean = true,
-): string[] {
+): Generator<string> {
+  const vowels = HANGUL_DATA.vowelInfo.values().toArray();
+  const consonants = HANGUL_DATA.consonantInfo.values().toArray();
+
   switch (varsetName) {
     case "l1": // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "right")
-        .map((info) => composeHangul(jamoName, info.name, null, precompose))
-        .toArray();
+      for (const info of vowels) {
+        if (info.position === "right") {
+          yield composeHangul(jamoName, info.name, null, precompose);
+        }
+      }
+      break;
+
     case "l2": // 받침없는 ㅗ ㅛ ㅡ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "under" && !info.pokingDown)
-        .map((info) => composeHangul(jamoName, info.name, null, precompose))
-        .toArray();
+      for (const info of vowels) {
+        if (info.position === "under" && !info.pokingDown) {
+          yield composeHangul(jamoName, info.name, null, precompose);
+        }
+      }
+      break;
+
     case "l3": // 받침없는 ㅜ ㅠ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "under" && info.pokingDown)
-        .map((info) => composeHangul(jamoName, info.name, null, precompose))
-        .toArray();
+      for (const info of vowels) {
+        if (info.position === "under" && info.pokingDown) {
+          yield composeHangul(jamoName, info.name, null, precompose);
+        }
+      }
+      break;
+
     case "l4": // 받침없는 ㅘ ㅙ ㅚ ㅢ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "mixed" && !info.pokingDown)
-        .map((info) => composeHangul(jamoName, info.name, null, precompose))
-        .toArray();
+      for (const info of vowels) {
+        if (info.position === "mixed" && !info.pokingDown) {
+          yield composeHangul(jamoName, info.name, null, precompose);
+        }
+      }
+      break;
+
     case "l5": // 받침없는 ㅝ ㅞ ㅟ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "mixed" && info.pokingDown)
-        .map((info) => composeHangul(jamoName, info.name, null, precompose))
-        .toArray();
+      for (const info of vowels) {
+        if (info.position === "mixed" && info.pokingDown) {
+          yield composeHangul(jamoName, info.name, null, precompose);
+        }
+      }
+      break;
+
     case "l6": // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "right")
-        .flatMap((vinfo) =>
-          HANGUL_DATA.consonantInfo
-            .values()
-            .filter((tinfo) => tinfo.trailing !== null)
-            .map((tinfo) =>
-              composeHangul(jamoName, vinfo.name, tinfo.name, precompose),
-            ),
-        )
-        .toArray();
+      for (const vinfo of vowels) {
+        if (vinfo.position === "right") {
+          for (const tinfo of consonants) {
+            if (tinfo.trailing !== null) {
+              yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "l7": // 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "under")
-        .flatMap((vinfo) =>
-          HANGUL_DATA.consonantInfo
-            .values()
-            .filter((tinfo) => tinfo.trailing !== null)
-            .map((tinfo) =>
-              composeHangul(jamoName, vinfo.name, tinfo.name, precompose),
-            ),
-        )
-        .toArray();
+      for (const vinfo of vowels) {
+        if (vinfo.position === "under") {
+          for (const tinfo of consonants) {
+            if (tinfo.trailing !== null) {
+              yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "l8": // 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-      return HANGUL_DATA.vowelInfo
-        .values()
-        .filter((info) => info.position === "mixed")
-        .flatMap((vinfo) =>
-          HANGUL_DATA.consonantInfo
-            .values()
-            .filter((tinfo) => tinfo.trailing !== null)
-            .map((tinfo) =>
-              composeHangul(jamoName, vinfo.name, tinfo.name, precompose),
-            ),
-        )
-        .toArray();
+      for (const vinfo of vowels) {
+        if (vinfo.position === "mixed") {
+          for (const tinfo of consonants) {
+            if (tinfo.trailing !== null) {
+              yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "v1": // 받침없는 [ㄱ ㅋ]과 결합
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter(
-          (info) => info.leading !== null && KIYEOK_LIKE.includes(info.name),
-        )
-        .map((info) => composeHangul(info.name, jamoName, null, precompose))
-        .toArray();
+      for (const info of consonants) {
+        if (info.leading !== null && KIYEOK_LIKE.includes(info.name)) {
+          yield composeHangul(info.name, jamoName, null, precompose);
+        }
+      }
+      break;
+
     case "v2": // 받침없는 [ㄱ ㅋ] 제외
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter(
-          (info) => info.leading !== null && !KIYEOK_LIKE.includes(info.name),
-        )
-        .map((info) => composeHangul(info.name, jamoName, null, precompose))
-        .toArray();
+      for (const info of consonants) {
+        if (info.leading !== null && !KIYEOK_LIKE.includes(info.name)) {
+          yield composeHangul(info.name, jamoName, null, precompose);
+        }
+      }
+      break;
+
     case "v3": // 받침있는 [ㄱ ㅋ]과 결합
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter(
-          (info) => info.leading !== null && KIYEOK_LIKE.includes(info.name),
-        )
-        .flatMap((linfo) =>
-          HANGUL_DATA.consonantInfo
-            .values()
-            .filter((tinfo) => tinfo.trailing !== null)
-            .map((tinfo) =>
-              composeHangul(linfo.name, jamoName, tinfo.name, precompose),
-            ),
-        )
-        .toArray();
+      for (const linfo of consonants) {
+        if (linfo.leading !== null && KIYEOK_LIKE.includes(linfo.name)) {
+          for (const tinfo of consonants) {
+            if (tinfo.trailing !== null) {
+              yield composeHangul(linfo.name, jamoName, tinfo.name, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "v4": // 받침있는 [ㄱ ㅋ] 제외
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter(
-          (info) => info.leading !== null && !KIYEOK_LIKE.includes(info.name),
-        )
-        .flatMap((linfo) =>
-          HANGUL_DATA.consonantInfo
-            .values()
-            .filter((tinfo) => tinfo.trailing !== null)
-            .map((tinfo) =>
-              composeHangul(linfo.name, jamoName, tinfo.name, precompose),
-            ),
-        )
-        .toArray();
+      for (const linfo of consonants) {
+        if (linfo.leading !== null && !KIYEOK_LIKE.includes(linfo.name)) {
+          for (const tinfo of consonants) {
+            if (tinfo.trailing !== null) {
+              yield composeHangul(linfo.name, jamoName, tinfo.name, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "t1": // 중성 ㅏ ㅑ ㅘ 와 결합
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter((info) => info.leading !== null)
-        .flatMap((linfo) =>
-          HANGUL_DATA.vowelInfo
-            .values()
-            .filter(
-              (vinfo) =>
-                !vinfo.doubleVertical &&
-                vinfo.position !== "under" &&
-                vinfo.pokingRight,
-            )
-            .map((vinfo) =>
-              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
-            ),
-        )
-        .toArray();
+      for (const linfo of consonants) {
+        if (linfo.leading !== null) {
+          for (const vinfo of vowels) {
+            if (
+              !vinfo.doubleVertical &&
+              vinfo.position !== "under" &&
+              vinfo.pokingRight
+            ) {
+              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "t2": // 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter((info) => info.leading !== null)
-        .flatMap((linfo) =>
-          HANGUL_DATA.vowelInfo
-            .values()
-            .filter(
-              (vinfo) =>
-                !vinfo.doubleVertical &&
-                vinfo.position !== "under" &&
-                !vinfo.pokingRight,
-            )
-            .map((vinfo) =>
-              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
-            ),
-        )
-        .toArray();
+      for (const linfo of consonants) {
+        if (linfo.leading !== null) {
+          for (const vinfo of vowels) {
+            if (
+              !vinfo.doubleVertical &&
+              vinfo.position !== "under" &&
+              !vinfo.pokingRight
+            ) {
+              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "t3": // 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter((info) => info.leading !== null)
-        .flatMap((linfo) =>
-          HANGUL_DATA.vowelInfo
-            .values()
-            .filter((vinfo) => vinfo.doubleVertical)
-            .map((vinfo) =>
-              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
-            ),
-        )
-        .toArray();
+      for (const linfo of consonants) {
+        if (linfo.leading !== null) {
+          for (const vinfo of vowels) {
+            if (vinfo.doubleVertical) {
+              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
+            }
+          }
+        }
+      }
+      break;
+
     case "t4": // 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
-      return HANGUL_DATA.consonantInfo
-        .values()
-        .filter((info) => info.leading !== null)
-        .flatMap((linfo) =>
-          HANGUL_DATA.vowelInfo
-            .values()
-            .filter(
-              (vinfo) => !vinfo.doubleVertical && vinfo.position === "under",
-            )
-            .map((vinfo) =>
-              composeHangul(linfo.name, vinfo.name, jamoName, precompose),
-            ),
-        )
-        .toArray();
+      for (const linfo of consonants) {
+        if (linfo.leading !== null) {
+          for (const vinfo of vowels) {
+            if (!vinfo.doubleVertical && vinfo.position === "under") {
+              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
+            }
+          }
+        }
+      }
+      break;
   }
-  return [];
 }
 
 export function getExampleEnvPaths(
@@ -301,56 +295,55 @@ export function getExampleEnvPaths(
   numExamples: number,
 ): TComplexPathData[][] {
   const varsetType = varsetName[0].slice(0, 1) as "l" | "v" | "t";
-  const syllables = getSyllablesFor(jamoName, varsetName, false)
-    .map((syllable) => {
-      const leading = getName(syllable.slice(0, 1))!;
-      const vowel = getName(syllable.slice(1, 2))!;
-      const trailing = getName(syllable.slice(2, 3))!;
-      const combination: TComplexPathData[] = [];
-      if (varsetType !== "l") {
-        const varset = getVarset(
-          varsets.consonants.get(leading)!,
-          getJamoForm("l", leading, vowel, trailing),
-        );
-        if (varset === null) {
-          return null;
-        }
-        combination.push(varset);
+  const results: TComplexPathData[][] = [];
+  const syllables = getSyllablesFor(jamoName, varsetName, false).toArray();
+  for (const syllable of shuffle(syllables)) {
+    const leading = getName(syllable.slice(0, 1))!;
+    const vowel = getName(syllable.slice(1, 2))!;
+    const trailing = getName(syllable.slice(2, 3))!;
+    const combination: TComplexPathData[] = [];
+    if (varsetType !== "l") {
+      const varset = getVarset(
+        varsets.consonants.get(leading)!,
+        getJamoForm("l", leading, vowel, trailing),
+      );
+      if (varset === null) {
+        continue;
       }
-      if (varsetType !== "v") {
-        const varset = getVarset(
-          varsets.vowel.get(vowel)!,
-          getJamoForm("v", leading, vowel, trailing),
-        );
-        if (varset === null) {
-          return null;
-        }
-        combination.push(varset);
+      combination.push(varset);
+    }
+    if (varsetType !== "v") {
+      const varset = getVarset(
+        varsets.vowel.get(vowel)!,
+        getJamoForm("v", leading, vowel, trailing),
+      );
+      if (varset === null) {
+        continue;
       }
-      if (varsetType !== "t" && trailing !== "") {
-        const varset = getVarset(
-          varsets.consonants.get(trailing)!,
-          getJamoForm("t", leading, vowel, trailing),
-        );
-        if (varset === null) {
-          return null;
-        }
-        combination.push(varset);
+      combination.push(varset);
+    }
+    if (varsetType !== "t" && trailing !== "") {
+      const varset = getVarset(
+        varsets.consonants.get(trailing)!,
+        getJamoForm("t", leading, vowel, trailing),
+      );
+      if (varset === null) {
+        continue;
       }
-      return combination;
-    })
-    .filter((syllable) => syllable !== null);
-  const rng = seedrandom(`${jamoName}/${varsetName}`);
-  return partialSample(syllables, numExamples, rng);
+      combination.push(varset);
+    }
+    results.push(combination);
+    if (results.length >= numExamples) {
+      break;
+    }
+  }
+  return results;
 }
 
-function partialSample<T>(array: T[], n: number, rng: () => number): T[] {
-  const result: T[] = [...array];
-  const length = result.length;
-  const count = Math.min(n, length);
-  for (let i = 0; i < count; i++) {
-    const j = Math.floor(rng() * (length - i)) + i;
-    [result[i], result[j]] = [result[j], result[i]];
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
-  return result.slice(0, count);
+  return arr;
 }
