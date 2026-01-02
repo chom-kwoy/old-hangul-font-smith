@@ -12,6 +12,7 @@ import { useLocalStorage } from "react-use";
 
 import { Editor } from "@/app/editor";
 import { FontProcessor } from "@/app/fontProcessor";
+import { getProgress } from "@/app/jamos";
 import schedulerYield from "@/app/schedulerYield";
 import { replacer, reviver } from "@/app/serialize";
 import { FontMetadata, JamoVarsets, SavedState } from "@/app/types";
@@ -108,6 +109,7 @@ export default function Home() {
         metadata: metadata,
         previewImage: sampleImage,
         jamoVarsets: varsets,
+        progress: getProgress(varsets),
         date: moment().valueOf(),
       },
     ]);
@@ -198,7 +200,7 @@ export default function Home() {
                 {savedFonts.map((font, i) => (
                   <div
                     key={i}
-                    className="w-64 flex-none shadow-sm rounded-xl bg-white hover:bg-amber-200 transition-colors duration-300 ease-in-out border border-stone-200 p-2 cursor-pointer"
+                    className="w-80 flex-none shadow-sm rounded-xl bg-white hover:bg-amber-200 transition-colors duration-300 ease-in-out border border-stone-200 p-2 cursor-pointer"
                     onClick={() => loadSavedFont(i, savedFonts[i])}
                   >
                     <div className="relative">
@@ -247,9 +249,11 @@ export default function Home() {
                       alt="Font Preview"
                       className="h-16 object-cover object-left opacity-80 border border-stone-200"
                     />
-                    <span className="text-stone-500">98%</span>
+                    <span className="text-stone-500 text-sm">
+                      {(font.progress * 100).toFixed(1)}%
+                    </span>
                     <span className="text-stone-500"> • </span>
-                    <span className="text-stone-500 text-sm text-end">
+                    <span className="text-stone-500 text-sm">
                       last edited {moment(font.date).fromNow()}
                     </span>
                   </div>

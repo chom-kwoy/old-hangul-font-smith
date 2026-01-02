@@ -92,5 +92,6 @@ export type SavedState = {
   metadata: FontMetadata;
   previewImage: string;
   jamoVarsets: JamoVarsets;
+  progress: number;
   date: number;
 };

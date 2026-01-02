@@ -7,6 +7,8 @@ import {
   getJamoInfo,
   getLeading,
   getName,
+  getTrailing,
+  getVowel,
 } from "@/app/hangulData";
 import {
   ConsonantInfo,
@@ -380,4 +382,33 @@ function shuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
-export function getProgress(varsets: JamoVarsets) {}
+export function getProgress(varsets: JamoVarsets) {
+  let total = 0;
+  let progress = 0;
+  for (const [jamoName, varset] of varsets.consonants.entries()) {
+    for (const varsetName of CONSONANT_VARSET_NAMES) {
+      if (
+        (varsetName.startsWith("l") && getLeading(jamoName) === null) ||
+        (varsetName.startsWith("t") && getTrailing(jamoName) === null)
+      ) {
+        continue;
+      }
+      total++;
+      if (getVarset(varset, varsetName) !== null) {
+        progress++;
+      }
+    }
+  }
+  for (const [jamoName, varset] of varsets.vowel.entries()) {
+    for (const varsetName of VOWEL_VARSET_NAMES) {
+      if (varsetName.startsWith("v") && getVowel(jamoName) === null) {
+        continue;
+      }
+      total++;
+      if (getVarset(varset, varsetName) !== null) {
+        progress++;
+      }
+    }
+  }
+  return progress / total;
+}
