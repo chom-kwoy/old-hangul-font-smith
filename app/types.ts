@@ -1,4 +1,5 @@
 import { TComplexPathData } from "fabric";
+import moment from "moment";
 
 export type FontMetadata = {
   name: string;
@@ -86,3 +87,10 @@ export type VarsetType =
   | "t2"
   | "t3"
   | "t4";
+
+export type SavedState = {
+  metadata: FontMetadata;
+  previewImage: string;
+  jamoVarsets: JamoVarsets;
+  date: number;
+};

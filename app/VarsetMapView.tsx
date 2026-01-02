@@ -107,6 +107,9 @@ export function VarsetMapView({
   }, []);
 
   useEffect(() => {
+    if (width === 0) {
+      return () => {};
+    }
     if (canvasRef.current === null || overlayCanvasRef.current === null) {
       return () => {};
     }
@@ -345,6 +348,10 @@ export function VarsetMapView({
     };
     updateSelected();
   }, [selectedJamoName, selectedVarsetName, updateSelected]);
+
+  if (width === 0) {
+    return null;
+  }
 
   return (
     <Stack>

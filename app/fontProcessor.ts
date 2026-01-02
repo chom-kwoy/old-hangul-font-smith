@@ -6,6 +6,7 @@ import opentype from "opentype.js";
 import { intersectBezier, toBezier, toPathData } from "@/app/bezier";
 import { HANGUL_DATA, composeHangul } from "@/app/hangulData";
 import { getSyllablesFor } from "@/app/jamos";
+import schedulerYield from "@/app/schedulerYield";
 import {
   ConsonantSets,
   FontMetadata,
@@ -69,7 +70,7 @@ export class FontProcessor {
     return canvas.toDataURL("image/png");
   }
 
-  analyzeJamoVarsets(): JamoVarsets {
+  async analyzeJamoVarsets(): Promise<JamoVarsets> {
     if (!this.font) {
       throw new Error("Call loadFont() first.");
     }
@@ -156,9 +157,6 @@ export class FontProcessor {
         for (const syllable of getSyllablesFor(jamo.leading, "l3", true, {
           vowelPref: ["ㅜ"],
         })) {
-          if (jamo.name === "KIYEOK") {
-            console.log(syllable);
-          }
           if (
             Array.from(syllable).length === 1 &&
             this.font.hasChar(syllable)
@@ -389,6 +387,8 @@ export class FontProcessor {
         }
       }
       result.consonants.set(jamo.name, sets);
+
+      await schedulerYield();
     }
     for (const jamo of vowelInfo.values()) {
       const sets: VowelSets = {
@@ -470,6 +470,8 @@ export class FontProcessor {
         }
       }
       result.vowel.set(jamo.name, sets);
+
+      await schedulerYield();
     }
 
     return result;

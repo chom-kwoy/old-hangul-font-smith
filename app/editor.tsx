@@ -95,13 +95,11 @@ export function Editor({
             Input Sample
           </p>
           <div className="border border-stone-200 rounded-lg p-4 bg-white overflow-hidden">
-            {previewImage && (
-              <img
-                src={previewImage}
-                alt="Font Preview"
-                className="h-16 object-contain opacity-80"
-              />
-            )}
+            <img
+              src={previewImage}
+              alt="Font Preview"
+              className="h-16 object-contain opacity-80"
+            />
           </div>
         </div>
 
@@ -189,6 +187,9 @@ export function Editor({
                 bgPaths={bgPaths}
                 interactive={true}
               />
+              <div className="text-stone-500 text-sm [font-variant:small-caps]">
+                Use ctrl+mouse wheel for zoom, ctrl+drag for pan
+              </div>
             </div>
             <div ref={rightDivRef} className="w-2/3 text-stone-700 ps-1">
               <VarsetMapView
