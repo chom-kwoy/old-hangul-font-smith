@@ -188,7 +188,7 @@ export function Editor({
                 interactive={true}
               />
               <div className="text-stone-500 text-sm [font-variant:small-caps]">
-                Use ctrl+mouse wheel for zoom, ctrl+drag for pan
+                Use ctrl+mouse wheel to zoom, ctrl+drag to pan
               </div>
             </div>
             <div ref={rightDivRef} className="w-2/3 text-stone-700 ps-1">

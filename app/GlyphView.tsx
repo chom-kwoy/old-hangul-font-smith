@@ -4,6 +4,7 @@ import { TComplexPathData } from "fabric";
 import React, { useEffect, useRef } from "react";
 
 import { toFabricPath } from "@/app/fabricUtils";
+import { createPathControls } from "@/app/pathControl";
 
 export function GlyphView({
   width,
@@ -157,22 +158,19 @@ export function GlyphView({
       fabricPath.on("mousedblclick", () => {
         editing = !editing;
         if (editing) {
-          fabricPath.controls = fabric.controlsUtils.createPathControls(
-            fabricPath,
-            {
-              sizeX: 8,
-              sizeY: 8,
-              pointStyle: {
-                controlFill: blue[300],
-                controlStroke: "white",
-              },
-              controlPointStyle: {
-                controlFill: "white",
-                controlStroke: blue[100],
-                connectionDashArray: [3],
-              },
+          fabricPath.controls = createPathControls(fabricPath, {
+            sizeX: 8,
+            sizeY: 8,
+            pointStyle: {
+              controlFill: blue[300],
+              controlStroke: "white",
             },
-          );
+            controlPointStyle: {
+              controlFill: "white",
+              controlStroke: blue[100],
+              connectionDashArray: [3],
+            },
+          });
           fabricPath.hasBorders = false;
         } else {
           fabricPath.controls =

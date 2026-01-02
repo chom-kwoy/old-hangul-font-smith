@@ -192,8 +192,12 @@ export default function Home() {
           <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
             <div className="flex items-center gap-3 mb-6">
               <h2 className="text-xl font-bold text-stone-900">
-                Resume Editing...
+                Continue Editing
               </h2>
+            </div>
+            <div className="text-md text-stone-600">
+              Select a font to continue editing. After selecting, re-upload the
+              source font file to resume your session.
             </div>
             <div className="bg-stone-50 border border-stone-200 p-10">
               <div className="flex flex-wrap justify-evenly items-center gap-10">
