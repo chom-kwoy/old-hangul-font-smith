@@ -11,14 +11,20 @@ import React, {
   useState,
 } from "react";
 
-import { toFabricPath } from "@/app/fabricUtils";
+import { toFabricPaths } from "@/app/fabricUtils";
 import { HANGUL_DATA } from "@/app/hangulData";
 import {
   CONSONANT_VARSET_NAMES,
   VOWEL_VARSET_NAMES,
   getVarset,
 } from "@/app/jamos";
-import { ConsonantInfo, JamoVarsets, VarsetType, VowelInfo } from "@/app/types";
+import {
+  ConsonantInfo,
+  JamoVarsets,
+  PathData,
+  VarsetType,
+  VowelInfo,
+} from "@/app/types";
 
 export function VarsetMapView({
   width,
@@ -156,7 +162,7 @@ export function VarsetMapView({
       overlayCanvas: fabric.Canvas,
       jamoInfo: ConsonantInfo | VowelInfo,
       varsetName: VarsetType,
-      path: TComplexPathData | null,
+      path: PathData | null,
       isInvalid: boolean,
       offX: number,
       offY: number,
@@ -204,7 +210,7 @@ export function VarsetMapView({
       const overlayObjects: fabric.Object[] = [overlayRect, zoomRect];
       if (path !== null) {
         objects.push(
-          toFabricPath(path, cellSize, cellSize, {
+          ...toFabricPaths(path, cellSize, cellSize, {
             offsetX: offX * cellSize,
             offsetY: offY * cellSize,
             selectable: false,
@@ -212,7 +218,7 @@ export function VarsetMapView({
           }),
         );
         overlayObjects.push(
-          toFabricPath(path, zoomSize, zoomSize, {
+          ...toFabricPaths(path, zoomSize, zoomSize, {
             offsetX: (offX + 1) * cellSize,
             offsetY: offY * cellSize,
             selectable: false,

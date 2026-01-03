@@ -1,10 +1,10 @@
 import { blue } from "@mui/material/colors";
 import * as fabric from "fabric";
-import { TComplexPathData } from "fabric";
 import React, { useEffect, useRef } from "react";
 
-import { toFabricPath } from "@/app/fabricUtils";
+import { toFabricPaths } from "@/app/fabricUtils";
 import { createPathControls } from "@/app/pathControl";
+import { PathData } from "@/app/types";
 
 export function GlyphView({
   width,
@@ -17,8 +17,8 @@ export function GlyphView({
   width: number;
   height: number;
   interactive: boolean;
-  path: TComplexPathData | null;
-  bgPaths: TComplexPathData[];
+  path: PathData | null;
+  bgPaths: PathData[];
 } & React.ComponentProps<"canvas">) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
@@ -39,8 +39,7 @@ export function GlyphView({
     let isDragging = false;
     let lastPosX: number | null = null;
     let lastPosY: number | null = null;
-    function constrainViewport() {
-      const vpt = canvas.viewportTransform;
+    function constrainViewport(vpt: fabric.TMat2D) {
       vpt[4] = Math.min(vpt[4], 0);
       vpt[4] = Math.max(vpt[4], width * (1 - vpt[0] - vpt[2]));
       vpt[5] = Math.min(vpt[5], 0);
@@ -60,7 +59,7 @@ export function GlyphView({
         opt.e.preventDefault();
         opt.e.stopPropagation();
         // constrain to glyph area
-        constrainViewport();
+        constrainViewport(canvas.viewportTransform);
       }
     });
     canvas.on("mouse:down", function (opt) {
@@ -70,6 +69,11 @@ export function GlyphView({
         canvas.selection = false;
         lastPosX = evt.clientX;
         lastPosY = evt.clientY;
+        const obj = canvas.getActiveObject();
+        if (obj) {
+          obj.lockMovementX = true;
+          obj.lockMovementY = true;
+        }
       }
     });
     canvas.on("mouse:move", function (opt) {
@@ -78,7 +82,8 @@ export function GlyphView({
         const vpt = canvas.viewportTransform;
         vpt[4] += e.clientX - lastPosX;
         vpt[5] += e.clientY - lastPosY;
-        constrainViewport();
+        constrainViewport(vpt);
+        canvas.setViewportTransform(vpt);
         canvas.requestRenderAll();
         lastPosX = e.clientX;
         lastPosY = e.clientY;
@@ -90,6 +95,10 @@ export function GlyphView({
       canvas.setViewportTransform(canvas.viewportTransform);
       isDragging = false;
       canvas.selection = true;
+      for (const obj of canvas.getObjects()) {
+        obj.lockMovementX = false;
+        obj.lockMovementY = false;
+      }
     });
 
     // Add gridlines
@@ -126,7 +135,7 @@ export function GlyphView({
 
     for (const path of bgPaths) {
       canvas.add(
-        toFabricPath(path, width, height, {
+        ...toFabricPaths(path, width, height, {
           selectable: false,
           evented: false,
           strokeWidth: 2,
@@ -138,9 +147,10 @@ export function GlyphView({
     }
 
     if (path !== null) {
+      console.log(path.paths[0].pathData);
       if (interactive) {
         canvas.add(
-          toFabricPath(path, width, height, {
+          ...toFabricPaths(path, width, height, {
             selectable: false,
             evented: false,
             fill: "blue",
@@ -149,39 +159,41 @@ export function GlyphView({
         );
       }
 
-      const fabricPath = toFabricPath(path, width, height, {
+      const fabricPaths = toFabricPaths(path, width, height, {
         selectable: interactive,
         evented: interactive,
       });
 
-      let editing = false;
-      fabricPath.on("mousedblclick", () => {
-        editing = !editing;
-        if (editing) {
-          fabricPath.controls = createPathControls(fabricPath, {
-            sizeX: 8,
-            sizeY: 8,
-            pointStyle: {
-              controlFill: blue[300],
-              controlStroke: "white",
-            },
-            controlPointStyle: {
-              controlFill: "white",
-              controlStroke: blue[100],
-              connectionDashArray: [3],
-            },
-          });
-          fabricPath.hasBorders = false;
-        } else {
-          fabricPath.controls =
-            fabric.controlsUtils.createObjectDefaultControls();
-          fabricPath.hasBorders = true;
-        }
-        fabricPath.setCoords();
-        canvas.requestRenderAll();
-      });
+      for (const fabricPath of fabricPaths) {
+        let editing = false;
+        fabricPath.on("mousedblclick", () => {
+          editing = !editing;
+          if (editing) {
+            fabricPath.controls = createPathControls(fabricPath, {
+              sizeX: 8,
+              sizeY: 8,
+              pointStyle: {
+                controlFill: blue[300],
+                controlStroke: "white",
+              },
+              controlPointStyle: {
+                controlFill: "white",
+                controlStroke: blue[100],
+                connectionDashArray: [3],
+              },
+            });
+            fabricPath.hasBorders = false;
+          } else {
+            fabricPath.controls =
+              fabric.controlsUtils.createObjectDefaultControls();
+            fabricPath.hasBorders = true;
+          }
+          fabricPath.setCoords();
+          canvas.requestRenderAll();
+        });
+      }
 
-      canvas.add(fabricPath);
+      canvas.add(...fabricPaths);
     }
 
     // Clean up on unmount to prevent memory leaks

@@ -1,6 +1,3 @@
-import { TComplexPathData } from "fabric";
-import seedrandom from "seedrandom";
-
 import {
   HANGUL_DATA,
   composeHangul,
@@ -14,6 +11,7 @@ import {
   ConsonantInfo,
   ConsonantSets,
   JamoVarsets,
+  PathData,
   VarsetType,
   VowelInfo,
   VowelSets,
@@ -46,7 +44,7 @@ export const VOWEL_VARSET_NAMES: VarsetType[] = [
 export function getVarset(
   varsets: ConsonantSets | VowelSets,
   varsetName: VarsetType,
-) {
+): PathData | null {
   if (varsets.type === "consonant") {
     // prettier-ignore
     switch (varsetName) {
@@ -327,15 +325,15 @@ export function getExampleEnvPaths(
   jamoName: string,
   varsetName: VarsetType,
   numExamples: number,
-): TComplexPathData[][] {
+): PathData[][] {
   const varsetType = varsetName[0].slice(0, 1) as "l" | "v" | "t";
-  const results: TComplexPathData[][] = [];
+  const results: PathData[][] = [];
   const syllables = getSyllablesFor(jamoName, varsetName, false).toArray();
   for (const syllable of shuffle(syllables)) {
     const leading = getName(syllable.slice(0, 1))!;
     const vowel = getName(syllable.slice(1, 2))!;
     const trailing = getName(syllable.slice(2, 3))!;
-    const combination: TComplexPathData[] = [];
+    const combination: PathData[] = [];
     if (varsetType !== "l") {
       const varset = getVarset(
         varsets.consonants.get(leading)!,

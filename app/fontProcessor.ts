@@ -1,16 +1,14 @@
-import { Bezier } from "bezier-js";
-import { TComplexPathData } from "fabric";
-// @ts-expect-error types package for opentype.js is outdated
 import opentype from "opentype.js";
 
-import { intersectBezier, toBezier, toPathData } from "@/app/bezier";
-import { HANGUL_DATA, composeHangul } from "@/app/hangulData";
+import { intersectBezier, opentypeToPathData } from "@/app/bezier";
+import { HANGUL_DATA } from "@/app/hangulData";
 import { getSyllablesFor } from "@/app/jamos";
 import schedulerYield from "@/app/schedulerYield";
 import {
   ConsonantSets,
   FontMetadata,
   JamoVarsets,
+  PathData,
   VowelSets,
 } from "@/app/types";
 
@@ -104,7 +102,7 @@ export class FontProcessor {
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
         // console.log(jamo.canonical, glyph.name);
-        sets.canonical = this.toFabricPath(glyph.path);
+        sets.canonical = this.toPathData(glyph.path);
       }
       if (jamo.leading !== null) {
         // set 1: 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
@@ -117,8 +115,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet1 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 600,
@@ -126,7 +124,6 @@ export class FontProcessor {
                 bottom: 1000,
               },
             ]);
-            sets.leadingSet1 = toPathData(jamo);
             break;
           }
         }
@@ -140,8 +137,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet2 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 1000,
@@ -149,7 +146,6 @@ export class FontProcessor {
                 bottom: 500,
               },
             ]);
-            sets.leadingSet2 = toPathData(jamo);
             break;
           }
         }
@@ -163,8 +159,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet3 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 1000,
@@ -172,7 +168,6 @@ export class FontProcessor {
                 bottom: 500,
               },
             ]);
-            sets.leadingSet3 = toPathData(jamo);
             break;
           }
         }
@@ -186,8 +181,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet4 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 600,
@@ -195,7 +190,6 @@ export class FontProcessor {
                 bottom: 500,
               },
             ]);
-            sets.leadingSet4 = toPathData(jamo);
             break;
           }
         }
@@ -209,8 +203,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet5 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 600,
@@ -218,7 +212,6 @@ export class FontProcessor {
                 bottom: 500,
               },
             ]);
-            sets.leadingSet5 = toPathData(jamo);
             break;
           }
         }
@@ -232,8 +225,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet6 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 600,
@@ -241,7 +234,6 @@ export class FontProcessor {
                 bottom: 500,
               },
             ]);
-            sets.leadingSet6 = toPathData(jamo);
             break;
           }
         }
@@ -255,8 +247,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet7 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 1000,
@@ -264,7 +256,6 @@ export class FontProcessor {
                 bottom: 400,
               },
             ]);
-            sets.leadingSet7 = toPathData(jamo);
             break;
           }
         }
@@ -278,8 +269,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.leadingSet8 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 600,
@@ -287,7 +278,6 @@ export class FontProcessor {
                 bottom: 400,
               },
             ]);
-            sets.leadingSet8 = toPathData(jamo);
             break;
           }
         }
@@ -303,8 +293,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.trailingSet1 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 1000,
@@ -312,7 +302,6 @@ export class FontProcessor {
                 bottom: 1000,
               },
             ]);
-            sets.trailingSet1 = toPathData(jamo);
             break;
           }
         }
@@ -326,8 +315,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.trailingSet2 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 1000,
@@ -335,7 +324,6 @@ export class FontProcessor {
                 bottom: 1000,
               },
             ]);
-            sets.trailingSet2 = toPathData(jamo);
             break;
           }
         }
@@ -349,8 +337,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.trailingSet3 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 1000,
@@ -358,7 +346,6 @@ export class FontProcessor {
                 bottom: 1000,
               },
             ]);
-            sets.trailingSet3 = toPathData(jamo);
             break;
           }
         }
@@ -372,8 +359,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            const jamo = intersectBezier(bezier, [
+            const bezier = this.toPathData(glyph.path);
+            sets.trailingSet4 = intersectBezier(bezier, [
               {
                 left: 0,
                 right: 1000,
@@ -381,7 +368,6 @@ export class FontProcessor {
                 bottom: 1000,
               },
             ]);
-            sets.trailingSet4 = toPathData(jamo);
             break;
           }
         }
@@ -403,7 +389,7 @@ export class FontProcessor {
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
         // console.log(jamo.canonical, glyph.name);
-        sets.canonical = this.toFabricPath(glyph.path);
+        sets.canonical = this.toPathData(glyph.path);
       }
       if (jamo.vowel !== null) {
         // set 1: 받침없는 [ㄱ ㅋ]과 결합
@@ -416,8 +402,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            sets.set1 = toPathData(extractVowel(bezier, jamo.position, false));
+            const bezier = this.toPathData(glyph.path);
+            sets.set1 = extractVowel(bezier, jamo.position, false);
             break;
           }
         }
@@ -431,8 +417,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            sets.set2 = toPathData(extractVowel(bezier, jamo.position, false));
+            const bezier = this.toPathData(glyph.path);
+            sets.set2 = extractVowel(bezier, jamo.position, false);
             break;
           }
         }
@@ -447,8 +433,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            sets.set3 = toPathData(extractVowel(bezier, jamo.position, true));
+            const bezier = this.toPathData(glyph.path);
+            sets.set3 = extractVowel(bezier, jamo.position, true);
             break;
           }
         }
@@ -463,8 +449,8 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             // console.log(syllable, glyph.name);
-            const bezier = toBezier(this.toFabricPath(glyph.path));
-            sets.set4 = toPathData(extractVowel(bezier, jamo.position, true));
+            const bezier = this.toPathData(glyph.path);
+            sets.set4 = extractVowel(bezier, jamo.position, true);
             break;
           }
         }
@@ -486,77 +472,24 @@ export class FontProcessor {
     this.font.tables.os2.ulUnicodeRange1 =
       (this.font.tables.os2.ulUnicodeRange1 | (1 << 28)) >>> 0;
 
-    if (this.font.tables.gsub === undefined) {
-      // make gsub table if not exists
-      this.font.tables.gsub = {
-        version: 1,
-        scripts: {
-          tag: "DFLT",
-          script: {
-            defaultLangSys: {
-              reserved: 0,
-              reqFeatureIndex: 65535,
-              featureIndexes: [],
-            },
-            langSysRecords: [],
-          },
-        },
-        features: [],
-        lookups: [],
-      };
-    }
+    // TODO
 
     return this.font.toArrayBuffer();
   }
 
-  toFabricPath(path: opentype.Path) {
+  toPathData(path: opentype.Path): PathData {
     if (!this.font) {
       throw new Error("Call loadFont() first.");
     }
     // Font metric scaling (Em units usually 1000 or 2048)
     const unitsPerEm = this.font.unitsPerEm;
-    const descender = this.font.tables.os2.sTypoDescender;
-    const scale = 1000 / unitsPerEm;
-    const data: TComplexPathData = [];
-    function trX(x: number) {
-      return x * scale;
-    }
-    function trY(y: number) {
-      return 1000 - (y - descender) * scale;
-    }
-    for (const cmd of path.commands) {
-      switch (cmd.type) {
-        case "M": // move to
-          data.push(["M", trX(cmd.x), trY(cmd.y)]);
-          break;
-        case "L": // line to
-          data.push(["L", trX(cmd.x), trY(cmd.y)]);
-          break;
-        case "Q": // quadratic bezier curve
-          data.push(["Q", trX(cmd.x1), trY(cmd.y1), trX(cmd.x), trY(cmd.y)]);
-          break;
-        case "C": // cubic bezier curve
-          data.push([
-            "C",
-            trX(cmd.x1),
-            trY(cmd.y1),
-            trX(cmd.x2),
-            trY(cmd.y2),
-            trX(cmd.x),
-            trY(cmd.y),
-          ]);
-          break;
-        case "Z": // close path
-          data.push(["Z"]);
-          break;
-      }
-    }
-    return data;
+    const sTypoDescender = this.font.tables.os2.sTypoDescender;
+    return opentypeToPathData(path, unitsPerEm, sTypoDescender);
   }
 }
 
 function extractVowel(
-  bezier: Bezier[][],
+  bezier: PathData,
   position: "right" | "under" | "mixed",
   hasTrailing: boolean,
 ) {

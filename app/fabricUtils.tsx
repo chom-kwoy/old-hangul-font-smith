@@ -1,8 +1,8 @@
 import * as fabric from "fabric";
-import { TComplexPathData } from "fabric";
 
-import { pathBounds, toBezier } from "@/app/bezier";
+import { PathData } from "@/app/types";
 
+// Set global fabric.js defaults
 fabric.InteractiveFabricObject.ownDefaults = {
   ...fabric.InteractiveFabricObject.ownDefaults,
   cornerStrokeColor: "white",
@@ -15,8 +15,8 @@ fabric.InteractiveFabricObject.ownDefaults = {
   borderScaleFactor: 1.2,
 };
 
-export function toFabricPath(
-  path: TComplexPathData,
+export function toFabricPaths(
+  path: PathData,
   width: number,
   height: number,
   {
@@ -24,17 +24,23 @@ export function toFabricPath(
     offsetY,
     ...options
   }: { offsetX?: number; offsetY?: number } & Partial<fabric.PathProps> = {},
-): fabric.Path {
+): fabric.Path[] {
   offsetX = offsetX || 0;
   offsetY = offsetY || 0;
-  const bbox = pathBounds(toBezier(path));
-  const bboxWidth = bbox.right - bbox.left;
-  const bboxHeight = bbox.bottom - bbox.top;
-  return new fabric.Path(path, {
-    ...options,
-    left: offsetX + (bbox.left + bboxWidth / 2) * (width / 1000),
-    top: offsetY + (bbox.top + bboxHeight / 2) * (height / 1000),
-    scaleX: width / 1000,
-    scaleY: height / 1000,
-  });
+  const result: fabric.Path[] = [];
+  for (const comp of path.paths) {
+    const bbox = comp.bounds;
+    const bboxWidth = bbox.right - bbox.left;
+    const bboxHeight = bbox.bottom - bbox.top;
+    result.push(
+      new fabric.Path(comp.pathData, {
+        ...options,
+        left: offsetX + (bbox.left + bboxWidth / 2) * (width / 1000),
+        top: offsetY + (bbox.top + bboxHeight / 2) * (height / 1000),
+        scaleX: width / 1000,
+        scaleY: height / 1000,
+      }),
+    );
+  }
+  return result;
 }
