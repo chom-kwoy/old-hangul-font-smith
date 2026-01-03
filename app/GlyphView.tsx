@@ -147,7 +147,6 @@ export function GlyphView({
     }
 
     if (path !== null) {
-      console.log(path.paths[0].pathData);
       if (interactive) {
         canvas.add(
           ...toFabricPaths(path, width, height, {
