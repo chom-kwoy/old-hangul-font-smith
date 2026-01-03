@@ -370,7 +370,7 @@ export function VarsetMapView({
             top: 0,
             left: 0,
             pointerEvents: "none",
-            zIndex: 10000,
+            zIndex: 1299,
           }}
         >
           <canvas ref={overlayCanvasRef} />
