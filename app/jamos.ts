@@ -46,33 +46,60 @@ export function getVarset(
   varsetName: VarsetType,
 ): PathData | null {
   if (varsets.type === "consonant") {
-    // prettier-ignore
-    switch (varsetName) {
-      case "canon": return varsets.canonical;
-      case "l1": return varsets.leadingSet1;
-      case "l2": return varsets.leadingSet2;
-      case "l3": return varsets.leadingSet3;
-      case "l4": return varsets.leadingSet4;
-      case "l5": return varsets.leadingSet5;
-      case "l6": return varsets.leadingSet6;
-      case "l7": return varsets.leadingSet7;
-      case "l8": return varsets.leadingSet8;
-      case "t1": return varsets.trailingSet1;
-      case "t2": return varsets.trailingSet2;
-      case "t3": return varsets.trailingSet3;
-      case "t4": return varsets.trailingSet4;
+    if (CONSONANT_VARSET_NAMES.includes(varsetName)) {
+      // @ts-expect-error ignore error
+      return varsets[varsetName] as PathData | null;
     }
+    return null;
   } else {
-    // prettier-ignore
-    switch (varsetName) {
-      case "canon": return varsets.canonical;
-      case "v1": return varsets.set1;
-      case "v2": return varsets.set2;
-      case "v3": return varsets.set3;
-      case "v4": return varsets.set4;
+    if (VOWEL_VARSET_NAMES.includes(varsetName)) {
+      // @ts-expect-error ignore error
+      return varsets[varsetName] as PathData | null;
+    }
+    return null;
+  }
+}
+
+export function setVarset(
+  varsets: ConsonantSets | VowelSets,
+  varsetName: VarsetType,
+  data: PathData | null,
+): PathData | null {
+  if (varsets.type === "consonant") {
+    if (CONSONANT_VARSET_NAMES.includes(varsetName)) {
+      // @ts-expect-error ignore error
+      varsets[varsetName] = data;
+    }
+  } else if (varsets.type === "vowel") {
+    if (VOWEL_VARSET_NAMES.includes(varsetName)) {
+      // @ts-expect-error ignore error
+      varsets[varsetName] = data;
     }
   }
   return null;
+}
+
+export function updateVarset(
+  varsets: ConsonantSets | VowelSets,
+  varsetName: VarsetType,
+  data: PathData | null,
+): ConsonantSets | VowelSets {
+  if (varsets.type === "consonant") {
+    if (CONSONANT_VARSET_NAMES.includes(varsetName)) {
+      return {
+        ...varsets,
+        [varsetName]: data,
+      };
+    }
+  } else if (varsets.type === "vowel") {
+    if (VOWEL_VARSET_NAMES.includes(varsetName)) {
+      return {
+        ...varsets,
+        [varsetName]: data,
+      };
+    }
+  }
+  return varsets;
 }
 
 const KIYEOK_LIKE = ["KIYEOK", "KIYEOK-KIYEOK", "KHIEUKH"];
@@ -336,7 +363,7 @@ export function getExampleEnvPaths(
     const combination: PathData[] = [];
     if (varsetType !== "l") {
       const varset = getVarset(
-        varsets.consonants.get(leading)!,
+        varsets.jamos.get(leading)!,
         getJamoForm("l", leading, vowel, trailing),
       );
       if (varset === null) {
@@ -346,7 +373,7 @@ export function getExampleEnvPaths(
     }
     if (varsetType !== "v") {
       const varset = getVarset(
-        varsets.vowel.get(vowel)!,
+        varsets.jamos.get(vowel)!,
         getJamoForm("v", leading, vowel, trailing),
       );
       if (varset === null) {
@@ -356,7 +383,7 @@ export function getExampleEnvPaths(
     }
     if (varsetType !== "t" && trailing !== "") {
       const varset = getVarset(
-        varsets.consonants.get(trailing)!,
+        varsets.jamos.get(trailing)!,
         getJamoForm("t", leading, vowel, trailing),
       );
       if (varset === null) {
@@ -383,23 +410,15 @@ function shuffle<T>(arr: T[]): T[] {
 export function getProgress(varsets: JamoVarsets) {
   let total = 0;
   let progress = 0;
-  for (const [jamoName, varset] of varsets.consonants.entries()) {
-    for (const varsetName of CONSONANT_VARSET_NAMES) {
+  for (const [jamoName, varset] of varsets.jamos.entries()) {
+    for (const varsetName of varset.type === "consonant"
+      ? CONSONANT_VARSET_NAMES
+      : VOWEL_VARSET_NAMES) {
       if (
         (varsetName.startsWith("l") && getLeading(jamoName) === null) ||
+        (varsetName.startsWith("v") && getVowel(jamoName) === null) ||
         (varsetName.startsWith("t") && getTrailing(jamoName) === null)
       ) {
-        continue;
-      }
-      total++;
-      if (getVarset(varset, varsetName) !== null) {
-        progress++;
-      }
-    }
-  }
-  for (const [jamoName, varset] of varsets.vowel.entries()) {
-    for (const varsetName of VOWEL_VARSET_NAMES) {
-      if (varsetName.startsWith("v") && getVowel(jamoName) === null) {
         continue;
       }
       total++;

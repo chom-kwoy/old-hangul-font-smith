@@ -15,14 +15,17 @@ export function GlyphView({
   path,
   bgPaths,
   interactive,
+  onResetToSyllable,
   ...props
 }: {
   width: number;
   height: number;
   interactive: boolean;
   path: PathData | null;
-  bgPaths: PathData[];
+  bgPaths?: PathData[];
+  onResetToSyllable?: (target: HTMLElement) => void;
 } & React.ComponentProps<"div">) {
+  bgPaths = bgPaths || [];
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
 
@@ -211,7 +214,13 @@ export function GlyphView({
       {interactive && (
         <div className="flex bg-stone-200">
           <Tooltip title="Reset to Full Syllable">
-            <IconButton onClick={() => {}}>
+            <IconButton
+              onClick={(event) => {
+                if (onResetToSyllable) {
+                  onResetToSyllable(event.currentTarget);
+                }
+              }}
+            >
               <RestartAltIcon />
             </IconButton>
           </Tooltip>

@@ -351,6 +351,7 @@ export default function Home() {
                 fontProcessor={fontProcessor}
                 previewImage={previewImage}
                 varsets={varsets}
+                setVarsets={setVarsets}
               />
             </section>
           )}

@@ -128,8 +128,8 @@ export function VarsetMapView({
     });
 
     overlayFabricRef.current = new fabric.Canvas(overlayCanvasRef.current, {
-      width: width + zoomSize,
-      height: height + zoomSize,
+      width: width + zoomSize + 20,
+      height: height + zoomSize + 20,
       selection: false,
     });
 
@@ -266,60 +266,42 @@ export function VarsetMapView({
     }
 
     const curPage = pages[curPageNum];
-    if (curPage.type === "consonant") {
-      let offX = 0;
-      let offY = 0;
-      for (const varsetName of CONSONANT_VARSET_NAMES) {
-        for (const consonant of curPage.jamos) {
-          const isInvalid =
-            (consonant.leading === null && varsetName.startsWith("l")) ||
-            (consonant.trailing === null && varsetName.startsWith("t"));
-          const curVarset = varsets.consonants.get(consonant.name)!;
-          const path = getVarset(curVarset, varsetName);
-          const realOffX = offX % nCols;
-          const realOffY =
-            Math.floor(offX / nCols) * CONSONANT_VARSET_NAMES.length + offY;
-          renderBox(
-            fabricRef.current,
-            overlayFabricRef.current,
-            consonant,
-            varsetName,
-            path,
-            isInvalid,
-            realOffX,
-            realOffY,
-          );
-          offX += 1;
-        }
-        offX = 0;
-        offY += 1;
+    const varsetNames =
+      curPage.type === "consonant"
+        ? CONSONANT_VARSET_NAMES
+        : VOWEL_VARSET_NAMES;
+    const ySkip =
+      curPage.type === "consonant"
+        ? CONSONANT_VARSET_NAMES.length
+        : VOWEL_VARSET_NAMES.length + 1;
+
+    let offX = 0;
+    let offY = 0;
+    for (const varsetName of varsetNames) {
+      for (const jamo of curPage.jamos) {
+        const isInvalid =
+          jamo.type === "consonant"
+            ? (jamo.leading === null && varsetName.startsWith("l")) ||
+              (jamo.trailing === null && varsetName.startsWith("t"))
+            : jamo.vowel === null && varsetName.startsWith("v");
+        const curVarset = varsets.jamos.get(jamo.name)!;
+        const path = getVarset(curVarset, varsetName);
+        const realOffX = offX % nCols;
+        const realOffY = Math.floor(offX / nCols) * ySkip + offY;
+        renderBox(
+          fabricRef.current,
+          overlayFabricRef.current,
+          jamo,
+          varsetName,
+          path,
+          isInvalid,
+          realOffX,
+          realOffY,
+        );
+        offX += 1;
       }
-    } else {
-      let offX = 0;
-      let offY = 0;
-      for (const varsetName of VOWEL_VARSET_NAMES) {
-        for (const vowel of curPage.jamos) {
-          const isInvalid = false;
-          const curVarset = varsets.vowel.get(vowel.name)!;
-          const path = getVarset(curVarset, varsetName);
-          const realOffX = offX % nCols;
-          const realOffY =
-            Math.floor(offX / nCols) * (VOWEL_VARSET_NAMES.length + 1) + offY;
-          renderBox(
-            fabricRef.current,
-            overlayFabricRef.current,
-            vowel,
-            varsetName,
-            path,
-            isInvalid,
-            realOffX,
-            realOffY,
-          );
-          offX += 1;
-        }
-        offX = 0;
-        offY += 1;
-      }
+      offX = 0;
+      offY += 1;
     }
 
     updateSelected();
@@ -341,8 +323,7 @@ export function VarsetMapView({
     pages,
     curPageNum,
     onItemClick,
-    varsets.consonants,
-    varsets.vowel,
+    varsets.jamos,
     zoomSize,
     updateSelected,
   ]);

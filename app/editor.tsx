@@ -3,6 +3,8 @@ import {
   Autocomplete,
   FormControl,
   InputLabel,
+  Menu,
+  MenuItem,
   TextField,
 } from "@mui/material";
 import Button from "@mui/material/Button";
@@ -15,21 +17,32 @@ import { VarsetMapView } from "@/app/VarsetMapView";
 import { downloadArrayBufferAsFile } from "@/app/download";
 import { FontProcessor } from "@/app/fontProcessor";
 import { HANGUL_DATA, unicodeNameToHangul } from "@/app/hangulData";
-import { getExampleEnvPaths, getVarset } from "@/app/jamos";
+import {
+  getExampleEnvPaths,
+  getSyllablesFor,
+  getVarset,
+  updateVarset,
+} from "@/app/jamos";
 import { ConsonantInfo, JamoVarsets, VarsetType, VowelInfo } from "@/app/types";
 import useComponentSize from "@/app/useComponentSize";
+import { uniToPua } from "@/app/utils/puaUniConv";
 
 export function Editor({
   fontProcessor,
   previewImage,
   varsets,
+  setVarsets,
 }: {
   fontProcessor: FontProcessor;
   previewImage: string;
   varsets: JamoVarsets;
+  setVarsets: (newVarsets: JamoVarsets) => void;
 }) {
   const [leftDivRef, leftDivSize] = useComponentSize<HTMLDivElement>();
   const [rightDivRef, rightDivSize] = useComponentSize<HTMLDivElement>();
+
+  const [anchorEl, setAnchorEl] = React.useState<HTMLElement | null>(null);
+  const open = Boolean(anchorEl);
 
   type JamoItem = { label: string; name: string; value: string };
   const JAMO_LIST = React.useMemo(
@@ -62,16 +75,19 @@ export function Editor({
     HANGUL_DATA.vowelInfo.get(selectedJamoName);
   const varsetList = getAvailableVarsetList(selectedJamoInfo);
 
-  const curVarsets = (varsets.consonants.get(selectedJamoName) ??
-    varsets.vowel.get(selectedJamoName))!;
+  const curVarsets = varsets.jamos.get(selectedJamoName)!;
   const selectedVarset = getVarset(curVarsets, selectedVarsetName);
 
-  const bgPaths = getExampleEnvPaths(
-    varsets,
-    selectedJamoName,
-    selectedVarsetName,
-    10,
-  ).flat();
+  const bgPaths = React.useMemo(
+    () =>
+      getExampleEnvPaths(
+        varsets,
+        selectedJamoName,
+        selectedVarsetName,
+        10,
+      ).flat(),
+    [varsets, selectedJamoName, selectedVarsetName],
+  );
 
   const updateSelectedItem = useCallback(
     (jamoInfo: ConsonantInfo | VowelInfo, varsetName: VarsetType) => {
@@ -79,6 +95,17 @@ export function Editor({
       setSelectedVarsetName(varsetName);
     },
     [],
+  );
+
+  const syllables = React.useMemo(
+    () =>
+      getSyllablesFor(selectedJamoName, selectedVarsetName, false)
+        .filter((syllable) => {
+          const pua = uniToPua(syllable);
+          return pua.length === 1 && fontProcessor.font?.hasChar(pua);
+        })
+        .toArray(),
+    [selectedJamoName, selectedVarsetName, fontProcessor],
   );
 
   return (
@@ -167,7 +194,6 @@ export function Editor({
                         width={100}
                         height={100}
                         path={getVarset(curVarsets, setName)}
-                        bgPaths={[]}
                         interactive={false}
                       />
                     </AdaptiveSelectItem>
@@ -186,14 +212,43 @@ export function Editor({
                 path={selectedVarset}
                 bgPaths={bgPaths}
                 interactive={true}
+                onResetToSyllable={(target) => setAnchorEl(target)}
               />
+              <Menu
+                anchorEl={anchorEl}
+                open={open}
+                onClose={() => setAnchorEl(null)}
+                style={{ maxHeight: 400 }}
+              >
+                {syllables.map((syllable, idx) => (
+                  <MenuItem
+                    key={idx}
+                    onClick={() => {
+                      setAnchorEl(null);
+                      setVarsets({
+                        ...varsets,
+                        jamos: new Map(varsets.jamos).set(
+                          selectedJamoName,
+                          updateVarset(
+                            curVarsets,
+                            selectedVarsetName,
+                            fontProcessor.getPath(uniToPua(syllable)),
+                          ),
+                        ),
+                      });
+                    }}
+                  >
+                    {syllable}
+                  </MenuItem>
+                ))}
+              </Menu>
               <div className="text-stone-500 text-sm [font-variant:small-caps]">
                 Use ctrl+mouse wheel to zoom, ctrl+drag to pan
               </div>
             </div>
             <div ref={rightDivRef} className="w-2/3 text-stone-700 ps-1">
               <VarsetMapView
-                className="border border-stone-200 rounded-lg"
+                className="outline outline-stone-200"
                 width={rightDivSize.width}
                 varsets={varsets}
                 onItemClick={updateSelectedItem}
