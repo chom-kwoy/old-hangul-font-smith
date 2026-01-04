@@ -168,7 +168,7 @@ export function VarsetMapView({
       offY: number,
     ) {
       const fill = isInvalid
-        ? "oklch(86.9% 0.005 56.366)"
+        ? "#E7E5E4"
         : path
           ? "white"
           : "oklch(89.2% 0.058 10.001)";

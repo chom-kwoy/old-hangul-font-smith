@@ -1,3 +1,6 @@
+import CropIcon from "@mui/icons-material/Crop";
+import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import { IconButton, Tooltip } from "@mui/material";
 import { blue } from "@mui/material/colors";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
@@ -19,7 +22,7 @@ export function GlyphView({
   interactive: boolean;
   path: PathData | null;
   bgPaths: PathData[];
-} & React.ComponentProps<"canvas">) {
+} & React.ComponentProps<"div">) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
 
@@ -203,5 +206,23 @@ export function GlyphView({
     };
   });
 
-  return <canvas ref={canvasRef} {...props} />;
+  return (
+    <div {...props}>
+      {interactive && (
+        <div className="flex bg-stone-200">
+          <Tooltip title="Reset to Full Syllable">
+            <IconButton onClick={() => {}}>
+              <RestartAltIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Crop">
+            <IconButton onClick={() => {}}>
+              <CropIcon />
+            </IconButton>
+          </Tooltip>
+        </div>
+      )}
+      <canvas ref={canvasRef} />
+    </div>
+  );
 }

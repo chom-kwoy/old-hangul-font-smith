@@ -163,7 +163,7 @@ export function Editor({
                     >
                       <span>{description}</span>
                       <GlyphView
-                        className="border border-stone-200 rounded-lg"
+                        className="outline outline-stone-200 rounded-lg overflow-hidden"
                         width={100}
                         height={100}
                         path={getVarset(curVarsets, setName)}
@@ -180,7 +180,7 @@ export function Editor({
           <div className="flex">
             <div ref={leftDivRef} className="w-1/3 pe-1">
               <GlyphView
-                className="border border-stone-200 rounded-lg"
+                className="outline outline-stone-200 rounded-lg overflow-hidden"
                 width={leftDivSize.width}
                 height={leftDivSize.width}
                 path={selectedVarset}
