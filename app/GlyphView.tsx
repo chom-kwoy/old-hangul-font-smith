@@ -1,13 +1,24 @@
+import { is } from "@babel/types";
 import CropIcon from "@mui/icons-material/Crop";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import { IconButton, Tooltip } from "@mui/material";
-import { blue } from "@mui/material/colors";
+import {
+  IconButton,
+  ToggleButton,
+  ToggleButtonGroup,
+  Tooltip,
+} from "@mui/material";
+import { blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
 
 import { toFabricPaths } from "@/app/fabricUtils";
 import { createPathControls } from "@/app/pathControl";
 import { PathData } from "@/app/types";
+
+export enum GlyphViewState {
+  NORMAL,
+  SELECTING,
+}
 
 export function GlyphView({
   width,
@@ -29,6 +40,8 @@ export function GlyphView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
 
+  const [mode, setMode] = React.useState<GlyphViewState>(GlyphViewState.NORMAL);
+
   useEffect(() => {
     if (canvasRef.current === null) {
       return () => {};
@@ -43,6 +56,7 @@ export function GlyphView({
     fabricRef.current = canvas;
 
     let isDragging = false;
+    let isCropping = false;
     let lastPosX: number | null = null;
     let lastPosY: number | null = null;
     function constrainViewport(vpt: fabric.TMat2D) {
@@ -66,6 +80,17 @@ export function GlyphView({
         opt.e.stopPropagation();
         // constrain to glyph area
         constrainViewport(canvas.viewportTransform);
+        // Keep stroke width appear constant regardless of zoom
+        canvas.forEachObject(function (obj_) {
+          // typescript hack
+          const obj = obj_ as typeof obj_ & {
+            originalStrokeWidth: number | undefined;
+          };
+          if (obj.originalStrokeWidth === undefined) {
+            obj.originalStrokeWidth = obj_.strokeWidth;
+          }
+          obj.set("strokeWidth", obj.originalStrokeWidth / zoom);
+        });
       }
     });
     canvas.on("mouse:down", function (opt) {
@@ -80,64 +105,89 @@ export function GlyphView({
           obj.lockMovementX = true;
           obj.lockMovementY = true;
         }
+      } else if (mode == GlyphViewState.SELECTING) {
+        isCropping = true;
       }
     });
     canvas.on("mouse:move", function (opt) {
-      if (isDragging && lastPosX !== null && lastPosY !== null) {
+      if (isDragging) {
+        if (lastPosX !== null && lastPosY !== null) {
+          const e = opt.e as MouseEvent;
+          const vpt = canvas.viewportTransform;
+          vpt[4] += e.clientX - lastPosX;
+          vpt[5] += e.clientY - lastPosY;
+          constrainViewport(vpt);
+          canvas.setViewportTransform(vpt);
+          canvas.requestRenderAll();
+          lastPosX = e.clientX;
+          lastPosY = e.clientY;
+        }
+      } else if (isCropping) {
         const e = opt.e as MouseEvent;
-        const vpt = canvas.viewportTransform;
-        vpt[4] += e.clientX - lastPosX;
-        vpt[5] += e.clientY - lastPosY;
-        constrainViewport(vpt);
-        canvas.setViewportTransform(vpt);
-        canvas.requestRenderAll();
-        lastPosX = e.clientX;
-        lastPosY = e.clientY;
+        console.log("Cropping", e.clientX, e.clientY);
       }
     });
     canvas.on("mouse:up", function () {
       // on mouse up we want to recalculate new interaction
       // for all objects, so we call setViewportTransform
-      canvas.setViewportTransform(canvas.viewportTransform);
-      isDragging = false;
-      canvas.selection = true;
-      for (const obj of canvas.getObjects()) {
-        obj.lockMovementX = false;
-        obj.lockMovementY = false;
+      if (isDragging) {
+        canvas.setViewportTransform(canvas.viewportTransform);
+        isDragging = false;
+        canvas.selection = true;
+        for (const obj of canvas.getObjects()) {
+          obj.lockMovementX = false;
+          obj.lockMovementY = false;
+        }
+      } else if (isCropping) {
+        isCropping = false;
       }
     });
 
     // Add gridlines
-    canvas.add(
-      new fabric.Polyline(
-        [
-          { x: 0, y: 0 },
-          { x: 0, y: height },
-        ],
-        {
-          stroke: "red",
+    const horzGrid = [
+      { x: 0, y: 0 },
+      { x: width, y: 0 },
+    ];
+    const vertGrid = [
+      { x: 0, y: 0 },
+      { x: 0, y: height },
+    ];
+
+    // Minor gridlines
+    const N_MINOR = 10;
+    for (let i = 1; i < N_MINOR; ++i) {
+      canvas.add(
+        new fabric.Polyline(horzGrid, {
           left: width / 2,
-          top: height / 2,
+          top: (i * height) / N_MINOR,
+          stroke: "lightgrey",
           selectable: false,
           evented: false,
-        },
-      ),
-    );
-    canvas.add(
-      new fabric.Polyline(
-        [
-          { x: 0, y: 0 },
-          { x: width, y: 0 },
-        ],
-        {
-          stroke: "red",
-          left: width / 2,
+        }),
+      );
+      canvas.add(
+        new fabric.Polyline(vertGrid, {
+          left: (i * width) / N_MINOR,
           top: height / 2,
+          stroke: "lightgrey",
           selectable: false,
           evented: false,
-        },
-      ),
-    );
+        }),
+      );
+    }
+
+    // Center gridline
+    for (const grid of [horzGrid, vertGrid]) {
+      canvas.add(
+        new fabric.Polyline(grid, {
+          left: width / 2,
+          top: height / 2,
+          stroke: "red",
+          selectable: false,
+          evented: false,
+        }),
+      );
+    }
 
     for (const path of bgPaths) {
       canvas.add(
@@ -145,9 +195,9 @@ export function GlyphView({
           selectable: false,
           evented: false,
           strokeWidth: 2,
-          stroke: "grey",
+          stroke: teal[800],
           fill: "transparent",
-          opacity: 0.7,
+          opacity: 0.3,
         }),
       );
     }
@@ -158,15 +208,18 @@ export function GlyphView({
           ...toFabricPaths(path, width, height, {
             selectable: false,
             evented: false,
-            fill: "blue",
-            opacity: 0.1,
+            fill: blue[500],
+            opacity: 0.3,
           }),
         );
       }
 
+      const pathSelectable =
+        mode === GlyphViewState.SELECTING ? false : interactive;
       const fabricPaths = toFabricPaths(path, width, height, {
-        selectable: interactive,
-        evented: interactive,
+        selectable: pathSelectable,
+        evented: pathSelectable,
+        fill: mode === GlyphViewState.SELECTING ? "grey" : "black",
       });
 
       for (const fabricPath of fabricPaths) {
@@ -207,28 +260,40 @@ export function GlyphView({
         fabricRef.current.dispose();
       }
     };
-  });
+  }, [width, height, mode, path, bgPaths, interactive]);
 
   return (
     <div {...props}>
       {interactive && (
         <div className="flex bg-stone-200">
-          <Tooltip title="Reset to Full Syllable">
-            <IconButton
-              onClick={(event) => {
-                if (onResetToSyllable) {
-                  onResetToSyllable(event.currentTarget);
-                }
-              }}
-            >
+          <IconButton
+            onClick={(event) => {
+              if (onResetToSyllable) {
+                onResetToSyllable(event.currentTarget);
+              }
+            }}
+          >
+            <Tooltip title="Reset to Full Syllable">
               <RestartAltIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Crop">
-            <IconButton onClick={() => {}}>
-              <CropIcon />
-            </IconButton>
-          </Tooltip>
+            </Tooltip>
+          </IconButton>
+          <ToggleButtonGroup
+            value={mode === GlyphViewState.SELECTING ? "select" : null}
+            exclusive
+            onChange={(event, newValue) => {
+              setMode(
+                newValue === "select"
+                  ? GlyphViewState.SELECTING
+                  : GlyphViewState.NORMAL,
+              );
+            }}
+          >
+            <ToggleButton value={"select"}>
+              <Tooltip title="Select Elements">
+                <CropIcon />
+              </Tooltip>
+            </ToggleButton>
+          </ToggleButtonGroup>
         </div>
       )}
       <canvas ref={canvasRef} />
