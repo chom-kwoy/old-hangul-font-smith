@@ -23,7 +23,13 @@ import {
   getVarset,
   updateVarset,
 } from "@/app/jamos";
-import { ConsonantInfo, JamoVarsets, VarsetType, VowelInfo } from "@/app/types";
+import {
+  ConsonantInfo,
+  JamoVarsets,
+  PathData,
+  VarsetType,
+  VowelInfo,
+} from "@/app/types";
 import useComponentSize from "@/app/useComponentSize";
 import { uniToPua } from "@/app/utils/puaUniConv";
 
@@ -106,6 +112,19 @@ export function Editor({
         })
         .toArray(),
     [selectedJamoName, selectedVarsetName, fontProcessor],
+  );
+
+  const setCurrentPath = React.useCallback(
+    (newPath: PathData | null) => {
+      setVarsets({
+        ...varsets,
+        jamos: new Map(varsets.jamos).set(
+          selectedJamoName,
+          updateVarset(curVarsets, selectedVarsetName, newPath),
+        ),
+      });
+    },
+    [varsets, setVarsets, curVarsets, selectedJamoName, selectedVarsetName],
   );
 
   return (
@@ -213,6 +232,7 @@ export function Editor({
                 bgPaths={bgPaths}
                 interactive={true}
                 onResetToSyllable={(target) => setAnchorEl(target)}
+                onPathChanged={(newPath) => setCurrentPath(newPath)}
               />
               <Menu
                 anchorEl={anchorEl}
@@ -225,17 +245,7 @@ export function Editor({
                     key={idx}
                     onClick={() => {
                       setAnchorEl(null);
-                      setVarsets({
-                        ...varsets,
-                        jamos: new Map(varsets.jamos).set(
-                          selectedJamoName,
-                          updateVarset(
-                            curVarsets,
-                            selectedVarsetName,
-                            fontProcessor.getPath(uniToPua(syllable)),
-                          ),
-                        ),
-                      });
+                      setCurrentPath(fontProcessor.getPath(uniToPua(syllable)));
                     }}
                   >
                     {syllable}

@@ -29,6 +29,7 @@ export function GlyphView({
   width,
   height,
   path,
+  onPathChanged,
   bgPaths,
   interactive,
   onResetToSyllable,
@@ -38,6 +39,7 @@ export function GlyphView({
   height: number;
   interactive: boolean;
   path: PathData | null;
+  onPathChanged?: (newPath: PathData | null) => void;
   bgPaths?: PathData[];
   onResetToSyllable?: (target: HTMLElement) => void;
 } & React.ComponentProps<"div">) {
@@ -53,7 +55,6 @@ export function GlyphView({
       return () => {};
     }
 
-    console.log(path);
     pathRef.current = structuredClone(path);
 
     // Initialize the Fabric canvas
@@ -336,7 +337,14 @@ export function GlyphView({
             </ToggleButton>
           </ToggleButtonGroup>
           {mode == GlyphViewState.SELECTING && (
-            <IconButton onClick={() => {}}>
+            <IconButton
+              onClick={() => {
+                setMode(GlyphViewState.NORMAL);
+                if (onPathChanged) {
+                  onPathChanged(pathRef.current);
+                }
+              }}
+            >
               <Tooltip title="Done">
                 <CheckIcon />
               </Tooltip>

@@ -190,7 +190,6 @@ export class FontProcessor {
     if (!this.font) {
       throw new Error("Call loadFont() first.");
     }
-    console.log(c);
     const glyph = this.font.charToGlyph(c);
     return this.toPathData(glyph.path);
   }
