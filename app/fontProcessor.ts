@@ -159,7 +159,11 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             const bezier = this.toPathData(glyph.path);
-            sets[varsetName] = extractVowel(bezier, jamo.position, false);
+            sets[varsetName] = extractVowel(
+              bezier,
+              jamo.position,
+              ["v3", "v4"].includes(varsetName),
+            );
             break;
           }
         }

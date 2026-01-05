@@ -1,7 +1,9 @@
 import paper from "paper";
 
 // Initialize paper.js context
-paper.setup([100, 100]);
+// @ts-expect-error no argument is also allowed
+paper.setup();
+paper.settings.insertItems = false;
 
 export function replacer<T>(key: string, value: T) {
   if (value instanceof Map) {

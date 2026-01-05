@@ -9,6 +9,7 @@ import {
 } from "@mui/material";
 import { blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
+import paper from "paper";
 import React, { useEffect, useRef } from "react";
 
 import { intersectCompoundPath } from "@/app/bezier";
