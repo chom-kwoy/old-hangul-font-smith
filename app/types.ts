@@ -1,3 +1,5 @@
+import { TSimplePathData } from "fabric";
+
 export type FontMetadata = {
   name: string;
   family: string;
@@ -31,36 +33,16 @@ export type JamoVarsets = {
 };
 
 export type PathData = {
-  paths: paper.CompoundPath[];
+  paths: TSimplePathData[];
 };
 
 export type ConsonantSets = {
   type: "consonant";
-  canon: PathData | null; // 단독꼴
-  // leading
-  l1: PathData | null; // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-  l2: PathData | null; // 받침없는 ㅗ ㅛ ㅡ
-  l3: PathData | null; // 받침없는 ㅜ ㅠ
-  l4: PathData | null; // 받침없는 ㅘ ㅙ ㅚ ㅢ
-  l5: PathData | null; // 받침없는 ㅝ ㅞ ㅟ
-  l6: PathData | null; // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-  l7: PathData | null; // 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
-  l8: PathData | null; // 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-  // trailing
-  t1: PathData | null; // 중성 ㅏ ㅑ ㅘ 와 결합
-  t2: PathData | null; // 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-  t3: PathData | null; // 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-  t4: PathData | null; // 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
-};
+} & Record<ConsonantVarsetType, PathData | null>;
 
 export type VowelSets = {
   type: "vowel";
-  canon: PathData | null; // 단독꼴
-  v1: PathData | null; // 받침없는 [ㄱ ㅋ]과 결합
-  v2: PathData | null; // 받침없는 [ㄱ ㅋ] 제외
-  v3: PathData | null; // 받침있는 [ㄱ ㅋ]과 결합
-  v4: PathData | null; // 받침있는 [ㄱ ㅋ] 제외
-};
+} & Record<VowelVarsetType, PathData | null>;
 
 export type Bounds = {
   left: number;
@@ -69,24 +51,27 @@ export type Bounds = {
   bottom: number;
 };
 
-export type VarsetType =
-  | "canon"
-  | "l1"
-  | "l2"
-  | "l3"
-  | "l4"
-  | "l5"
-  | "l6"
-  | "l7"
-  | "l8"
-  | "v1"
-  | "v2"
-  | "v3"
-  | "v4"
-  | "t1"
-  | "t2"
-  | "t3"
-  | "t4";
+export type ConsonantVarsetType =
+  | "canon" // 단독꼴
+  | "l1" // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
+  | "l2" // 받침없는 ㅗ ㅛ ㅡ
+  | "l3" // 받침없는 ㅜ ㅠ
+  | "l4" // 받침없는 ㅘ ㅙ ㅚ ㅢ
+  | "l5" // 받침없는 ㅝ ㅞ ㅟ
+  | "l6" // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
+  | "l7" // 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
+  | "l8" // 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
+  | "t1" // 중성 ㅏ ㅑ ㅘ 와 결합
+  | "t2" // 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
+  | "t3" // 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
+  | "t4"; // 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
+export type VowelVarsetType =
+  | "canon" // 단독꼴
+  | "v1" // 받침없는 [ㄱ ㅋ]과 결합
+  | "v2" // 받침없는 [ㄱ ㅋ] 제외
+  | "v3" // 받침있는 [ㄱ ㅋ]과 결합
+  | "v4"; // 받침있는 [ㄱ ㅋ] 제외
+export type VarsetType = ConsonantVarsetType | VowelVarsetType;
 
 export type SavedState = {
   metadata: FontMetadata;
@@ -94,4 +79,10 @@ export type SavedState = {
   jamoVarsets: JamoVarsets;
   progress: number;
   date: number;
+};
+
+export type JamoPref = {
+  leadingPref?: string[];
+  vowelPref?: string[];
+  trailingPref?: string[];
 };

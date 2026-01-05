@@ -1,8 +1,13 @@
 import opentype from "opentype.js";
 
-import { intersectBezier, opentypeToPathData } from "@/app/bezier";
+import { intersectPathData, opentypeToPathData } from "@/app/bezier";
 import { HANGUL_DATA } from "@/app/hangulData";
-import { getSyllablesFor } from "@/app/jamos";
+import { CONSONANT_JAMO_BOUNDS, VOWEL_JAMO_BOUNDS } from "@/app/jamoBounds";
+import {
+  CONSONANT_VARSET_NAMES,
+  VOWEL_VARSET_NAMES,
+  getSyllablesFor,
+} from "@/app/jamos";
 import schedulerYield from "@/app/schedulerYield";
 import {
   ConsonantSets,
@@ -81,292 +86,43 @@ export class FontProcessor {
     for (const jamo of consonantInfo.values()) {
       const sets: ConsonantSets = {
         type: "consonant",
-        canon: null, // 단독꼴
-        // leading
-        l1: null, // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        l2: null, // 받침없는 ㅗ ㅛ ㅡ
-        l3: null, // 받침없는 ㅜ ㅠ
-        l4: null, // 받침없는 ㅘ ㅙ ㅚ ㅢ
-        l5: null, // 받침없는 ㅝ ㅞ ㅟ
-        l6: null, // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        l7: null, // 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
-        l8: null, // 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-        // trailing
-        t1: null, // 중성 ㅏ ㅑ ㅘ 와 결합
-        t2: null, // 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-        t3: null, // 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-        t4: null, // 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
+        canon: null,
+        l1: null,
+        l2: null,
+        l3: null,
+        l4: null,
+        l5: null,
+        l6: null,
+        l7: null,
+        l8: null,
+        t1: null,
+        t2: null,
+        t3: null,
+        t4: null,
       };
       // canonical form
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
-        // console.log(jamo.canonical, glyph.name);
         sets.canon = this.toPathData(glyph.path);
       }
-      if (jamo.leading !== null) {
-        // set 1: 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        for (const syllable of getSyllablesFor(jamo.leading, "l1", true, {
-          vowelPref: ["ㅒ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.l1 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 600,
-                top: 0,
-                bottom: 1000,
-              },
-            ]);
-            break;
-          }
+      for (const varsetName of CONSONANT_VARSET_NAMES) {
+        if (
+          varsetName === "canon" ||
+          (varsetName.startsWith("l") && jamo.leading === null) ||
+          (varsetName.startsWith("t") && jamo.trailing === null)
+        ) {
+          continue;
         }
-        // set 2: 받침없는 ㅗ ㅛ ㅡ
-        for (const syllable of getSyllablesFor(jamo.leading, "l2", true, {
-          vowelPref: ["ㅡ"],
-        })) {
+        const [bounds, prefs] = CONSONANT_JAMO_BOUNDS[varsetName];
+        const syllables = getSyllablesFor(jamo.name, varsetName, true, prefs);
+        for (const syllable of syllables) {
           if (
             Array.from(syllable).length === 1 &&
             this.font.hasChar(syllable)
           ) {
             const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
             const bezier = this.toPathData(glyph.path);
-            sets.l2 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 1000,
-                top: 0,
-                bottom: 500,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 3: 받침없는 ㅜ ㅠ
-        for (const syllable of getSyllablesFor(jamo.leading, "l3", true, {
-          vowelPref: ["ㅜ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.l3 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 1000,
-                top: 0,
-                bottom: 500,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 4: 받침없는 ㅘ ㅙ ㅚ ㅢ
-        for (const syllable of getSyllablesFor(jamo.leading, "l4", true, {
-          vowelPref: ["ㅢ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.l4 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 600,
-                top: 0,
-                bottom: 500,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 5: 받침없는 ㅝ ㅞ ㅟ
-        for (const syllable of getSyllablesFor(jamo.leading, "l5", true, {
-          vowelPref: ["ㅝ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.l5 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 600,
-                top: 0,
-                bottom: 500,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 6: 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-        for (const syllable of getSyllablesFor(jamo.leading, "l6", true, {
-          vowelPref: ["ㅏ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.l6 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 600,
-                top: 0,
-                bottom: 500,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 7: 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
-        for (const syllable of getSyllablesFor(jamo.leading, "l7", true, {
-          vowelPref: ["ㅡ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.l7 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 1000,
-                top: 0,
-                bottom: 400,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 8: 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-        for (const syllable of getSyllablesFor(jamo.leading, "l8", true, {
-          vowelPref: ["ㅢ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.l8 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 600,
-                top: 0,
-                bottom: 400,
-              },
-            ]);
-            break;
-          }
-        }
-      }
-      if (jamo.trailing !== null) {
-        // set 1: 중성 ㅏ ㅑ ㅘ 와 결합
-        for (const syllable of getSyllablesFor(jamo.trailing, "t1", true, {
-          vowelPref: ["ㅏ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.t1 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 1000,
-                top: 500,
-                bottom: 1000,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 2: 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-        for (const syllable of getSyllablesFor(jamo.trailing, "t2", true, {
-          vowelPref: ["ㅓ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.t2 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 1000,
-                top: 500,
-                bottom: 1000,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 3: 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-        for (const syllable of getSyllablesFor(jamo.trailing, "t3", true, {
-          vowelPref: ["ㅐ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.t3 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 1000,
-                top: 500,
-                bottom: 1000,
-              },
-            ]);
-            break;
-          }
-        }
-        // set 4: 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
-        for (const syllable of getSyllablesFor(jamo.trailing, "t4", true, {
-          vowelPref: ["ㅗ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.t4 = intersectBezier(bezier, [
-              {
-                left: 0,
-                right: 1000,
-                top: 500,
-                bottom: 1000,
-              },
-            ]);
+            sets[varsetName] = intersectPathData(bezier, bounds);
             break;
           }
         }
@@ -375,81 +131,35 @@ export class FontProcessor {
 
       await schedulerYield();
     }
+
     for (const jamo of vowelInfo.values()) {
       const sets: VowelSets = {
         type: "vowel",
-        canon: null, // 단독꼴
-        v1: null, // 받침없는 [ㄱ ㅋ]과 결합
-        v2: null, // 받침없는 [ㄱ ㅋ] 제외
-        v3: null, // 받침있는 [ㄱ ㅋ]과 결합
-        v4: null, // 받침있는 [ㄱ ㅋ] 제외
+        canon: null,
+        v1: null,
+        v2: null,
+        v3: null,
+        v4: null,
       };
       // canonical form
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
-        // console.log(jamo.canonical, glyph.name);
         sets.canon = this.toPathData(glyph.path);
       }
-      if (jamo.vowel !== null) {
-        // set 1: 받침없는 [ㄱ ㅋ]과 결합
-        for (const syllable of getSyllablesFor(jamo.vowel, "v1", true, {
-          leadingPref: ["ㅋ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.v1 = extractVowel(bezier, jamo.position, false);
-            break;
-          }
+      for (const varsetName of VOWEL_VARSET_NAMES) {
+        if (varsetName === "canon" || jamo.vowel === null) {
+          continue;
         }
-        // set 2: 받침없는 [ㄱ ㅋ] 제외
-        for (const syllable of getSyllablesFor(jamo.vowel, "v2", true, {
-          leadingPref: ["ㅂ"],
-        })) {
+        const prefs = VOWEL_JAMO_BOUNDS[varsetName];
+        const syllables = getSyllablesFor(jamo.name, varsetName, true, prefs);
+        for (const syllable of syllables) {
           if (
             Array.from(syllable).length === 1 &&
             this.font.hasChar(syllable)
           ) {
             const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
             const bezier = this.toPathData(glyph.path);
-            sets.v2 = extractVowel(bezier, jamo.position, false);
-            break;
-          }
-        }
-        // set 3: 받침있는 [ㄱ ㅋ]과 결합
-        for (const syllable of getSyllablesFor(jamo.vowel, "v3", true, {
-          leadingPref: ["ㅋ"],
-          trailingPref: ["ㄱ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.v3 = extractVowel(bezier, jamo.position, true);
-            break;
-          }
-        }
-        // set 4: 받침있는 [ㄱ ㅋ] 제외
-        for (const syllable of getSyllablesFor(jamo.vowel, "v4", true, {
-          leadingPref: ["ㅂ"],
-          trailingPref: ["ㄱ"],
-        })) {
-          if (
-            Array.from(syllable).length === 1 &&
-            this.font.hasChar(syllable)
-          ) {
-            const glyph = this.font.charToGlyph(syllable);
-            // console.log(syllable, glyph.name);
-            const bezier = this.toPathData(glyph.path);
-            sets.v4 = extractVowel(bezier, jamo.position, true);
+            sets[varsetName] = extractVowel(bezier, jamo.position, false);
             break;
           }
         }
@@ -503,7 +213,7 @@ function extractVowel(
 ) {
   let extracted;
   if (position === "right") {
-    extracted = intersectBezier(bezier, [
+    extracted = intersectPathData(bezier, [
       {
         left: 500,
         right: 1000,
@@ -512,7 +222,7 @@ function extractVowel(
       },
     ]);
   } else if (position === "under") {
-    extracted = intersectBezier(bezier, [
+    extracted = intersectPathData(bezier, [
       {
         left: 0,
         right: 1000,
@@ -521,7 +231,7 @@ function extractVowel(
       },
     ]);
   } else if (position === "mixed") {
-    extracted = intersectBezier(bezier, [
+    extracted = intersectPathData(bezier, [
       {
         left: 500,
         right: 1000,

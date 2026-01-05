@@ -38,6 +38,9 @@ export enum AppState {
   ERROR,
 }
 
+const FONT_MIME_TYPES =
+  "font/otf, font/ttf, application/x-font-opentype, application/x-font-truetype";
+
 export default function Home() {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [errorMsg, setErrorMsg] = useState<string>("Unknown error.");
@@ -118,6 +121,7 @@ export default function Home() {
   async function loadSavedFont(index: number, saved: SavedState) {
     const input = document.createElement("input");
     input.type = "file";
+    input.accept = FONT_MIME_TYPES;
     input.onchange = async () => {
       const files = input.files;
       if (!files || !files.length) {
@@ -304,6 +308,7 @@ export default function Home() {
                   Upload font file
                   <VisuallyHiddenInput
                     type="file"
+                    accept={FONT_MIME_TYPES}
                     onChange={(event) => handleFileChange(event.target.files)}
                   />
                 </Button>

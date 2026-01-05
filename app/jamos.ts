@@ -10,14 +10,17 @@ import {
 import {
   ConsonantInfo,
   ConsonantSets,
+  ConsonantVarsetType,
+  JamoPref,
   JamoVarsets,
   PathData,
   VarsetType,
   VowelInfo,
   VowelSets,
+  VowelVarsetType,
 } from "@/app/types";
 
-export const CONSONANT_VARSET_NAMES: VarsetType[] = [
+export const CONSONANT_VARSET_NAMES: ConsonantVarsetType[] = [
   "canon",
   "l1",
   "l2",
@@ -33,7 +36,7 @@ export const CONSONANT_VARSET_NAMES: VarsetType[] = [
   "t4",
 ];
 
-export const VOWEL_VARSET_NAMES: VarsetType[] = [
+export const VOWEL_VARSET_NAMES: VowelVarsetType[] = [
   "canon",
   "v1",
   "v2",
@@ -46,15 +49,15 @@ export function getVarset(
   varsetName: VarsetType,
 ): PathData | null {
   if (varsets.type === "consonant") {
-    if (CONSONANT_VARSET_NAMES.includes(varsetName)) {
-      // @ts-expect-error ignore error
-      return varsets[varsetName] as PathData | null;
+    const v = varsetName as ConsonantVarsetType;
+    if (CONSONANT_VARSET_NAMES.includes(v)) {
+      return varsets[v] as PathData | null;
     }
     return null;
   } else {
-    if (VOWEL_VARSET_NAMES.includes(varsetName)) {
-      // @ts-expect-error ignore error
-      return varsets[varsetName] as PathData | null;
+    const v = varsetName as VowelVarsetType;
+    if (VOWEL_VARSET_NAMES.includes(v)) {
+      return varsets[v] as PathData | null;
     }
     return null;
   }
@@ -66,14 +69,14 @@ export function setVarset(
   data: PathData | null,
 ): PathData | null {
   if (varsets.type === "consonant") {
-    if (CONSONANT_VARSET_NAMES.includes(varsetName)) {
-      // @ts-expect-error ignore error
-      varsets[varsetName] = data;
+    const v = varsetName as ConsonantVarsetType;
+    if (CONSONANT_VARSET_NAMES.includes(v)) {
+      varsets[v] = data;
     }
   } else if (varsets.type === "vowel") {
-    if (VOWEL_VARSET_NAMES.includes(varsetName)) {
-      // @ts-expect-error ignore error
-      varsets[varsetName] = data;
+    const v = varsetName as VowelVarsetType;
+    if (VOWEL_VARSET_NAMES.includes(v)) {
+      varsets[v] = data;
     }
   }
   return null;
@@ -85,17 +88,19 @@ export function updateVarset(
   data: PathData | null,
 ): ConsonantSets | VowelSets {
   if (varsets.type === "consonant") {
-    if (CONSONANT_VARSET_NAMES.includes(varsetName)) {
+    const v = varsetName as ConsonantVarsetType;
+    if (CONSONANT_VARSET_NAMES.includes(v)) {
       return {
         ...varsets,
-        [varsetName]: data,
+        [v]: data,
       };
     }
   } else if (varsets.type === "vowel") {
-    if (VOWEL_VARSET_NAMES.includes(varsetName)) {
+    const v = varsetName as VowelVarsetType;
+    if (VOWEL_VARSET_NAMES.includes(v)) {
       return {
         ...varsets,
-        [varsetName]: data,
+        [v]: data,
       };
     }
   }
@@ -149,15 +154,7 @@ export function* getSyllablesFor(
   jamoName: string,
   varsetName: VarsetType,
   precompose: boolean = true,
-  {
-    leadingPref,
-    vowelPref,
-    trailingPref,
-  }: {
-    leadingPref?: string[];
-    vowelPref?: string[];
-    trailingPref?: string[];
-  } = {},
+  { leadingPref, vowelPref, trailingPref }: JamoPref = {},
 ): Generator<string> {
   const leadings = new Set([
     ...(leadingPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
