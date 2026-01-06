@@ -82,9 +82,7 @@ export class FontProcessor {
     }
     const { consonantInfo, vowelInfo } = HANGUL_DATA;
 
-    const result = {
-      jamos: new Map<string, ConsonantSets | VowelSets>(),
-    };
+    const result: JamoVarsets = {};
 
     for (const jamo of consonantInfo.values()) {
       const sets: ConsonantSets = {
@@ -130,7 +128,7 @@ export class FontProcessor {
           }
         }
       }
-      result.jamos.set(jamo.name, sets);
+      result[jamo.name] = sets;
 
       await schedulerYield();
     }
@@ -171,7 +169,7 @@ export class FontProcessor {
           }
         }
       }
-      result.jamos.set(jamo.name, sets);
+      result[jamo.name] = sets;
 
       await schedulerYield();
     }

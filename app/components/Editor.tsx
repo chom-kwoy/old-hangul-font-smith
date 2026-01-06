@@ -16,18 +16,18 @@ import { GlyphView } from "@/app/components/GlyphView";
 import { VarsetMapView } from "@/app/components/VarsetMapView";
 import useComponentSize from "@/app/hooks/useComponentSize";
 import { FontProcessor } from "@/app/processors/fontProcessor";
+import { pathUpdated } from "@/app/redux/features/font/font-slice";
+import { useAppDispatch, useAppSelector } from "@/app/redux/hooks";
 import { downloadArrayBufferAsFile } from "@/app/utils/download";
 import { HANGUL_DATA, unicodeNameToHangul } from "@/app/utils/hangulData";
 import {
   getExampleEnvPaths,
   getSyllablesFor,
   getVarset,
-  updateVarset,
 } from "@/app/utils/jamos";
 import { uniToPua } from "@/app/utils/puaUniConv";
 import {
   ConsonantInfo,
-  JamoVarsets,
   PathData,
   VarsetType,
   VowelInfo,
@@ -36,14 +36,13 @@ import {
 export function Editor({
   fontProcessor,
   previewImage,
-  varsets,
-  setVarsets,
 }: {
   fontProcessor: FontProcessor;
   previewImage: string;
-  varsets: JamoVarsets;
-  setVarsets: (newVarsets: JamoVarsets) => void;
 }) {
+  const jamoVarsets = useAppSelector((state) => state.font.jamoVarsets!);
+  const dispatch = useAppDispatch();
+
   const [leftDivRef, leftDivSize] = useComponentSize<HTMLDivElement>();
   const [rightDivRef, rightDivSize] = useComponentSize<HTMLDivElement>();
 
@@ -81,18 +80,18 @@ export function Editor({
     HANGUL_DATA.vowelInfo.get(selectedJamoName);
   const varsetList = getAvailableVarsetList(selectedJamoInfo);
 
-  const curVarsets = varsets.jamos.get(selectedJamoName)!;
+  const curVarsets = jamoVarsets[selectedJamoName];
   const selectedVarset = getVarset(curVarsets, selectedVarsetName);
 
   const bgPaths = React.useMemo(
     () =>
       getExampleEnvPaths(
-        varsets,
+        jamoVarsets,
         selectedJamoName,
         selectedVarsetName,
         10,
       ).flat(),
-    [varsets, selectedJamoName, selectedVarsetName],
+    [jamoVarsets, selectedJamoName, selectedVarsetName],
   );
 
   const updateSelectedItem = useCallback(
@@ -116,15 +115,15 @@ export function Editor({
 
   const setCurrentPath = React.useCallback(
     (newPath: PathData | null) => {
-      setVarsets({
-        ...varsets,
-        jamos: new Map(varsets.jamos).set(
-          selectedJamoName,
-          updateVarset(curVarsets, selectedVarsetName, newPath),
-        ),
-      });
+      dispatch(
+        pathUpdated({
+          jamoName: selectedJamoName,
+          varsetName: selectedVarsetName,
+          path: newPath,
+        }),
+      );
     },
-    [varsets, setVarsets, curVarsets, selectedJamoName, selectedVarsetName],
+    [dispatch, selectedJamoName, selectedVarsetName],
   );
 
   return (
@@ -182,6 +181,7 @@ export function Editor({
               <FormControl fullWidth>
                 <InputLabel id="varset-select-label">Variant Set</InputLabel>
                 <AdaptiveSelect
+                  variant="outlined"
                   labelId="varset-select-label"
                   label={"Variant Set"}
                   value={selectedVarsetName}
@@ -260,7 +260,7 @@ export function Editor({
               <VarsetMapView
                 className="outline outline-stone-200"
                 width={rightDivSize.width}
-                varsets={varsets}
+                varsets={jamoVarsets}
                 onItemClick={updateSelectedItem}
                 selectedJamoName={selectedJamoName}
                 selectedVarsetName={selectedVarsetName}

@@ -28,9 +28,7 @@ export type VowelInfo = {
   doubleVertical: boolean; // e.g. ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ
 };
 
-export type JamoVarsets = {
-  jamos: Map<string, ConsonantSets | VowelSets>;
-};
+export type JamoVarsets = Record<string, ConsonantSets | VowelSets>;
 
 export type PathData = {
   paths: TSimplePathData[];

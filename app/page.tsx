@@ -5,29 +5,24 @@ import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { IconButton, Menu, MenuItem } from "@mui/material";
 import Button from "@mui/material/Button";
-import { styled } from "@mui/system";
 import moment from "moment";
+import paper from "paper";
 import React, { useEffect, useState } from "react";
 import { useLocalStorage } from "react-use";
 
 import { Editor } from "@/app/components/Editor";
+import { VisuallyHiddenInput } from "@/app/components/VisuallyHiddenInput";
 import { FontProcessor } from "@/app/processors/fontProcessor";
+import { fontLoaded } from "@/app/redux/features/font/font-slice";
+import { useAppDispatch } from "@/app/redux/hooks";
 import { getProgress } from "@/app/utils/jamos";
 import schedulerYield from "@/app/utils/schedulerYield";
-import { replacer, reviver } from "@/app/utils/serialize";
-import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
+import { FontMetadata, SavedState } from "@/app/utils/types";
 
-const VisuallyHiddenInput = styled("input")({
-  clip: "rect(0 0 0 0)",
-  clipPath: "inset(50%)",
-  height: 1,
-  overflow: "hidden",
-  position: "absolute",
-  bottom: 0,
-  left: 0,
-  whiteSpace: "nowrap",
-  width: 1,
-});
+// Initialize paper.js context
+// @ts-expect-error no argument is also allowed
+paper.setup();
+paper.settings.insertItems = false;
 
 export enum AppState {
   IDLE,
@@ -47,7 +42,9 @@ export default function Home() {
   const [fontProcessor] = useState(() => new FontProcessor());
   const [fontMetadata, setFontMetadata] = useState<FontMetadata | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [varsets, setVarsets] = useState<JamoVarsets | null>(null);
+
+  // Redux dispatch action
+  const dispatch = useAppDispatch();
 
   // State for the saved fonts popup menu
   const [anchorEl, setAnchorEl] = React.useState<HTMLButtonElement | null>(
@@ -62,11 +59,6 @@ export default function Home() {
   const [savedFonts_, setSavedFonts] = useLocalStorage<SavedState[]>(
     "saved-fonts",
     [],
-    {
-      raw: false,
-      serializer: (value) => JSON.stringify(value, replacer),
-      deserializer: (json) => JSON.parse(json, reviver),
-    },
   );
 
   // Workaround for hydration mismatch error
@@ -93,7 +85,7 @@ export default function Home() {
     setFontMetadata(metadata);
 
     const varsets = await fontProcessor.analyzeJamoVarsets();
-    setVarsets(varsets);
+    dispatch(fontLoaded(varsets));
 
     const sampleImage = fontProcessor.getSampleImage(
       "유월 활짝 편 배꽃들 밑에 요 콩새야,",
@@ -144,7 +136,7 @@ export default function Home() {
 
       setFontMetadata(loadedMetadata);
       setPreviewImage(saved.previewImage);
-      setVarsets(saved.jamoVarsets);
+      dispatch(fontLoaded(saved.jamoVarsets));
 
       setAppState(AppState.READY_TO_GENERATE);
 
@@ -345,14 +337,11 @@ export default function Home() {
         {(appState === AppState.READY_TO_GENERATE ||
           appState === AppState.GENERATING ||
           appState === AppState.COMPLETED) &&
-          previewImage &&
-          varsets && (
+          previewImage && (
             <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
               <Editor
                 fontProcessor={fontProcessor}
                 previewImage={previewImage}
-                varsets={varsets}
-                setVarsets={setVarsets}
               />
             </section>
           )}

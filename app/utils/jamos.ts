@@ -63,50 +63,6 @@ export function getVarset(
   }
 }
 
-export function setVarset(
-  varsets: ConsonantSets | VowelSets,
-  varsetName: VarsetType,
-  data: PathData | null,
-): PathData | null {
-  if (varsets.type === "consonant") {
-    const v = varsetName as ConsonantVarsetType;
-    if (CONSONANT_VARSET_NAMES.includes(v)) {
-      varsets[v] = data;
-    }
-  } else if (varsets.type === "vowel") {
-    const v = varsetName as VowelVarsetType;
-    if (VOWEL_VARSET_NAMES.includes(v)) {
-      varsets[v] = data;
-    }
-  }
-  return null;
-}
-
-export function updateVarset(
-  varsets: ConsonantSets | VowelSets,
-  varsetName: VarsetType,
-  data: PathData | null,
-): ConsonantSets | VowelSets {
-  if (varsets.type === "consonant") {
-    const v = varsetName as ConsonantVarsetType;
-    if (CONSONANT_VARSET_NAMES.includes(v)) {
-      return {
-        ...varsets,
-        [v]: data,
-      };
-    }
-  } else if (varsets.type === "vowel") {
-    const v = varsetName as VowelVarsetType;
-    if (VOWEL_VARSET_NAMES.includes(v)) {
-      return {
-        ...varsets,
-        [v]: data,
-      };
-    }
-  }
-  return varsets;
-}
-
 const KIYEOK_LIKE = ["KIYEOK", "KIYEOK-KIYEOK", "KHIEUKH"];
 
 function getJamoForm(
@@ -360,7 +316,7 @@ export function getExampleEnvPaths(
     const combination: PathData[] = [];
     if (varsetType !== "l") {
       const varset = getVarset(
-        varsets.jamos.get(leading)!,
+        varsets[leading],
         getJamoForm("l", leading, vowel, trailing),
       );
       if (varset === null) {
@@ -370,7 +326,7 @@ export function getExampleEnvPaths(
     }
     if (varsetType !== "v") {
       const varset = getVarset(
-        varsets.jamos.get(vowel)!,
+        varsets[vowel],
         getJamoForm("v", leading, vowel, trailing),
       );
       if (varset === null) {
@@ -380,7 +336,7 @@ export function getExampleEnvPaths(
     }
     if (varsetType !== "t" && trailing !== "") {
       const varset = getVarset(
-        varsets.jamos.get(trailing)!,
+        varsets[trailing],
         getJamoForm("t", leading, vowel, trailing),
       );
       if (varset === null) {
@@ -407,7 +363,7 @@ function shuffle<T>(arr: T[]): T[] {
 export function getProgress(varsets: JamoVarsets) {
   let total = 0;
   let progress = 0;
-  for (const [jamoName, varset] of varsets.jamos.entries()) {
+  for (const [jamoName, varset] of Object.entries(varsets)) {
     for (const varsetName of varset.type === "consonant"
       ? CONSONANT_VARSET_NAMES
       : VOWEL_VARSET_NAMES) {

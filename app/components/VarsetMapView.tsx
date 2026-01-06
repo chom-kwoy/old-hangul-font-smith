@@ -114,7 +114,7 @@ export function VarsetMapView({
               `${jamo.name}/${varsetName}`,
             );
             if (objects) {
-              const newVarset = newVarsets.jamos.get(jamo.name)!;
+              const newVarset = newVarsets[jamo.name];
               const newPath = getVarset(newVarset, varsetName);
               if (objects.path !== newPath) {
                 objects.mainPaths.removeAll();
@@ -346,7 +346,7 @@ export function VarsetMapView({
             ? (jamo.leading === null && varsetName.startsWith("l")) ||
               (jamo.trailing === null && varsetName.startsWith("t"))
             : jamo.vowel === null && varsetName.startsWith("v");
-        const curVarset = varsetRef.current.jamos.get(jamo.name)!;
+        const curVarset = varsetRef.current[jamo.name];
         const path = getVarset(curVarset, varsetName);
         const realOffX = offX % nCols;
         const realOffY = Math.floor(offX / nCols) * ySkip + offY;
