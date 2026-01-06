@@ -3,8 +3,9 @@
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import { IconButton, Menu, MenuItem } from "@mui/material";
+import { IconButton, Menu, MenuItem, Snackbar } from "@mui/material";
 import Button from "@mui/material/Button";
+import { produce } from "immer";
 import moment from "moment";
 import paper from "paper";
 import React, { useEffect, useState } from "react";
@@ -14,10 +15,10 @@ import { Editor } from "@/app/components/Editor";
 import { VisuallyHiddenInput } from "@/app/components/VisuallyHiddenInput";
 import { FontProcessor } from "@/app/processors/fontProcessor";
 import { fontLoaded } from "@/app/redux/features/font/font-slice";
-import { useAppDispatch } from "@/app/redux/hooks";
+import { useAppDispatch, useAppSelector } from "@/app/redux/hooks";
 import { getProgress } from "@/app/utils/jamos";
 import schedulerYield from "@/app/utils/schedulerYield";
-import { FontMetadata, SavedState } from "@/app/utils/types";
+import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
 
 // Initialize paper.js context
 // @ts-expect-error no argument is also allowed
@@ -45,15 +46,19 @@ export default function Home() {
 
   // Redux dispatch action
   const dispatch = useAppDispatch();
+  const jamoVarsets = useAppSelector(
+    (state) => state.font.present.jamoVarsets!,
+  );
 
   // State for the saved fonts popup menu
-  const [anchorEl, setAnchorEl] = React.useState<HTMLButtonElement | null>(
-    null,
-  );
-  const open = Boolean(anchorEl);
+  const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
+  const menuOpen = Boolean(anchorEl);
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
   };
+
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMsg, setSnackbarMsg] = useState("");
 
   // Access localstorage for saved fonts
   const [savedFonts_, setSavedFonts] = useLocalStorage<SavedState[]>(
@@ -68,6 +73,7 @@ export default function Home() {
     setIsMounted(true);
   }, []);
   const savedFonts = isMounted ? (savedFonts_ ?? []) : [];
+  const [curSavedFontIdx, setCurSavedFontIdx] = useState<number | null>(null);
 
   async function handleFileChange(files: FileList | null) {
     if (!files || !files.length) {
@@ -94,16 +100,18 @@ export default function Home() {
 
     setAppState(AppState.READY_TO_GENERATE);
 
-    setSavedFonts([
-      ...savedFonts,
-      {
-        metadata: metadata,
-        previewImage: sampleImage,
-        jamoVarsets: varsets,
-        progress: getProgress(varsets),
-        date: moment().valueOf(),
-      },
-    ]);
+    setCurSavedFontIdx(savedFonts.length);
+    setSavedFonts(
+      produce(savedFonts, (prevSavedFonts) => {
+        prevSavedFonts.push({
+          metadata: metadata,
+          previewImage: sampleImage,
+          jamoVarsets: varsets,
+          progress: getProgress(varsets),
+          date: moment().valueOf(),
+        });
+      }),
+    );
   }
 
   async function loadSavedFont(index: number, saved: SavedState) {
@@ -140,17 +148,27 @@ export default function Home() {
 
       setAppState(AppState.READY_TO_GENERATE);
 
+      setCurSavedFontIdx(index);
       // update date
-      setSavedFonts([
-        ...savedFonts.slice(0, index),
-        {
-          ...saved,
-          date: moment().valueOf(),
-        },
-        ...savedFonts.slice(index + 1),
-      ]);
+      setSavedFonts(
+        produce(savedFonts, (prevSavedFonts) => {
+          prevSavedFonts[index].date = moment().valueOf();
+        }),
+      );
     };
     input.click();
+  }
+
+  function saveFont(newJamoVarsets: JamoVarsets) {
+    if (curSavedFontIdx !== null) {
+      setSavedFonts(
+        produce(savedFonts, (prevSavedFonts) => {
+          prevSavedFonts[curSavedFontIdx].jamoVarsets = newJamoVarsets;
+        }),
+      );
+      setSnackbarMsg("Saved.");
+      setSnackbarOpen(true);
+    }
   }
 
   return (
@@ -187,9 +205,10 @@ export default function Home() {
                 Continue Editing
               </h2>
             </div>
-            <div className="text-md text-stone-600">
-              Select a font to continue editing. After selecting, re-upload the
-              source font file to resume your session.
+            <div className="text-sm text-stone-600 pb-1">
+              Select a font to continue editing. After selecting,{" "}
+              <strong>re-upload the source font file</strong> to resume your
+              session.
             </div>
             <div className="bg-stone-50 border border-stone-200 p-10">
               <div className="flex flex-wrap justify-evenly items-center gap-10">
@@ -211,7 +230,7 @@ export default function Home() {
                           </IconButton>
                           <Menu
                             anchorEl={anchorEl}
-                            open={open}
+                            open={menuOpen}
                             onClose={() => setAnchorEl(null)}
                             slotProps={{
                               list: {
@@ -223,10 +242,11 @@ export default function Home() {
                               onClick={() => {
                                 if (anchorEl) {
                                   const i = parseInt(anchorEl.value);
-                                  setSavedFonts([
-                                    ...savedFonts.slice(0, i),
-                                    ...savedFonts.slice(i + 1),
-                                  ]);
+                                  setSavedFonts(
+                                    produce(savedFonts, (prevSavedFonts) => {
+                                      prevSavedFonts.splice(i, 1);
+                                    }),
+                                  );
                                   setAnchorEl(null);
                                 }
                               }}
@@ -324,7 +344,11 @@ export default function Home() {
                   </div>
                 </div>
                 <button
-                  onClick={() => setAppState(AppState.IDLE)}
+                  onClick={() => {
+                    saveFont(jamoVarsets);
+                    setAppState(AppState.IDLE);
+                    setCurSavedFontIdx(null);
+                  }}
                   className="text-sm text-stone-500 hover:text-stone-800 underline"
                 >
                   Change Font
@@ -342,10 +366,18 @@ export default function Home() {
               <Editor
                 fontProcessor={fontProcessor}
                 previewImage={previewImage}
+                onSaveFont={(newJamoVarsets) => saveFont(newJamoVarsets)}
               />
             </section>
           )}
       </main>
+      <Snackbar
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        open={snackbarOpen}
+        autoHideDuration={500}
+        onClose={() => setSnackbarOpen(false)}
+        message={snackbarMsg}
+      />
     </div>
   );
 }

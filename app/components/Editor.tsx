@@ -11,6 +11,7 @@ import Button from "@mui/material/Button";
 import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
 import React, { useCallback, useState } from "react";
+import { ActionCreators } from "redux-undo";
 
 import { GlyphView } from "@/app/components/GlyphView";
 import { VarsetMapView } from "@/app/components/VarsetMapView";
@@ -28,6 +29,7 @@ import {
 import { uniToPua } from "@/app/utils/puaUniConv";
 import {
   ConsonantInfo,
+  JamoVarsets,
   PathData,
   VarsetType,
   VowelInfo,
@@ -36,12 +38,48 @@ import {
 export function Editor({
   fontProcessor,
   previewImage,
+  onSaveFont,
 }: {
   fontProcessor: FontProcessor;
   previewImage: string;
+  onSaveFont: (jamoVarsets: JamoVarsets) => void;
 }) {
-  const jamoVarsets = useAppSelector((state) => state.font.jamoVarsets!);
+  const jamoVarsets = useAppSelector(
+    (state) => state.font.present.jamoVarsets!,
+  );
+  const pastStates = useAppSelector((state) => state.font.past);
   const dispatch = useAppDispatch();
+
+  // handle what happens on key press
+  const handleKeyPress = React.useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key === "z" && event.ctrlKey && !event.shiftKey) {
+        // Ctrl+Z pressed
+        if (pastStates.length > 1) {
+          dispatch(ActionCreators.undo());
+        }
+        event.preventDefault();
+      } else if (
+        (event.key === "y" && event.ctrlKey) ||
+        (event.key === "Z" && event.ctrlKey && event.shiftKey)
+      ) {
+        // Ctrl+Y / Ctrl+Shift+Z pressed
+        dispatch(ActionCreators.redo());
+        event.preventDefault();
+      } else if (event.key === "s" && event.ctrlKey) {
+        onSaveFont(jamoVarsets);
+        event.preventDefault();
+      }
+    },
+    [onSaveFont, jamoVarsets, pastStates, dispatch],
+  );
+
+  React.useEffect(() => {
+    document.addEventListener("keydown", handleKeyPress);
+    return () => {
+      document.removeEventListener("keydown", handleKeyPress);
+    };
+  }, [handleKeyPress]);
 
   const [leftDivRef, leftDivSize] = useComponentSize<HTMLDivElement>();
   const [rightDivRef, rightDivSize] = useComponentSize<HTMLDivElement>();
@@ -245,7 +283,11 @@ export function Editor({
                     key={idx}
                     onClick={() => {
                       setAnchorEl(null);
-                      setCurrentPath(fontProcessor.getPath(uniToPua(syllable)));
+                      setCurrentPath(
+                        fontProcessor.getPath(
+                          syllable.length === 1 ? syllable : uniToPua(syllable),
+                        ),
+                      );
                     }}
                   >
                     {syllable}

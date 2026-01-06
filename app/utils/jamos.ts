@@ -112,6 +112,11 @@ export function* getSyllablesFor(
   precompose: boolean = true,
   { leadingPref, vowelPref, trailingPref }: JamoPref = {},
 ): Generator<string> {
+  if (varsetName === "canon") {
+    yield getJamoInfo(jamoName)!.canonical;
+    return;
+  }
+
   const leadings = new Set([
     ...(leadingPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
     ...HANGUL_DATA.consonantInfo.values(),
@@ -306,6 +311,9 @@ export function getExampleEnvPaths(
   varsetName: VarsetType,
   numExamples: number,
 ): PathData[][] {
+  if (varsetName === "canon") {
+    return [];
+  }
   const varsetType = varsetName[0].slice(0, 1) as "l" | "v" | "t";
   const results: PathData[][] = [];
   const syllables = getSyllablesFor(jamoName, varsetName, false).toArray();

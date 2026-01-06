@@ -127,10 +127,9 @@ export class FontProcessor {
             break;
           }
         }
+        await schedulerYield();
       }
       result[jamo.name] = sets;
-
-      await schedulerYield();
     }
 
     for (const jamo of vowelInfo.values()) {
@@ -168,10 +167,9 @@ export class FontProcessor {
             break;
           }
         }
+        await schedulerYield();
       }
       result[jamo.name] = sets;
-
-      await schedulerYield();
     }
 
     return result;

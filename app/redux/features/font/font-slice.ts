@@ -1,4 +1,5 @@
 import { PayloadAction, createSlice } from "@reduxjs/toolkit";
+import undoable from "redux-undo";
 
 import { CONSONANT_VARSET_NAMES, VOWEL_VARSET_NAMES } from "@/app/utils/jamos";
 import {
@@ -49,4 +50,4 @@ const fontSlice = createSlice({
 });
 
 export const { fontLoaded, pathUpdated } = fontSlice.actions;
-export default fontSlice.reducer;
+export default undoable(fontSlice.reducer);

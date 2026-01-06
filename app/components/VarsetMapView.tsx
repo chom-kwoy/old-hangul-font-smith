@@ -71,7 +71,7 @@ export function VarsetMapView({
   const selectedObjRef = useRef<VarsetObjects | null>(null);
   const varsetToObjMap = useRef(new Map<string, VarsetObjects>());
 
-  const nCols = Math.max(Math.ceil(width / 25), 1);
+  const nCols = Math.max(Math.ceil(width / 28), 1);
   const cellSize = width / nCols;
   const zoomSize = cellSize * 2;
   const height = cellSize * CONSONANT_VARSET_NAMES.length;
