@@ -10,12 +10,12 @@ import moment from "moment";
 import React, { useEffect, useState } from "react";
 import { useLocalStorage } from "react-use";
 
-import { Editor } from "@/app/editor";
-import { FontProcessor } from "@/app/fontProcessor";
-import { getProgress } from "@/app/jamos";
-import schedulerYield from "@/app/schedulerYield";
-import { replacer, reviver } from "@/app/serialize";
-import { FontMetadata, JamoVarsets, SavedState } from "@/app/types";
+import { Editor } from "@/app/components/Editor";
+import { FontProcessor } from "@/app/processors/fontProcessor";
+import { getProgress } from "@/app/utils/jamos";
+import schedulerYield from "@/app/utils/schedulerYield";
+import { replacer, reviver } from "@/app/utils/serialize";
+import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",

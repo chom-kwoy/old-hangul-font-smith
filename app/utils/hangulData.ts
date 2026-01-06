@@ -1,5 +1,5 @@
-import { ConsonantInfo, VowelInfo } from "@/app/types";
 import { uniToPua } from "@/app/utils/puaUniConv";
+import { ConsonantInfo, VowelInfo } from "@/app/utils/types";
 
 function getHangulData(): {
   consonantInfo: Map<string, ConsonantInfo>;

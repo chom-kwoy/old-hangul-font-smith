@@ -9,7 +9,7 @@ export function replacer<T>(key: string, value: T) {
   if (value instanceof Map) {
     return {
       dataType: "Map",
-      value: Array.from(value.entries()), // or with spread: value: [...value]
+      value: Array.from(value.entries()),
     };
   }
   return value;

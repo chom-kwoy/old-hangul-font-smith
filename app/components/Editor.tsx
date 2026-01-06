@@ -12,26 +12,26 @@ import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
 import React, { useCallback, useState } from "react";
 
-import { GlyphView } from "@/app/GlyphView";
-import { VarsetMapView } from "@/app/VarsetMapView";
-import { downloadArrayBufferAsFile } from "@/app/download";
-import { FontProcessor } from "@/app/fontProcessor";
-import { HANGUL_DATA, unicodeNameToHangul } from "@/app/hangulData";
+import { GlyphView } from "@/app/components/GlyphView";
+import { VarsetMapView } from "@/app/components/VarsetMapView";
+import useComponentSize from "@/app/hooks/useComponentSize";
+import { FontProcessor } from "@/app/processors/fontProcessor";
+import { downloadArrayBufferAsFile } from "@/app/utils/download";
+import { HANGUL_DATA, unicodeNameToHangul } from "@/app/utils/hangulData";
 import {
   getExampleEnvPaths,
   getSyllablesFor,
   getVarset,
   updateVarset,
-} from "@/app/jamos";
+} from "@/app/utils/jamos";
+import { uniToPua } from "@/app/utils/puaUniConv";
 import {
   ConsonantInfo,
   JamoVarsets,
   PathData,
   VarsetType,
   VowelInfo,
-} from "@/app/types";
-import useComponentSize from "@/app/useComponentSize";
-import { uniToPua } from "@/app/utils/puaUniConv";
+} from "@/app/utils/types";
 
 export function Editor({
   fontProcessor,

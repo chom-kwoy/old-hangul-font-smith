@@ -6,7 +6,7 @@ import {
   getName,
   getTrailing,
   getVowel,
-} from "@/app/hangulData";
+} from "@/app/utils/hangulData";
 import {
   ConsonantInfo,
   ConsonantSets,
@@ -18,7 +18,7 @@ import {
   VowelInfo,
   VowelSets,
   VowelVarsetType,
-} from "@/app/types";
+} from "@/app/utils/types";
 
 export const CONSONANT_VARSET_NAMES: ConsonantVarsetType[] = [
   "canon",

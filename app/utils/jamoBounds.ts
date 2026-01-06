@@ -3,7 +3,7 @@ import {
   ConsonantVarsetType,
   JamoPref,
   VowelVarsetType,
-} from "@/app/types";
+} from "@/app/utils/types";
 
 export const CONSONANT_JAMO_BOUNDS: Record<
   ConsonantVarsetType,

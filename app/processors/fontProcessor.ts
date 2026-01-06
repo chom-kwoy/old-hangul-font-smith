@@ -1,21 +1,24 @@
 import opentype from "opentype.js";
 
-import { intersectPathData, opentypeToPathData } from "@/app/bezier";
-import { HANGUL_DATA } from "@/app/hangulData";
-import { CONSONANT_JAMO_BOUNDS, VOWEL_JAMO_BOUNDS } from "@/app/jamoBounds";
+import { intersectPathData, opentypeToPathData } from "@/app/utils/bezier";
+import { HANGUL_DATA } from "@/app/utils/hangulData";
+import {
+  CONSONANT_JAMO_BOUNDS,
+  VOWEL_JAMO_BOUNDS,
+} from "@/app/utils/jamoBounds";
 import {
   CONSONANT_VARSET_NAMES,
   VOWEL_VARSET_NAMES,
   getSyllablesFor,
-} from "@/app/jamos";
-import schedulerYield from "@/app/schedulerYield";
+} from "@/app/utils/jamos";
+import schedulerYield from "@/app/utils/schedulerYield";
 import {
   ConsonantSets,
   FontMetadata,
   JamoVarsets,
   PathData,
   VowelSets,
-} from "@/app/types";
+} from "@/app/utils/types";
 
 export class FontProcessor {
   font: opentype.Font | null = null;

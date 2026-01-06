@@ -10,20 +10,20 @@ import React, {
   useState,
 } from "react";
 
-import { toFabricPaths } from "@/app/fabricUtils";
-import { HANGUL_DATA } from "@/app/hangulData";
+import { toFabricPaths } from "@/app/utils/fabricUtils";
+import { HANGUL_DATA } from "@/app/utils/hangulData";
 import {
   CONSONANT_VARSET_NAMES,
   VOWEL_VARSET_NAMES,
   getVarset,
-} from "@/app/jamos";
+} from "@/app/utils/jamos";
 import {
   ConsonantInfo,
   JamoVarsets,
   PathData,
   VarsetType,
   VowelInfo,
-} from "@/app/types";
+} from "@/app/utils/types";
 
 type VarsetObjects = {
   overlayRect: fabric.Rect;

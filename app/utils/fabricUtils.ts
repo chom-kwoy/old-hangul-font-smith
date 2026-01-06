@@ -2,7 +2,7 @@ import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
 import paper from "paper";
 
-import { PathData } from "@/app/types";
+import { PathData } from "@/app/utils/types";
 
 // Set global fabric.js defaults
 fabric.InteractiveFabricObject.ownDefaults = {

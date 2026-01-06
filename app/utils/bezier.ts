@@ -1,11 +1,12 @@
-"use client";
-
 import { TSimplePathData } from "fabric";
 import opentype from "opentype.js";
 import paper from "paper";
 
-import { fabricToCompoundPath, paperToFabricPath } from "@/app/fabricUtils";
-import { Bounds, PathData } from "@/app/types";
+import {
+  fabricToCompoundPath,
+  paperToFabricPath,
+} from "@/app/utils/fabricUtils";
+import { Bounds, PathData } from "@/app/utils/types";
 
 export function opentypeToPathData(
   path: opentype.Path,

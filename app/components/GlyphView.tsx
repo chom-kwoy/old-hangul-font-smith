@@ -12,14 +12,14 @@ import * as fabric from "fabric";
 import paper from "paper";
 import React, { useEffect, useRef } from "react";
 
-import { intersectCompoundPath } from "@/app/bezier";
+import { intersectCompoundPath } from "@/app/utils/bezier";
 import {
   fabricToCompoundPath,
   paperToFabricPath,
   toFabricPaths,
-} from "@/app/fabricUtils";
-import { createPathControls } from "@/app/pathControl";
-import { PathData } from "@/app/types";
+} from "@/app/utils/fabricUtils";
+import { createPathControls } from "@/app/utils/pathControl";
+import { PathData } from "@/app/utils/types";
 
 export enum GlyphViewState {
   NORMAL,
