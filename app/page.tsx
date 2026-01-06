@@ -64,12 +64,8 @@ export default function Home() {
     [],
     {
       raw: false,
-      serializer: (value) => {
-        return JSON.stringify(value, replacer);
-      },
-      deserializer: (json) => {
-        return JSON.parse(json, reviver);
-      },
+      serializer: (value) => JSON.stringify(value, replacer),
+      deserializer: (json) => JSON.parse(json, reviver),
     },
   );
 
