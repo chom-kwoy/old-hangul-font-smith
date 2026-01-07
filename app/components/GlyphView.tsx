@@ -1,4 +1,5 @@
 import CheckIcon from "@mui/icons-material/Check";
+import ContentCutIcon from "@mui/icons-material/ContentCut";
 import CropIcon from "@mui/icons-material/Crop";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import {
@@ -9,7 +10,6 @@ import {
 } from "@mui/material";
 import { blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
-import paper from "paper";
 import React, { useEffect, useRef } from "react";
 
 import { intersectCompoundPath } from "@/app/utils/bezier";
@@ -19,11 +19,12 @@ import {
   toFabricPaths,
 } from "@/app/utils/fabricUtils";
 import { createPathControls } from "@/app/utils/pathControl";
-import { PathData } from "@/app/utils/types";
+import { Bounds, PathData } from "@/app/utils/types";
 
 export enum GlyphViewState {
   NORMAL,
   SELECTING,
+  CUTTING,
 }
 
 export function GlyphView({
@@ -65,6 +66,10 @@ export function GlyphView({
       backgroundColor: "white",
     });
     fabricRef.current = canvas;
+
+    canvas.selection = interactive && mode !== GlyphViewState.CUTTING;
+    canvas.isDrawingMode = mode === GlyphViewState.CUTTING;
+    canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
 
     // Add gridlines
     const horzGrid = [
@@ -126,13 +131,21 @@ export function GlyphView({
     }
 
     const pathSelectable =
-      mode === GlyphViewState.SELECTING ? false : interactive;
+      interactive &&
+      mode !== GlyphViewState.SELECTING &&
+      mode !== GlyphViewState.CUTTING;
     const fabricPaths =
       path !== null
         ? toFabricPaths(path, width, height, {
             selectable: pathSelectable,
             evented: pathSelectable,
-            fill: mode === GlyphViewState.SELECTING ? "grey" : "black",
+            fill:
+              mode === GlyphViewState.SELECTING ||
+              mode === GlyphViewState.CUTTING
+                ? "grey"
+                : "black",
+            stroke: "red",
+            strokeWidth: 10,
           })
         : [];
 
@@ -186,6 +199,7 @@ export function GlyphView({
     let isCropping = false;
     let startPosX: number | null = null;
     let startPosY: number | null = null;
+    const cropRects: Bounds[] = [];
     function constrainViewport(vpt: fabric.TMat2D) {
       vpt[4] = Math.min(vpt[4], 0);
       vpt[4] = Math.max(vpt[4], width * (1 - vpt[0] - vpt[2]));
@@ -252,28 +266,21 @@ export function GlyphView({
           lastPosY = e.clientY;
         }
       } else if (isCropping) {
-        if (
-          path !== null &&
-          pathRef.current !== null &&
-          startPosX !== null &&
-          startPosY !== null
-        ) {
+        if (path !== null && startPosX !== null && startPosY !== null) {
           const curX = opt.scenePoint.x * (1000 / width);
           const curY = opt.scenePoint.y * (1000 / height);
           for (let i = 0; i < path.paths.length; ++i) {
             const fabricPath = fabricPaths[i];
-            const comp = path.paths[i];
+            const comp = fabricToCompoundPath(path.paths[i]);
+            const bounds = {
+              left: Math.min(startPosX, curX),
+              top: Math.min(startPosY, curY),
+              right: Math.max(startPosX, curX),
+              bottom: Math.max(startPosY, curY),
+            };
             const newPath = paperToFabricPath(
-              intersectCompoundPath(fabricToCompoundPath(comp), [
-                {
-                  left: Math.min(startPosX, curX),
-                  top: Math.min(startPosY, curY),
-                  right: Math.max(startPosX, curX),
-                  bottom: Math.max(startPosY, curY),
-                },
-              ]),
+              intersectCompoundPath(comp, [...cropRects, bounds]),
             );
-            pathRef.current.paths[i] = newPath;
             fabricPath.set("path", newPath);
             fabricPath.setCoords();
           }
@@ -281,7 +288,7 @@ export function GlyphView({
         }
       }
     });
-    canvas.on("mouse:up", function () {
+    canvas.on("mouse:up", function (opt) {
       // on mouse up we want to recalculate new interaction
       // for all objects, so we call setViewportTransform
       if (isDragging) {
@@ -294,6 +301,42 @@ export function GlyphView({
         }
       } else if (isCropping) {
         isCropping = false;
+        if (startPosX !== null && startPosY !== null) {
+          const curX = opt.scenePoint.x * (1000 / width);
+          const curY = opt.scenePoint.y * (1000 / height);
+          const bounds = {
+            left: Math.min(startPosX, curX),
+            top: Math.min(startPosY, curY),
+            right: Math.max(startPosX, curX),
+            bottom: Math.max(startPosY, curY),
+          };
+          cropRects.push(bounds);
+        }
+        if (pathRef.current !== null) {
+          for (let i = 0; i < pathRef.current.paths.length; ++i) {
+            const fabricPath = fabricPaths[i];
+            pathRef.current.paths[i] = fabricPath.path;
+          }
+        }
+      }
+    });
+    canvas.on("path:created", function (event) {
+      if (
+        mode === GlyphViewState.CUTTING &&
+        path !== null &&
+        pathRef.current !== null
+      ) {
+        const addedPath = fabricToCompoundPath(
+          (event.path as fabric.Path).path,
+          1000 / width,
+          1000 / height,
+        );
+        for (let i = 0; i < path.paths.length; ++i) {
+          const fabricPath = fabricPaths[i];
+          const comp = fabricToCompoundPath(path.paths[i]);
+          const newPath = comp.divide(addedPath);
+          fabricPath.set("path", paperToFabricPath(newPath));
+        }
       }
     });
 
@@ -321,13 +364,21 @@ export function GlyphView({
             </Tooltip>
           </IconButton>
           <ToggleButtonGroup
-            value={mode === GlyphViewState.SELECTING ? "select" : null}
+            value={
+              mode === GlyphViewState.SELECTING
+                ? "select"
+                : mode === GlyphViewState.CUTTING
+                  ? "cut"
+                  : null
+            }
             exclusive
             onChange={(event, newValue) => {
               setMode(
                 newValue === "select"
                   ? GlyphViewState.SELECTING
-                  : GlyphViewState.NORMAL,
+                  : newValue === "cut"
+                    ? GlyphViewState.CUTTING
+                    : GlyphViewState.NORMAL,
               );
             }}
           >
@@ -336,8 +387,14 @@ export function GlyphView({
                 <CropIcon />
               </Tooltip>
             </ToggleButton>
+            <ToggleButton value={"cut"}>
+              <Tooltip title="Cut Elements">
+                <ContentCutIcon />
+              </Tooltip>
+            </ToggleButton>
           </ToggleButtonGroup>
-          {mode == GlyphViewState.SELECTING && (
+          {(mode === GlyphViewState.SELECTING ||
+            mode === GlyphViewState.CUTTING) && (
             <IconButton
               onClick={() => {
                 setMode(GlyphViewState.NORMAL);

@@ -209,11 +209,7 @@ export function VarsetMapView({
       offX: number,
       offY: number,
     ) {
-      const fill = isInvalid
-        ? "#E7E5E4"
-        : path
-          ? "white"
-          : "oklch(89.2% 0.058 10.001)";
+      const fill = isInvalid ? "#E7E5E4" : "white";
 
       // Cell borders for main layer
       const rect = new fabric.Rect({

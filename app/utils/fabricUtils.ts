@@ -18,7 +18,7 @@ fabric.InteractiveFabricObject.ownDefaults = {
 };
 
 export function paperToFabricPath(
-  compoundPath: paper.CompoundPath,
+  compoundPath: paper.PathItem,
 ): TSimplePathData {
   // TODO: performance
   return new fabric.Path(compoundPath.pathData).path;
@@ -54,22 +54,33 @@ export function toFabricPaths(
   return result;
 }
 
-export function fabricToSVG(path: TSimplePathData): string {
+export function fabricToSVG(
+  path: TSimplePathData,
+  scaleX?: number,
+  scaleY?: number,
+): string {
+  scaleX = scaleX || 1.0;
+  scaleY = scaleY || 1.0;
   const data: string[] = [];
   for (const cmd of path) {
     switch (cmd[0]) {
       case "M": // move to
-        data.push(`M ${cmd[1]},${cmd[2]}`);
+        data.push(`M ${cmd[1] * scaleX},${cmd[2] * scaleY}`);
         break;
       case "L": // line to
-        data.push(`L ${cmd[1]},${cmd[2]}`);
+        data.push(`L ${cmd[1] * scaleX},${cmd[2] * scaleY}`);
         break;
       case "Q": // quadratic bezier curve
-        data.push(`Q ${cmd[1]},${cmd[2]}, ${cmd[3]},${cmd[4]}`);
+        data.push(
+          `Q ${cmd[1] * scaleX},${cmd[2] * scaleY} ` +
+            `${cmd[3] * scaleX},${cmd[4] * scaleY}`,
+        );
         break;
       case "C": // cubic bezier curve
         data.push(
-          `C ${cmd[1]},${cmd[2]} ${cmd[3]},${cmd[4]} ${cmd[5]},${cmd[6]}`,
+          `C ${cmd[1] * scaleX},${cmd[2] * scaleY} ` +
+            `${cmd[3] * scaleX},${cmd[4] * scaleY} ` +
+            `${cmd[5] * scaleX},${cmd[6] * scaleY}`,
         );
         break;
       case "Z": // close path
@@ -82,6 +93,8 @@ export function fabricToSVG(path: TSimplePathData): string {
 
 export function fabricToCompoundPath(
   path: TSimplePathData,
+  scaleX?: number,
+  scaleY?: number,
 ): paper.CompoundPath {
-  return new paper.CompoundPath(fabricToSVG(path));
+  return new paper.CompoundPath(fabricToSVG(path, scaleX, scaleY));
 }
