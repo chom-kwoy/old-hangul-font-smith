@@ -54,13 +54,19 @@ export function toFabricPaths(
   return result;
 }
 
+type FabicToSvgOptions = {
+  scaleX?: number;
+  scaleY?: number;
+  dontClose?: boolean;
+};
+
 export function fabricToSVG(
   path: TSimplePathData,
-  scaleX?: number,
-  scaleY?: number,
+  options?: FabicToSvgOptions,
 ): string {
-  scaleX = scaleX || 1.0;
-  scaleY = scaleY || 1.0;
+  const scaleX = options?.scaleX || 1.0;
+  const scaleY = options?.scaleY || 1.0;
+  const dontClose = options?.dontClose || false;
   const data: string[] = [];
   for (const cmd of path) {
     switch (cmd[0]) {
@@ -84,7 +90,9 @@ export function fabricToSVG(
         );
         break;
       case "Z": // close path
-        data.push("Z");
+        if (!dontClose) {
+          data.push("Z");
+        }
         break;
     }
   }
@@ -93,8 +101,12 @@ export function fabricToSVG(
 
 export function fabricToCompoundPath(
   path: TSimplePathData,
-  scaleX?: number,
-  scaleY?: number,
+  options?: FabicToSvgOptions,
 ): paper.CompoundPath {
-  return new paper.CompoundPath(fabricToSVG(path, scaleX, scaleY));
+  const svg = fabricToSVG(path, options);
+  const result = new paper.CompoundPath(svg);
+  if (options?.dontClose) {
+    result.closed = false;
+  }
+  return result;
 }

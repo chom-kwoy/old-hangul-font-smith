@@ -328,13 +328,14 @@ export function GlyphView({
       ) {
         const addedPath = fabricToCompoundPath(
           (event.path as fabric.Path).path,
-          1000 / width,
-          1000 / height,
+          { scaleX: 1000 / width, scaleY: 1000 / height, dontClose: true },
         );
+        console.log(addedPath.pathData);
         for (let i = 0; i < path.paths.length; ++i) {
           const fabricPath = fabricPaths[i];
           const comp = fabricToCompoundPath(path.paths[i]);
-          const newPath = comp.divide(addedPath);
+          const newPath = comp.divide(addedPath, { trace: false });
+          newPath.closePath();
           fabricPath.set("path", paperToFabricPath(newPath));
         }
       }
