@@ -326,16 +326,31 @@ const createControl = (
     mouseDownHandler: (event, transform) => {
       const path = transform.target as Path;
       if (!isControlPoint) {
-        if (!event.ctrlKey) {
+        if (!event.ctrlKey && !event.shiftKey) {
           deselectPathControls();
         }
-        selectedControls.push(control);
-        const cps = controlPoints[commandIndexPos];
-        if (cps) {
-          cps.forEach(({ control: cp }) => {
-            lastControlPoints.push(cp);
-            cp.visible = true;
-          });
+        if (selectedControls.includes(control)) {
+          // Deselect
+          selectedControls.splice(selectedControls.indexOf(control), 1);
+          const cps = controlPoints[commandIndexPos];
+          if (cps) {
+            cps.forEach(({ control: cp }) => {
+              const cpIndex = lastControlPoints.indexOf(cp);
+              if (cpIndex !== -1) {
+                lastControlPoints.splice(cpIndex, 1);
+              }
+              cp.visible = false;
+            });
+          }
+        } else {
+          selectedControls.push(control);
+          const cps = controlPoints[commandIndexPos];
+          if (cps) {
+            cps.forEach(({ control: cp }) => {
+              lastControlPoints.push(cp);
+              cp.visible = true;
+            });
+          }
         }
         path.canvas?.requestRenderAll();
         return true;
