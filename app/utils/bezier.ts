@@ -52,6 +52,25 @@ export function opentypeToPathData(
   return splitPaths(data);
 }
 
+export function svgToPathData(svg: string): PathData {
+  // parse xml string
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(svg, "image/svg+xml");
+  const pathElements = xmlDoc.getElementsByTagName("path");
+
+  const result: PathData = { paths: [] };
+  for (const pathElement of pathElements) {
+    const d = pathElement.getAttribute("d");
+    if (d) {
+      const compoundPath = new paper.CompoundPath(d);
+      compoundPath.closePath();
+      result.paths.push(paperToFabricPath(compoundPath));
+    }
+  }
+
+  return result;
+}
+
 // returns shapes that overlap the bounds list
 export function intersectCompoundPath(
   compoundPath: paper.CompoundPath,

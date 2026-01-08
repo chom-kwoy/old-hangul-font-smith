@@ -13,7 +13,7 @@ import { amber, blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
 
-import { pathDataToSVG } from "@/app/utils/bezier";
+import { pathDataToSVG, svgToPathData } from "@/app/utils/bezier";
 import { downloadStringAsFile } from "@/app/utils/download";
 import {
   fabricToCompoundPath,
@@ -371,6 +371,26 @@ export function GlyphView({
     };
   }, [width, height, mode, path, bgPaths, interactive]);
 
+  function importFromSVG() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".svg,image/svg+xml";
+    input.onchange = async () => {
+      const files = input.files;
+      if (!files || !files.length) {
+        return;
+      }
+      const file = files[0];
+      const text = await file.text();
+      const newPath = svgToPathData(text);
+      pathRef.current = newPath;
+      if (onPathChanged) {
+        onPathChanged(pathRef.current);
+      }
+    };
+    input.click();
+  }
+
   return (
     <div {...props}>
       {interactive && (
@@ -417,12 +437,7 @@ export function GlyphView({
               </Tooltip>
             </IconButton>
           )}
-          <IconButton
-            onClick={() => {
-              // TODO: implement SVG import
-            }}
-            className="ml-auto"
-          >
+          <IconButton onClick={() => importFromSVG()} className="ml-auto">
             <Tooltip title="Import SVG">
               <UploadFileIcon />
             </Tooltip>
