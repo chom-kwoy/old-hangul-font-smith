@@ -13,7 +13,7 @@ import { blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
 
-import { intersectCompoundPath, pathDataToSVG } from "@/app/utils/bezier";
+import { pathDataToSVG } from "@/app/utils/bezier";
 import { downloadStringAsFile } from "@/app/utils/download";
 import {
   fabricToCompoundPath,
@@ -21,11 +21,10 @@ import {
   toFabricPaths,
 } from "@/app/utils/fabricUtils";
 import { createPathControls } from "@/app/utils/pathControl";
-import { Bounds, PathData } from "@/app/utils/types";
+import { PathData } from "@/app/utils/types";
 
 export enum GlyphViewState {
   NORMAL,
-  SELECTING,
   CUTTING,
 }
 
@@ -53,6 +52,50 @@ export function GlyphView({
   const pathRef = useRef(path);
 
   const [mode, setMode] = React.useState<GlyphViewState>(GlyphViewState.NORMAL);
+
+  // handle what happens on key press
+  const handleKeyPress = React.useCallback(
+    (event: KeyboardEvent) => {
+      console.log(event.key);
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (fabricRef.current) {
+          const canvas = fabricRef.current;
+          const activeObjects = canvas.getActiveObjects();
+          if (activeObjects.length > 0) {
+            canvas.discardActiveObject();
+            for (const obj of activeObjects) {
+              canvas.remove(obj);
+            }
+            canvas.requestRenderAll();
+            // update pathRef
+            if (pathRef.current !== null) {
+              const newPaths: fabric.Path[] = [];
+              for (const obj of canvas.getObjects()) {
+                if (obj instanceof fabric.Path && obj.selectable) {
+                  newPaths.push(obj);
+                }
+              }
+              const newPathData: PathData = {
+                paths: newPaths.map((p) => p.path),
+              };
+              pathRef.current = newPathData;
+              if (onPathChanged) {
+                onPathChanged(newPathData);
+              }
+            }
+          }
+        }
+      }
+    },
+    [onPathChanged],
+  );
+
+  React.useEffect(() => {
+    document.addEventListener("keydown", handleKeyPress);
+    return () => {
+      document.removeEventListener("keydown", handleKeyPress);
+    };
+  }, [handleKeyPress]);
 
   useEffect(() => {
     if (canvasRef.current === null) {
@@ -132,22 +175,15 @@ export function GlyphView({
       );
     }
 
-    const pathSelectable =
-      interactive &&
-      mode !== GlyphViewState.SELECTING &&
-      mode !== GlyphViewState.CUTTING;
+    const pathSelectable = interactive && mode !== GlyphViewState.CUTTING;
     const fabricPaths =
       path !== null
         ? toFabricPaths(path, width, height, {
             selectable: pathSelectable,
             evented: pathSelectable,
-            fill:
-              mode === GlyphViewState.SELECTING ||
-              mode === GlyphViewState.CUTTING
-                ? "grey"
-                : "black",
-            stroke: "red",
-            strokeWidth: 10,
+            fill: mode === GlyphViewState.CUTTING ? "grey" : "black",
+            stroke: blue[800],
+            strokeWidth: 8,
           })
         : [];
 
@@ -198,10 +234,6 @@ export function GlyphView({
     let isDragging = false;
     let lastPosX: number | null = null;
     let lastPosY: number | null = null;
-    let isCropping = false;
-    let startPosX: number | null = null;
-    let startPosY: number | null = null;
-    const cropRects: Bounds[] = [];
     function constrainViewport(vpt: fabric.TMat2D) {
       vpt[4] = Math.min(vpt[4], 0);
       vpt[4] = Math.max(vpt[4], width * (1 - vpt[0] - vpt[2]));
@@ -236,12 +268,17 @@ export function GlyphView({
         });
       }
     });
+    canvas.on("mouse:down:before", function (opt) {
+      const evt = opt.e as MouseEvent;
+      if (evt.ctrlKey) {
+        canvas.isDrawingMode = false;
+      }
+    });
     canvas.on("mouse:down", function (opt) {
       const evt = opt.e as MouseEvent;
       if (evt.ctrlKey) {
         isDragging = true;
         canvas.selection = false;
-        canvas.isDrawingMode = false;
         lastPosX = evt.clientX;
         lastPosY = evt.clientY;
         const obj = canvas.getActiveObject();
@@ -249,10 +286,6 @@ export function GlyphView({
           obj.lockMovementX = true;
           obj.lockMovementY = true;
         }
-      } else if (mode == GlyphViewState.SELECTING) {
-        isCropping = true;
-        startPosX = opt.scenePoint.x * (1000 / width);
-        startPosY = opt.scenePoint.y * (1000 / height);
       }
     });
     canvas.on("mouse:move", function (opt) {
@@ -268,30 +301,9 @@ export function GlyphView({
           lastPosX = e.clientX;
           lastPosY = e.clientY;
         }
-      } else if (isCropping) {
-        if (path !== null && startPosX !== null && startPosY !== null) {
-          const curX = opt.scenePoint.x * (1000 / width);
-          const curY = opt.scenePoint.y * (1000 / height);
-          for (let i = 0; i < path.paths.length; ++i) {
-            const fabricPath = fabricPaths[i];
-            const comp = fabricToCompoundPath(path.paths[i]);
-            const bounds = {
-              left: Math.min(startPosX, curX),
-              top: Math.min(startPosY, curY),
-              right: Math.max(startPosX, curX),
-              bottom: Math.max(startPosY, curY),
-            };
-            const newPath = paperToFabricPath(
-              intersectCompoundPath(comp, [...cropRects, bounds]),
-            );
-            fabricPath.set("path", newPath);
-            fabricPath.setCoords();
-          }
-          canvas.requestRenderAll();
-        }
       }
     });
-    canvas.on("mouse:up", function (opt) {
+    canvas.on("mouse:up", function () {
       // on mouse up we want to recalculate new interaction
       // for all objects, so we call setViewportTransform
       if (isDragging) {
@@ -302,25 +314,6 @@ export function GlyphView({
         for (const obj of canvas.getObjects()) {
           obj.lockMovementX = false;
           obj.lockMovementY = false;
-        }
-      } else if (isCropping) {
-        isCropping = false;
-        if (startPosX !== null && startPosY !== null) {
-          const curX = opt.scenePoint.x * (1000 / width);
-          const curY = opt.scenePoint.y * (1000 / height);
-          const bounds = {
-            left: Math.min(startPosX, curX),
-            top: Math.min(startPosY, curY),
-            right: Math.max(startPosX, curX),
-            bottom: Math.max(startPosY, curY),
-          };
-          cropRects.push(bounds);
-        }
-        if (pathRef.current !== null) {
-          for (let i = 0; i < pathRef.current.paths.length; ++i) {
-            const fabricPath = fabricPaths[i];
-            pathRef.current.paths[i] = fabricPath.path;
-          }
         }
       }
     });
@@ -380,37 +373,23 @@ export function GlyphView({
             </Tooltip>
           </IconButton>
           <ToggleButtonGroup
-            value={
-              mode === GlyphViewState.SELECTING
-                ? "select"
-                : mode === GlyphViewState.CUTTING
-                  ? "cut"
-                  : null
-            }
+            value={mode === GlyphViewState.CUTTING ? "cut" : null}
             exclusive
             onChange={(event, newValue) => {
               setMode(
-                newValue === "select"
-                  ? GlyphViewState.SELECTING
-                  : newValue === "cut"
-                    ? GlyphViewState.CUTTING
-                    : GlyphViewState.NORMAL,
+                newValue === "cut"
+                  ? GlyphViewState.CUTTING
+                  : GlyphViewState.NORMAL,
               );
             }}
           >
-            <ToggleButton value={"select"}>
-              <Tooltip title="Select Elements">
-                <CropIcon />
-              </Tooltip>
-            </ToggleButton>
             <ToggleButton value={"cut"}>
               <Tooltip title="Cut Elements">
                 <ContentCutIcon />
               </Tooltip>
             </ToggleButton>
           </ToggleButtonGroup>
-          {(mode === GlyphViewState.SELECTING ||
-            mode === GlyphViewState.CUTTING) && (
+          {mode === GlyphViewState.CUTTING && (
             <IconButton
               onClick={() => {
                 setMode(GlyphViewState.NORMAL);
