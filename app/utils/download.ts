@@ -23,3 +23,18 @@ export function downloadArrayBufferAsFile(
   // 5. Revoke the object URL to free up memory
   URL.revokeObjectURL(url);
 }
+
+function stringToArrayBuffer(str: string) {
+  const encoder = new TextEncoder(); // defaults to 'utf-8'
+  const uint8Array = encoder.encode(str); // returns a Uint8Array
+  return uint8Array.buffer;
+}
+
+export function downloadStringAsFile(
+  str: string,
+  filename: string,
+  mimeType: string,
+) {
+  const arrayBuffer = stringToArrayBuffer(str);
+  downloadArrayBufferAsFile(arrayBuffer, filename, mimeType);
+}

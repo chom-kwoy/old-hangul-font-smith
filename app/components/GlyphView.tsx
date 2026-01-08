@@ -1,6 +1,7 @@
 import CheckIcon from "@mui/icons-material/Check";
 import ContentCutIcon from "@mui/icons-material/ContentCut";
 import CropIcon from "@mui/icons-material/Crop";
+import DownloadIcon from "@mui/icons-material/Download";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import {
   IconButton,
@@ -12,7 +13,8 @@ import { blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
 
-import { intersectCompoundPath } from "@/app/utils/bezier";
+import { intersectCompoundPath, pathDataToSVG } from "@/app/utils/bezier";
+import { downloadStringAsFile } from "@/app/utils/download";
 import {
   fabricToCompoundPath,
   paperToFabricPath,
@@ -239,6 +241,7 @@ export function GlyphView({
       if (evt.ctrlKey) {
         isDragging = true;
         canvas.selection = false;
+        canvas.isDrawingMode = false;
         lastPosX = evt.clientX;
         lastPosY = evt.clientY;
         const obj = canvas.getActiveObject();
@@ -295,6 +298,7 @@ export function GlyphView({
         canvas.setViewportTransform(canvas.viewportTransform);
         isDragging = false;
         canvas.selection = true;
+        canvas.isDrawingMode = mode === GlyphViewState.CUTTING;
         for (const obj of canvas.getObjects()) {
           obj.lockMovementX = false;
           obj.lockMovementY = false;
@@ -320,6 +324,7 @@ export function GlyphView({
         }
       }
     });
+    const cuttingPaths: paper.CompoundPath[] = [];
     canvas.on("path:created", function (event) {
       if (
         mode === GlyphViewState.CUTTING &&
@@ -330,14 +335,24 @@ export function GlyphView({
           (event.path as fabric.Path).path,
           { scaleX: 1000 / width, scaleY: 1000 / height, dontClose: true },
         );
-        console.log(addedPath.pathData);
+        cuttingPaths.push(addedPath);
+        console.log(cuttingPaths);
         for (let i = 0; i < path.paths.length; ++i) {
           const fabricPath = fabricPaths[i];
-          const comp = fabricToCompoundPath(path.paths[i]);
-          const newPath = comp.divide(addedPath, { trace: false });
-          newPath.closePath();
+          let newPath = fabricToCompoundPath(path.paths[i]);
+          for (const cut of cuttingPaths) {
+            newPath = newPath.divide(cut, {
+              trace: false,
+            }) as paper.CompoundPath;
+            newPath.closePath();
+          }
           fabricPath.set("path", paperToFabricPath(newPath));
+          fabricPath.setCoords();
+          // Update the pathRef
+          pathRef.current.paths[i] = fabricPath.path;
         }
+        canvas.remove(event.path);
+        canvas.requestRenderAll();
       }
     });
 
@@ -409,6 +424,21 @@ export function GlyphView({
               </Tooltip>
             </IconButton>
           )}
+          <IconButton
+            onClick={() => {
+              if (path === null) return;
+              downloadStringAsFile(
+                pathDataToSVG(path),
+                "glyph.svg",
+                "image/svg+xml",
+              );
+            }}
+            className="ml-auto"
+          >
+            <Tooltip title="Download as SVG">
+              <DownloadIcon />
+            </Tooltip>
+          </IconButton>
         </div>
       )}
       <canvas ref={canvasRef} />

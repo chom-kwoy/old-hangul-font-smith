@@ -4,6 +4,7 @@ import paper from "paper";
 
 import {
   fabricToCompoundPath,
+  fabricToSVG,
   paperToFabricPath,
 } from "@/app/utils/fabricUtils";
 import { Bounds, PathData } from "@/app/utils/types";
@@ -106,4 +107,15 @@ export function intersectPathData(
     );
   }
   return result;
+}
+
+export function pathDataToSVG(path: PathData): string {
+  let svgData = "";
+  for (const comp of path.paths) {
+    svgData += `<path d="${fabricToSVG(comp)}" />\n`;
+  }
+  return `\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  ${svgData}
+</svg>`;
 }

@@ -218,8 +218,11 @@ export default function Home() {
                     className="w-80 flex-none shadow-sm rounded-xl bg-white hover:bg-amber-200 transition-colors duration-300 ease-in-out border border-stone-200 p-2 cursor-pointer"
                     onClick={() => loadSavedFont(i, savedFonts[i])}
                   >
-                    <div className="relative">
-                      <div className="text-stone-700 text-end">
+                    <div className="flex">
+                      <div className="text-stone-700 self-center">
+                        <div>{font.metadata.name}</div>
+                      </div>
+                      <div className="text-stone-700 ml-auto">
                         <span onClick={(event) => event.stopPropagation()}>
                           <IconButton
                             aria-label="options"
@@ -255,9 +258,6 @@ export default function Home() {
                             </MenuItem>
                           </Menu>
                         </span>
-                      </div>
-                      <div className="text-stone-700 absolute top-0 bottom-0 content-center">
-                        <div>{font.metadata.name}</div>
                       </div>
                     </div>
                     <img
