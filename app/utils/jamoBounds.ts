@@ -79,7 +79,7 @@ export const CONSONANT_JAMO_BOUNDS: Record<
         bottom: 500,
       },
     ],
-    { vowelPref: ["ㅝ"] },
+    { vowelPref: ["ㅞ"] },
   ],
   // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
   l6: [
@@ -115,7 +115,7 @@ export const CONSONANT_JAMO_BOUNDS: Record<
         bottom: 400,
       },
     ],
-    { vowelPref: ["ㅢ"] },
+    { vowelPref: ["ㅞ", "ㅢ"] },
   ],
   // 중성 ㅏ ㅑ ㅘ 와 결합
   t1: [

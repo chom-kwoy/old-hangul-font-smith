@@ -271,6 +271,7 @@ export function Editor({
                 interactive={true}
                 onResetToSyllable={(target) => setAnchorEl(target)}
                 onPathChanged={(newPath) => setCurrentPath(newPath)}
+                glyphName={`${selectedJamoName}-${selectedVarsetName}`}
               />
               <Menu
                 anchorEl={anchorEl}

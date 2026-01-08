@@ -1,15 +1,15 @@
 import CheckIcon from "@mui/icons-material/Check";
 import ContentCutIcon from "@mui/icons-material/ContentCut";
-import CropIcon from "@mui/icons-material/Crop";
 import DownloadIcon from "@mui/icons-material/Download";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
   IconButton,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
 } from "@mui/material";
-import { blue, teal } from "@mui/material/colors";
+import { amber, blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
 
@@ -36,6 +36,7 @@ export function GlyphView({
   bgPaths,
   interactive,
   onResetToSyllable,
+  glyphName,
   ...props
 }: {
   width: number;
@@ -45,10 +46,12 @@ export function GlyphView({
   onPathChanged?: (newPath: PathData | null) => void;
   bgPaths?: PathData[];
   onResetToSyllable?: (target: HTMLElement) => void;
+  glyphName?: string;
 } & React.ComponentProps<"div">) {
   bgPaths = bgPaths || [];
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
+  const vptRef = useRef<fabric.TMat2D | null>(null);
   const pathRef = useRef(path);
 
   const [mode, setMode] = React.useState<GlyphViewState>(GlyphViewState.NORMAL);
@@ -98,9 +101,7 @@ export function GlyphView({
   }, [handleKeyPress]);
 
   useEffect(() => {
-    if (canvasRef.current === null) {
-      return () => {};
-    }
+    if (canvasRef.current === null) return;
 
     pathRef.current = structuredClone(path);
 
@@ -115,6 +116,7 @@ export function GlyphView({
     canvas.selection = interactive && mode !== GlyphViewState.CUTTING;
     canvas.isDrawingMode = mode === GlyphViewState.CUTTING;
     canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+    canvas.freeDrawingBrush.width = 2;
 
     // Add gridlines
     const horzGrid = [
@@ -182,7 +184,7 @@ export function GlyphView({
             selectable: pathSelectable,
             evented: pathSelectable,
             fill: mode === GlyphViewState.CUTTING ? "grey" : "black",
-            stroke: blue[800],
+            stroke: amber[800],
             strokeWidth: 8,
           })
         : [];
@@ -240,6 +242,20 @@ export function GlyphView({
       vpt[5] = Math.min(vpt[5], 0);
       vpt[5] = Math.max(vpt[5], height * (1 - vpt[1] - vpt[3]));
     }
+    function adjustStrokes(zoom: number) {
+      // Keep stroke width appear constant regardless of zoom
+      canvas.forEachObject(function (obj_) {
+        // typescript hack
+        const obj = obj_ as typeof obj_ & {
+          originalStrokeWidth: number | undefined;
+        };
+        if (obj.originalStrokeWidth === undefined) {
+          obj.originalStrokeWidth = obj_.strokeWidth;
+        }
+        obj.set("strokeWidth", obj.originalStrokeWidth / zoom);
+      });
+      canvas.freeDrawingBrush.width = 2.0 / zoom;
+    }
     canvas.on("mouse:wheel", function (opt) {
       if (opt.e.ctrlKey) {
         const delta = opt.e.deltaY;
@@ -255,17 +271,10 @@ export function GlyphView({
         opt.e.stopPropagation();
         // constrain to glyph area
         constrainViewport(canvas.viewportTransform);
+        vptRef.current = canvas.viewportTransform;
         // Keep stroke width appear constant regardless of zoom
-        canvas.forEachObject(function (obj_) {
-          // typescript hack
-          const obj = obj_ as typeof obj_ & {
-            originalStrokeWidth: number | undefined;
-          };
-          if (obj.originalStrokeWidth === undefined) {
-            obj.originalStrokeWidth = obj_.strokeWidth;
-          }
-          obj.set("strokeWidth", obj.originalStrokeWidth / zoom);
-        });
+        adjustStrokes(zoom);
+        canvas.requestRenderAll();
       }
     });
     canvas.on("mouse:down:before", function (opt) {
@@ -297,6 +306,7 @@ export function GlyphView({
           vpt[5] += e.clientY - lastPosY;
           constrainViewport(vpt);
           canvas.setViewportTransform(vpt);
+          vptRef.current = vpt;
           canvas.requestRenderAll();
           lastPosX = e.clientX;
           lastPosY = e.clientY;
@@ -348,6 +358,10 @@ export function GlyphView({
         canvas.requestRenderAll();
       }
     });
+
+    // Set the viewport transform if it exists
+    canvas.viewportTransform = vptRef.current || [1, 0, 0, 1, 0, 0];
+    adjustStrokes(canvas.getZoom());
 
     // Clean up on unmount to prevent memory leaks
     return () => {
@@ -405,14 +419,23 @@ export function GlyphView({
           )}
           <IconButton
             onClick={() => {
+              // TODO: implement SVG import
+            }}
+            className="ml-auto"
+          >
+            <Tooltip title="Import SVG">
+              <UploadFileIcon />
+            </Tooltip>
+          </IconButton>
+          <IconButton
+            onClick={() => {
               if (path === null) return;
               downloadStringAsFile(
                 pathDataToSVG(path),
-                "glyph.svg",
+                glyphName ? `${glyphName}.svg` : "glyph.svg",
                 "image/svg+xml",
               );
             }}
-            className="ml-auto"
           >
             <Tooltip title="Download as SVG">
               <DownloadIcon />
