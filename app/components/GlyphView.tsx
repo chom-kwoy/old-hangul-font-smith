@@ -1,6 +1,7 @@
 import CheckIcon from "@mui/icons-material/Check";
 import ContentCutIcon from "@mui/icons-material/ContentCut";
 import DownloadIcon from "@mui/icons-material/Download";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
@@ -20,7 +21,10 @@ import {
   paperToFabricPath,
   toFabricPaths,
 } from "@/app/utils/fabricUtils";
-import { createPathControls } from "@/app/utils/pathControl";
+import {
+  createPathControls,
+  deselectPathControls,
+} from "@/app/utils/pathControl";
 import { PathData } from "@/app/utils/types";
 
 export enum GlyphViewState {
@@ -59,7 +63,6 @@ export function GlyphView({
   // handle what happens on key press
   const handleKeyPress = React.useCallback(
     (event: KeyboardEvent) => {
-      console.log(event.key);
       if (event.key === "Delete" || event.key === "Backspace") {
         if (fabricRef.current) {
           const canvas = fabricRef.current;
@@ -70,21 +73,20 @@ export function GlyphView({
               canvas.remove(obj);
             }
             canvas.requestRenderAll();
+
             // update pathRef
-            if (pathRef.current !== null) {
-              const newPaths: fabric.Path[] = [];
-              for (const obj of canvas.getObjects()) {
-                if (obj instanceof fabric.Path && obj.selectable) {
-                  newPaths.push(obj);
-                }
+            const newPaths: fabric.Path[] = [];
+            for (const obj of canvas.getObjects()) {
+              if (obj instanceof fabric.Path && obj.selectable) {
+                newPaths.push(obj);
               }
-              const newPathData: PathData = {
-                paths: newPaths.map((p) => p.path),
-              };
-              pathRef.current = newPathData;
-              if (onPathChanged) {
-                onPathChanged(newPathData);
-              }
+            }
+            const newPathData: PathData = {
+              paths: newPaths.map((p) => p.path),
+            };
+            pathRef.current = newPathData;
+            if (onPathChanged) {
+              onPathChanged(newPathData);
             }
           }
         }
@@ -207,16 +209,18 @@ export function GlyphView({
           editing = !editing;
           if (editing) {
             fabricPath.controls = createPathControls(fabricPath, {
-              sizeX: 8,
-              sizeY: 8,
               pointStyle: {
-                controlFill: blue[300],
-                controlStroke: "white",
+                controlSize: 10.0,
+                controlFill: "white",
+                controlStroke: "blue",
+                controlStyle: "rect",
               },
               controlPointStyle: {
-                controlFill: "white",
-                controlStroke: blue[100],
-                connectionDashArray: [3],
+                controlSize: 10.0,
+                controlFill: "transparent",
+                controlStroke: "white",
+                connectionStroke: "blue",
+                strokeCompositeOperation: "difference",
               },
             });
             fabricPath.hasBorders = false;
@@ -224,9 +228,16 @@ export function GlyphView({
             fabricPath.controls =
               fabric.controlsUtils.createObjectDefaultControls();
             fabricPath.hasBorders = true;
+            deselectPathControls();
           }
           fabricPath.setCoords();
           canvas.requestRenderAll();
+        });
+        fabricPath.on("deselected", () => {
+          deselectPathControls();
+        });
+        fabricPath.on("modifyPath", (event) => {
+          console.log(event);
         });
       }
 
@@ -254,7 +265,9 @@ export function GlyphView({
         }
         obj.set("strokeWidth", obj.originalStrokeWidth / zoom);
       });
-      canvas.freeDrawingBrush.width = 2.0 / zoom;
+      if (canvas.freeDrawingBrush) {
+        canvas.freeDrawingBrush.width = 2.0 / zoom;
+      }
     }
     canvas.on("mouse:wheel", function (opt) {
       if (opt.e.ctrlKey) {
@@ -339,7 +352,6 @@ export function GlyphView({
           { scaleX: 1000 / width, scaleY: 1000 / height, dontClose: true },
         );
         cuttingPaths.push(addedPath);
-        console.log(cuttingPaths);
         for (let i = 0; i < path.paths.length; ++i) {
           const fabricPath = fabricPaths[i];
           let newPath = fabricToCompoundPath(path.paths[i]);
@@ -382,8 +394,7 @@ export function GlyphView({
       }
       const file = files[0];
       const text = await file.text();
-      const newPath = svgToPathData(text);
-      pathRef.current = newPath;
+      pathRef.current = svgToPathData(text);
       if (onPathChanged) {
         onPathChanged(pathRef.current);
       }
@@ -395,6 +406,11 @@ export function GlyphView({
     <div {...props}>
       {interactive && (
         <div className="flex bg-stone-200">
+          <IconButton onClick={() => {}}>
+            <Tooltip title="Fullscreen">
+              <FullscreenIcon />
+            </Tooltip>
+          </IconButton>
           <IconButton
             onClick={(event) => {
               if (onResetToSyllable) {
