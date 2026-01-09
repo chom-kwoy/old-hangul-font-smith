@@ -269,8 +269,8 @@ export function Editor({
                 path={selectedVarset}
                 bgPaths={bgPaths}
                 interactive={true}
-                onResetToSyllable={(target) => setAnchorEl(target)}
-                onPathChanged={(newPath) => setCurrentPath(newPath)}
+                onResetToSyllable={setAnchorEl}
+                onPathChanged={setCurrentPath}
                 glyphName={`${selectedJamoName}-${selectedVarsetName}`}
               />
               <Menu

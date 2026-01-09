@@ -16,6 +16,7 @@
     "@mui/material": "^7.3.6",
     "@mui/material-nextjs": "^7.3.6",
     "@reduxjs/toolkit": "^2.11.2",
+    "@simbathesailor/use-what-changed": "^2.0.0",
     "adaptive-material-ui": "^1.0.0-beta.7",
     "canvas": "^3.2.0",
     "fabric": "^7.0.0",
@@ -28,7 +29,8 @@
     "react-dom": "19.2.3",
     "react-redux": "^9.2.0",
     "react-use": "^17.6.0",
-    "redux-undo": "^1.1.0"
+    "redux-undo": "^1.1.0",
+    "seedrandom": "^3.0.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

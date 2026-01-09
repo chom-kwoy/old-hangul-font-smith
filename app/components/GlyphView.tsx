@@ -1,36 +1,21 @@
-import CheckIcon from "@mui/icons-material/Check";
-import ContentCutIcon from "@mui/icons-material/ContentCut";
 import DownloadIcon from "@mui/icons-material/Download";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import {
-  IconButton,
-  ToggleButton,
-  ToggleButtonGroup,
-  Tooltip,
-} from "@mui/material";
+import { IconButton, Tooltip } from "@mui/material";
 import { amber, blue, teal } from "@mui/material/colors";
+import { useWhatChanged } from "@simbathesailor/use-what-changed";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
 
 import { pathDataToSVG, svgToPathData } from "@/app/utils/bezier";
 import { downloadStringAsFile } from "@/app/utils/download";
-import {
-  fabricToCompoundPath,
-  paperToFabricPath,
-  toFabricPaths,
-} from "@/app/utils/fabricUtils";
+import { toFabricPaths } from "@/app/utils/fabricUtils";
 import {
   createPathControls,
   deselectPathControls,
 } from "@/app/utils/pathControl";
 import { PathData } from "@/app/utils/types";
-
-export enum GlyphViewState {
-  NORMAL,
-  CUTTING,
-}
 
 export function GlyphView({
   width,
@@ -55,10 +40,12 @@ export function GlyphView({
   bgPaths = bgPaths || [];
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
-  const vptRef = useRef<fabric.TMat2D | null>(null);
-  const pathRef = useRef(path);
+  const canvasRecreatedRef = useRef(false);
+  const viewportRef = useRef<fabric.TMat2D | null>(null);
 
-  const [mode, setMode] = React.useState<GlyphViewState>(GlyphViewState.NORMAL);
+  const pathRef = useRef(path);
+  const pathObjectsRef = useRef<fabric.Path[]>([]);
+  const bgPathsObjectsRef = useRef<fabric.Path[]>([]);
 
   // handle what happens on key press
   const handleKeyPress = React.useCallback(
@@ -75,18 +62,20 @@ export function GlyphView({
             canvas.requestRenderAll();
 
             // update pathRef
-            const newPaths: fabric.Path[] = [];
-            for (const obj of canvas.getObjects()) {
-              if (obj instanceof fabric.Path && obj.selectable) {
-                newPaths.push(obj);
+            if (pathRef.current) {
+              const newPaths: fabric.Path[] = [];
+              for (const obj of canvas.getObjects()) {
+                if (obj instanceof fabric.Path && obj.selectable) {
+                  newPaths.push(obj);
+                }
               }
-            }
-            const newPathData: PathData = {
-              paths: newPaths.map((p) => p.path),
-            };
-            pathRef.current = newPathData;
-            if (onPathChanged) {
-              onPathChanged(newPathData);
+              const newPathData: PathData = {
+                paths: newPaths.map((p) => p.path),
+              };
+              pathRef.current = newPathData;
+              if (onPathChanged) {
+                onPathChanged(pathRef.current);
+              }
             }
           }
         }
@@ -102,10 +91,9 @@ export function GlyphView({
     };
   }, [handleKeyPress]);
 
+  // Re-initialize the Fabric canvas
   useEffect(() => {
     if (canvasRef.current === null) return;
-
-    pathRef.current = structuredClone(path);
 
     // Initialize the Fabric canvas
     const canvas = new fabric.Canvas(canvasRef.current, {
@@ -114,11 +102,9 @@ export function GlyphView({
       backgroundColor: "white",
     });
     fabricRef.current = canvas;
+    canvasRecreatedRef.current = true;
 
-    canvas.selection = interactive && mode !== GlyphViewState.CUTTING;
-    canvas.isDrawingMode = mode === GlyphViewState.CUTTING;
-    canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
-    canvas.freeDrawingBrush.width = 2;
+    canvas.selection = interactive;
 
     // Add gridlines
     const horzGrid = [
@@ -166,84 +152,6 @@ export function GlyphView({
       );
     }
 
-    for (const path of bgPaths) {
-      canvas.add(
-        ...toFabricPaths(path, width, height, {
-          selectable: false,
-          evented: false,
-          strokeWidth: 2,
-          stroke: teal[800],
-          fill: "transparent",
-          opacity: 0.3,
-        }),
-      );
-    }
-
-    const pathSelectable = interactive && mode !== GlyphViewState.CUTTING;
-    const fabricPaths =
-      path !== null
-        ? toFabricPaths(path, width, height, {
-            selectable: pathSelectable,
-            evented: pathSelectable,
-            fill: mode === GlyphViewState.CUTTING ? "grey" : "black",
-            stroke: amber[800],
-            strokeWidth: 8,
-          })
-        : [];
-
-    if (path !== null) {
-      if (interactive) {
-        canvas.add(
-          ...toFabricPaths(path, width, height, {
-            selectable: false,
-            evented: false,
-            fill: blue[500],
-            opacity: 0.3,
-          }),
-        );
-      }
-
-      for (const fabricPath of fabricPaths) {
-        let editing = false;
-        fabricPath.on("mousedblclick", () => {
-          editing = !editing;
-          if (editing) {
-            fabricPath.controls = createPathControls(fabricPath, {
-              pointStyle: {
-                controlSize: 10.0,
-                controlFill: "white",
-                controlStroke: "blue",
-                controlStyle: "rect",
-              },
-              controlPointStyle: {
-                controlSize: 10.0,
-                controlFill: "transparent",
-                controlStroke: "white",
-                connectionStroke: "blue",
-                strokeCompositeOperation: "difference",
-              },
-            });
-            fabricPath.hasBorders = false;
-          } else {
-            fabricPath.controls =
-              fabric.controlsUtils.createObjectDefaultControls();
-            fabricPath.hasBorders = true;
-            deselectPathControls();
-          }
-          fabricPath.setCoords();
-          canvas.requestRenderAll();
-        });
-        fabricPath.on("deselected", () => {
-          deselectPathControls();
-        });
-        fabricPath.on("modifyPath", (event) => {
-          console.log(event);
-        });
-      }
-
-      canvas.add(...fabricPaths);
-    }
-
     let isDragging = false;
     let lastPosX: number | null = null;
     let lastPosY: number | null = null;
@@ -265,9 +173,6 @@ export function GlyphView({
         }
         obj.set("strokeWidth", obj.originalStrokeWidth / zoom);
       });
-      if (canvas.freeDrawingBrush) {
-        canvas.freeDrawingBrush.width = 2.0 / zoom;
-      }
     }
     canvas.on("mouse:wheel", function (opt) {
       if (opt.e.ctrlKey) {
@@ -284,7 +189,7 @@ export function GlyphView({
         opt.e.stopPropagation();
         // constrain to glyph area
         constrainViewport(canvas.viewportTransform);
-        vptRef.current = canvas.viewportTransform;
+        viewportRef.current = canvas.viewportTransform;
         // Keep stroke width appear constant regardless of zoom
         adjustStrokes(zoom);
         canvas.requestRenderAll();
@@ -319,7 +224,7 @@ export function GlyphView({
           vpt[5] += e.clientY - lastPosY;
           constrainViewport(vpt);
           canvas.setViewportTransform(vpt);
-          vptRef.current = vpt;
+          viewportRef.current = vpt;
           canvas.requestRenderAll();
           lastPosX = e.clientX;
           lastPosY = e.clientY;
@@ -333,46 +238,15 @@ export function GlyphView({
         canvas.setViewportTransform(canvas.viewportTransform);
         isDragging = false;
         canvas.selection = true;
-        canvas.isDrawingMode = mode === GlyphViewState.CUTTING;
         for (const obj of canvas.getObjects()) {
           obj.lockMovementX = false;
           obj.lockMovementY = false;
         }
       }
     });
-    const cuttingPaths: paper.CompoundPath[] = [];
-    canvas.on("path:created", function (event) {
-      if (
-        mode === GlyphViewState.CUTTING &&
-        path !== null &&
-        pathRef.current !== null
-      ) {
-        const addedPath = fabricToCompoundPath(
-          (event.path as fabric.Path).path,
-          { scaleX: 1000 / width, scaleY: 1000 / height, dontClose: true },
-        );
-        cuttingPaths.push(addedPath);
-        for (let i = 0; i < path.paths.length; ++i) {
-          const fabricPath = fabricPaths[i];
-          let newPath = fabricToCompoundPath(path.paths[i]);
-          for (const cut of cuttingPaths) {
-            newPath = newPath.divide(cut, {
-              trace: false,
-            }) as paper.CompoundPath;
-            newPath.closePath();
-          }
-          fabricPath.set("path", paperToFabricPath(newPath));
-          fabricPath.setCoords();
-          // Update the pathRef
-          pathRef.current.paths[i] = fabricPath.path;
-        }
-        canvas.remove(event.path);
-        canvas.requestRenderAll();
-      }
-    });
 
     // Set the viewport transform if it exists
-    canvas.viewportTransform = vptRef.current || [1, 0, 0, 1, 0, 0];
+    canvas.viewportTransform = viewportRef.current || [1, 0, 0, 1, 0, 0];
     adjustStrokes(canvas.getZoom());
 
     // Clean up on unmount to prevent memory leaks
@@ -381,7 +255,121 @@ export function GlyphView({
         fabricRef.current.dispose();
       }
     };
-  }, [width, height, mode, path, bgPaths, interactive]);
+  }, [width, height, interactive, onPathChanged]);
+
+  // Update the background paths when they change
+  useEffect(() => {
+    if (!fabricRef.current) return;
+    for (const obj of bgPathsObjectsRef.current) {
+      fabricRef.current.remove(obj);
+    }
+    bgPathsObjectsRef.current.length = 0;
+    for (const path of bgPaths) {
+      bgPathsObjectsRef.current.push(
+        ...toFabricPaths(path, width, height, {
+          selectable: false,
+          evented: false,
+          strokeWidth: 2,
+          stroke: teal[800],
+          fill: "transparent",
+          opacity: 0.3,
+        }),
+      );
+    }
+    fabricRef.current.add(...bgPathsObjectsRef.current);
+  }, [width, height, bgPaths]);
+
+  // Update the path when it changes
+  useEffect(() => {
+    if (!fabricRef.current) return;
+    if (!canvasRecreatedRef.current && pathRef.current === path) return;
+
+    const canvas = fabricRef.current;
+
+    pathRef.current = structuredClone(path);
+
+    // update canvas with new path
+    for (const obj of pathObjectsRef.current) {
+      fabricRef.current.remove(obj);
+    }
+    pathObjectsRef.current.length = 0;
+
+    const pathSelectable = interactive;
+    const fabricPaths =
+      pathRef.current !== null
+        ? toFabricPaths(pathRef.current, width, height, {
+            selectable: pathSelectable,
+            evented: pathSelectable,
+            fill: "black",
+            stroke: amber[800],
+            strokeWidth: 8,
+          })
+        : [];
+
+    if (interactive) {
+      if (pathRef.current !== null) {
+        // Add a semi-transparent copy of the path for reference
+        const refPaths = toFabricPaths(pathRef.current, width, height, {
+          selectable: false,
+          evented: false,
+          fill: blue[500],
+          opacity: 0.3,
+        });
+        pathObjectsRef.current.push(...refPaths);
+        canvas.add(...refPaths);
+      }
+
+      // Attach event listeners
+      for (let i = 0; i < fabricPaths.length; ++i) {
+        const fabricPath = fabricPaths[i];
+        let editing = false;
+        fabricPath.on("mousedblclick", () => {
+          editing = !editing;
+          if (editing) {
+            fabricPath.controls = createPathControls(fabricPath, {
+              pointStyle: {
+                controlSize: 10.0,
+                controlFill: "white",
+                controlStroke: "blue",
+                controlStyle: "rect",
+              },
+              controlPointStyle: {
+                controlSize: 10.0,
+                controlFill: "transparent",
+                controlStroke: "white",
+                connectionStroke: "blue",
+                strokeCompositeOperation: "difference",
+              },
+            });
+            fabricPath.hasBorders = false;
+          } else {
+            fabricPath.controls =
+              fabric.controlsUtils.createObjectDefaultControls();
+            fabricPath.hasBorders = true;
+            deselectPathControls();
+          }
+          fabricPath.setCoords();
+          canvas.requestRenderAll();
+        });
+        fabricPath.on("deselected", () => {
+          deselectPathControls();
+          if (onPathChanged) {
+            onPathChanged(pathRef.current);
+          }
+        });
+        fabricPath.on("modifyPath", () => {
+          if (pathRef.current && pathRef.current.paths) {
+            pathRef.current.paths[i] = fabricPath.path;
+          }
+        });
+      }
+    }
+
+    pathObjectsRef.current.push(...fabricPaths);
+    canvas.add(...fabricPaths);
+  }, [width, height, path, interactive, onPathChanged]);
+
+  canvasRecreatedRef.current = false;
 
   function importFromSVG() {
     const input = document.createElement("input");
@@ -422,37 +410,6 @@ export function GlyphView({
               <RestartAltIcon />
             </Tooltip>
           </IconButton>
-          <ToggleButtonGroup
-            value={mode === GlyphViewState.CUTTING ? "cut" : null}
-            exclusive
-            onChange={(event, newValue) => {
-              setMode(
-                newValue === "cut"
-                  ? GlyphViewState.CUTTING
-                  : GlyphViewState.NORMAL,
-              );
-            }}
-          >
-            <ToggleButton value={"cut"}>
-              <Tooltip title="Cut Elements">
-                <ContentCutIcon />
-              </Tooltip>
-            </ToggleButton>
-          </ToggleButtonGroup>
-          {mode === GlyphViewState.CUTTING && (
-            <IconButton
-              onClick={() => {
-                setMode(GlyphViewState.NORMAL);
-                if (onPathChanged) {
-                  onPathChanged(pathRef.current);
-                }
-              }}
-            >
-              <Tooltip title="Done">
-                <CheckIcon />
-              </Tooltip>
-            </IconButton>
-          )}
           <IconButton onClick={() => importFromSVG()} className="ml-auto">
             <Tooltip title="Import SVG">
               <UploadFileIcon />

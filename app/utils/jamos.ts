@@ -1,3 +1,5 @@
+import seedrandom from "seedrandom";
+
 import {
   HANGUL_DATA,
   composeHangul,
@@ -317,7 +319,8 @@ export function getExampleEnvPaths(
   const varsetType = varsetName[0].slice(0, 1) as "l" | "v" | "t";
   const results: PathData[][] = [];
   const syllables = getSyllablesFor(jamoName, varsetName, false).toArray();
-  for (const syllable of shuffle(syllables)) {
+  const rng = seedrandom(`${jamoName}-${varsetName}`);
+  for (const syllable of shuffle(syllables, rng)) {
     const leading = getName(syllable.slice(0, 1))!;
     const vowel = getName(syllable.slice(1, 2))!;
     const trailing = getName(syllable.slice(2, 3))!;
@@ -360,9 +363,9 @@ export function getExampleEnvPaths(
   return results;
 }
 
-function shuffle<T>(arr: T[]): T[] {
+function shuffle<T>(arr: T[], rng: () => number): T[] {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
