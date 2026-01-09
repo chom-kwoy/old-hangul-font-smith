@@ -10,7 +10,7 @@ import {
 import Button from "@mui/material/Button";
 import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionCreators } from "redux-undo";
 
 import { GlyphView } from "@/app/components/GlyphView";
@@ -51,7 +51,7 @@ export function Editor({
   const dispatch = useAppDispatch();
 
   // handle what happens on key press
-  const handleKeyPress = React.useCallback(
+  const handleKeyPress = useCallback(
     (event: KeyboardEvent) => {
       if (event.key === "z" && event.ctrlKey && !event.shiftKey) {
         // Ctrl+Z pressed
@@ -74,7 +74,7 @@ export function Editor({
     [onSaveFont, jamoVarsets, pastStates, dispatch],
   );
 
-  React.useEffect(() => {
+  useEffect(() => {
     document.addEventListener("keydown", handleKeyPress);
     return () => {
       document.removeEventListener("keydown", handleKeyPress);
@@ -84,11 +84,11 @@ export function Editor({
   const [leftDivRef, leftDivSize] = useComponentSize<HTMLDivElement>();
   const [rightDivRef, rightDivSize] = useComponentSize<HTMLDivElement>();
 
-  const [anchorEl, setAnchorEl] = React.useState<HTMLElement | null>(null);
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
 
   type JamoItem = { label: string; name: string; value: string };
-  const JAMO_LIST = React.useMemo(
+  const JAMO_LIST = useMemo(
     () =>
       new Map<string, JamoItem>(
         [
@@ -121,7 +121,7 @@ export function Editor({
   const curVarsets = jamoVarsets[selectedJamoName];
   const selectedVarset = getVarset(curVarsets, selectedVarsetName);
 
-  const bgPaths = React.useMemo(
+  const bgPaths = useMemo(
     () =>
       getExampleEnvPaths(
         jamoVarsets,
@@ -140,7 +140,7 @@ export function Editor({
     [],
   );
 
-  const syllables = React.useMemo(
+  const syllables = useMemo(
     () =>
       getSyllablesFor(selectedJamoName, selectedVarsetName, false)
         .filter((syllable) => {
@@ -151,7 +151,7 @@ export function Editor({
     [selectedJamoName, selectedVarsetName, fontProcessor],
   );
 
-  const setCurrentPath = React.useCallback(
+  const setCurrentPath = useCallback(
     (newPath: PathData | null) => {
       dispatch(
         pathUpdated({

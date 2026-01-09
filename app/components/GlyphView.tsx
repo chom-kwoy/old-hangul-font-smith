@@ -5,7 +5,7 @@ import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { IconButton, Tooltip } from "@mui/material";
 import { amber, blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 
 import { pathDataToSVG, svgToPathData } from "@/app/utils/bezier";
 import { downloadStringAsFile } from "@/app/utils/download";
@@ -46,14 +46,14 @@ export function GlyphView({
   const pathObjectsRef = useRef<fabric.Path[]>([]);
   const bgPathsObjectsRef = useRef<fabric.Path[]>([]);
 
-  const commitPath = React.useCallback(() => {
+  const commitPath = useCallback(() => {
     if (onPathChanged) {
       onPathChanged(structuredClone(pathRef.current));
     }
   }, [onPathChanged]);
 
   // handle what happens on key press
-  const handleKeyPress = React.useCallback(
+  const handleKeyPress = useCallback(
     (event: KeyboardEvent) => {
       if (event.key === "Delete" || event.key === "Backspace") {
         if (fabricRef.current && pathRef.current) {
@@ -80,7 +80,7 @@ export function GlyphView({
     [commitPath],
   );
 
-  React.useEffect(() => {
+  useEffect(() => {
     document.addEventListener("keydown", handleKeyPress);
     return () => {
       document.removeEventListener("keydown", handleKeyPress);
