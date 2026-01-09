@@ -4,7 +4,6 @@ import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { IconButton, Tooltip } from "@mui/material";
 import { amber, blue, teal } from "@mui/material/colors";
-import { useWhatChanged } from "@simbathesailor/use-what-changed";
 import * as fabric from "fabric";
 import React, { useEffect, useRef } from "react";
 
@@ -47,11 +46,17 @@ export function GlyphView({
   const pathObjectsRef = useRef<fabric.Path[]>([]);
   const bgPathsObjectsRef = useRef<fabric.Path[]>([]);
 
+  const commitPath = React.useCallback(() => {
+    if (onPathChanged) {
+      onPathChanged(structuredClone(pathRef.current));
+    }
+  }, [onPathChanged]);
+
   // handle what happens on key press
   const handleKeyPress = React.useCallback(
     (event: KeyboardEvent) => {
       if (event.key === "Delete" || event.key === "Backspace") {
-        if (fabricRef.current) {
+        if (fabricRef.current && pathRef.current) {
           const canvas = fabricRef.current;
           const activeObjects = canvas.getActiveObjects();
           if (activeObjects.length > 0) {
@@ -62,26 +67,17 @@ export function GlyphView({
             canvas.requestRenderAll();
 
             // update pathRef
-            if (pathRef.current) {
-              const newPaths: fabric.Path[] = [];
-              for (const obj of canvas.getObjects()) {
-                if (obj instanceof fabric.Path && obj.selectable) {
-                  newPaths.push(obj);
-                }
-              }
-              const newPathData: PathData = {
-                paths: newPaths.map((p) => p.path),
-              };
-              pathRef.current = newPathData;
-              if (onPathChanged) {
-                onPathChanged(pathRef.current);
-              }
-            }
+            pathRef.current.paths = pathRef.current.paths.filter((path, i) => {
+              const fabricPath = pathObjectsRef.current[i];
+              return !activeObjects.includes(fabricPath);
+            });
+
+            commitPath();
           }
         }
       }
     },
-    [onPathChanged],
+    [commitPath],
   );
 
   React.useEffect(() => {
@@ -282,7 +278,11 @@ export function GlyphView({
   // Update the path when it changes
   useEffect(() => {
     if (!fabricRef.current) return;
-    if (!canvasRecreatedRef.current && pathRef.current === path) return;
+    if (
+      !canvasRecreatedRef.current &&
+      JSON.stringify(pathRef.current) === JSON.stringify(path)
+    )
+      return;
 
     const canvas = fabricRef.current;
 
@@ -305,6 +305,7 @@ export function GlyphView({
             strokeWidth: 8,
           })
         : [];
+    pathObjectsRef.current.push(...fabricPaths);
 
     if (interactive) {
       if (pathRef.current !== null) {
@@ -353,9 +354,7 @@ export function GlyphView({
         });
         fabricPath.on("deselected", () => {
           deselectPathControls();
-          if (onPathChanged) {
-            onPathChanged(pathRef.current);
-          }
+          commitPath();
         });
         fabricPath.on("modifyPath", () => {
           if (pathRef.current && pathRef.current.paths) {
@@ -365,9 +364,8 @@ export function GlyphView({
       }
     }
 
-    pathObjectsRef.current.push(...fabricPaths);
     canvas.add(...fabricPaths);
-  }, [width, height, path, interactive, onPathChanged]);
+  }, [width, height, path, interactive, commitPath]);
 
   canvasRecreatedRef.current = false;
 
@@ -383,9 +381,7 @@ export function GlyphView({
       const file = files[0];
       const text = await file.text();
       pathRef.current = svgToPathData(text);
-      if (onPathChanged) {
-        onPathChanged(pathRef.current);
-      }
+      commitPath();
     };
     input.click();
   }

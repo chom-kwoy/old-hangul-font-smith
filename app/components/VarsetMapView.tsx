@@ -102,32 +102,33 @@ export function VarsetMapView({
 
   const updateVarsets = useCallback(
     (newVarsets: JamoVarsets) => {
-      if (fabricRef.current !== null && overlayFabricRef.current !== null) {
-        const curPage = pages[curPageNum];
-        const varsetNames =
-          curPage.type === "consonant"
-            ? CONSONANT_VARSET_NAMES
-            : VOWEL_VARSET_NAMES;
-        for (const varsetName of varsetNames) {
-          for (const jamo of curPage.jamos) {
-            const objects = varsetToObjMap.current.get(
-              `${jamo.name}/${varsetName}`,
-            );
-            if (objects) {
-              const newVarset = newVarsets[jamo.name];
-              const newPath = getVarset(newVarset, varsetName);
-              if (objects.path !== newPath) {
-                objects.mainPaths.removeAll();
-                objects.mainPaths.add(...objects.makeMainPath(newPath));
-                objects.zoomPaths.removeAll();
-                objects.zoomPaths.add(...objects.makeZoomPath(newPath));
-              }
+      console.log("updateVarsets called");
+      if (!fabricRef.current || !overlayFabricRef.current) return;
+      const curPage = pages[curPageNum];
+      const varsetNames =
+        curPage.type === "consonant"
+          ? CONSONANT_VARSET_NAMES
+          : VOWEL_VARSET_NAMES;
+      for (const varsetName of varsetNames) {
+        for (const jamo of curPage.jamos) {
+          const objects = varsetToObjMap.current.get(
+            `${jamo.name}/${varsetName}`,
+          );
+          if (objects) {
+            const newVarset = newVarsets[jamo.name];
+            const newPath = getVarset(newVarset, varsetName);
+            if (objects.path !== newPath) {
+              objects.path = newPath;
+              objects.mainPaths.removeAll();
+              objects.mainPaths.add(...objects.makeMainPath(newPath));
+              objects.zoomPaths.removeAll();
+              objects.zoomPaths.add(...objects.makeZoomPath(newPath));
             }
           }
         }
-        fabricRef.current.requestRenderAll();
-        overlayFabricRef.current.requestRenderAll();
       }
+      fabricRef.current.requestRenderAll();
+      overlayFabricRef.current.requestRenderAll();
     },
     [pages, curPageNum],
   );
