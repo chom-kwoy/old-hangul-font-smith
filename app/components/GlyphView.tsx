@@ -305,6 +305,7 @@ export function GlyphView({
         for (let i = 0; i < fabricPaths.length; ++i) {
           const fabricPath = fabricPaths[i];
           let editing = false;
+          let pathModified = false;
           fabricPath.on("mousedblclick", () => {
             editing = !editing;
             if (editing) {
@@ -335,11 +336,15 @@ export function GlyphView({
           });
           fabricPath.on("deselected", () => {
             deselectPathControls();
-            commitPath(state);
+            if (pathModified) {
+              pathModified = false;
+              commitPath(state);
+            }
           });
           fabricPath.on("modifyPath", () => {
             if (state.path) {
               state.path.updatePath(i, fabricPath.path);
+              pathModified = true;
             }
           });
         }
@@ -459,6 +464,9 @@ export function GlyphView({
             // update pathRef
             state.path.filterPaths((path, i) => {
               const fabricPath = state.pathObjects[i];
+              return !activeObjects.includes(fabricPath);
+            });
+            state.pathObjects = state.pathObjects.filter((fabricPath) => {
               return !activeObjects.includes(fabricPath);
             });
             commitPath(state);
