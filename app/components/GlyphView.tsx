@@ -1,6 +1,7 @@
 import CloseIcon from "@mui/icons-material/Close";
 import DownloadIcon from "@mui/icons-material/Download";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
@@ -18,7 +19,6 @@ import { TransitionProps } from "@mui/material/transitions";
 import * as fabric from "fabric";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import useComponentSize from "@/app/hooks/useComponentSize";
 import PathData from "@/app/utils/PathData";
 import { downloadStringAsFile } from "@/app/utils/download";
 import {
@@ -565,7 +565,7 @@ export function GlyphView({
               <CloseIcon />
             </IconButton>
             <Typography sx={{ ml: 2, flex: 1 }} variant="h6" component="div">
-              Fullscreen glyph editor
+              Glyph editor
             </Typography>
             <Button
               autoFocus
@@ -576,11 +576,52 @@ export function GlyphView({
             </Button>
           </Toolbar>
         </AppBar>
-        <div
-          ref={dialogRef}
-          className="w-full h-full flex justify-center bg-stone-200"
-        >
-          <canvas className="m-auto" />
+        <div className="h-full flex">
+          {interactive && (
+            <div className="flex flex-col bg-stone-200">
+              <IconButton onClick={() => setDialogOpen(false)}>
+                <Tooltip title="Exit Fullscreen" placement="right">
+                  <FullscreenExitIcon />
+                </Tooltip>
+              </IconButton>
+              <IconButton
+                onClick={(event) => {
+                  if (onResetToSyllable) {
+                    onResetToSyllable(event.currentTarget);
+                  }
+                }}
+              >
+                <Tooltip title="Reset to Full Syllable" placement="right">
+                  <RestartAltIcon />
+                </Tooltip>
+              </IconButton>
+              <IconButton onClick={() => importFromSVG()} className="ml-auto">
+                <Tooltip title="Import SVG" placement="right">
+                  <UploadFileIcon />
+                </Tooltip>
+              </IconButton>
+              <IconButton
+                onClick={() => {
+                  if (path === null) return;
+                  downloadStringAsFile(
+                    path.exportSvg(),
+                    glyphName ? `${glyphName}.svg` : "glyph.svg",
+                    "image/svg+xml",
+                  );
+                }}
+              >
+                <Tooltip title="Download as SVG" placement="right">
+                  <DownloadIcon />
+                </Tooltip>
+              </IconButton>
+            </div>
+          )}
+          <div
+            ref={dialogRef}
+            className="w-full h-full flex justify-center bg-stone-200"
+          >
+            <canvas className="m-auto" />
+          </div>
         </div>
       </Dialog>
     </div>
