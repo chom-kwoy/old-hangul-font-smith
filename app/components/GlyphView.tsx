@@ -378,8 +378,9 @@ export function GlyphView({
       }
       const file = files[0];
       const text = await file.text();
-      pathRef.current = PathData.fromSvg(text);
-      commitPath();
+      if (onPathChanged) {
+        onPathChanged(PathData.fromSvg(text));
+      }
     };
     input.click();
   }
