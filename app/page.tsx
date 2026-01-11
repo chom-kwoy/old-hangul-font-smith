@@ -5,6 +5,7 @@ import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { IconButton, Menu, MenuItem, Snackbar } from "@mui/material";
 import Button from "@mui/material/Button";
+import * as fabric from "fabric";
 import { produce } from "immer";
 import moment from "moment";
 import paper from "paper";
@@ -24,6 +25,19 @@ import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
 // @ts-expect-error no argument is also allowed
 paper.setup();
 paper.settings.insertItems = false;
+
+// Set global fabric.js defaults
+fabric.InteractiveFabricObject.ownDefaults = {
+  ...fabric.InteractiveFabricObject.ownDefaults,
+  cornerStrokeColor: "white",
+  cornerColor: "lightblue",
+  cornerStyle: "circle",
+  cornerSize: 12,
+  padding: 0,
+  transparentCorners: false,
+  borderColor: "grey",
+  borderScaleFactor: 1.2,
+};
 
 export enum AppState {
   IDLE,

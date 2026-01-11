@@ -1,5 +1,6 @@
 import seedrandom from "seedrandom";
 
+import PathData from "@/app/utils/PathData";
 import {
   HANGUL_DATA,
   composeHangul,
@@ -15,7 +16,6 @@ import {
   ConsonantVarsetType,
   JamoPref,
   JamoVarsets,
-  PathData,
   VarsetType,
   VowelInfo,
   VowelSets,
@@ -53,13 +53,13 @@ export function getVarset(
   if (varsets.type === "consonant") {
     const v = varsetName as ConsonantVarsetType;
     if (CONSONANT_VARSET_NAMES.includes(v)) {
-      return varsets[v] as PathData | null;
+      return varsets[v] ? PathData.deserialize(varsets[v]) : null;
     }
     return null;
   } else {
     const v = varsetName as VowelVarsetType;
     if (VOWEL_VARSET_NAMES.includes(v)) {
-      return varsets[v] as PathData | null;
+      return varsets[v] ? PathData.deserialize(varsets[v]) : null;
     }
     return null;
   }

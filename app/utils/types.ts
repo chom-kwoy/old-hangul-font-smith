@@ -1,4 +1,4 @@
-import { TSimplePathData } from "fabric";
+import { SerializedPathData } from "@/app/utils/PathData";
 
 export type FontMetadata = {
   name: string;
@@ -30,17 +30,13 @@ export type VowelInfo = {
 
 export type JamoVarsets = Record<string, ConsonantSets | VowelSets>;
 
-export type PathData = {
-  paths: TSimplePathData[];
-};
-
 export type ConsonantSets = {
   type: "consonant";
-} & Record<ConsonantVarsetType, PathData | null>;
+} & Record<ConsonantVarsetType, SerializedPathData | null>;
 
 export type VowelSets = {
   type: "vowel";
-} & Record<VowelVarsetType, PathData | null>;
+} & Record<VowelVarsetType, SerializedPathData | null>;
 
 export type Bounds = {
   left: number;

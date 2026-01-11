@@ -7,14 +7,12 @@ import { amber, blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import React, { useCallback, useEffect, useRef } from "react";
 
-import { pathDataToSVG, svgToPathData } from "@/app/utils/bezier";
+import PathData from "@/app/utils/PathData";
 import { downloadStringAsFile } from "@/app/utils/download";
-import { toFabricPaths } from "@/app/utils/fabricUtils";
 import {
   createPathControls,
   deselectPathControls,
 } from "@/app/utils/pathControl";
-import { PathData } from "@/app/utils/types";
 
 export function GlyphView({
   width,
@@ -48,7 +46,7 @@ export function GlyphView({
 
   const commitPath = useCallback(() => {
     if (onPathChanged) {
-      onPathChanged(structuredClone(pathRef.current));
+      onPathChanged(pathRef.current?.clone() ?? null);
     }
   }, [onPathChanged]);
 
@@ -67,7 +65,7 @@ export function GlyphView({
             canvas.requestRenderAll();
 
             // update pathRef
-            pathRef.current.paths = pathRef.current.paths.filter((path, i) => {
+            pathRef.current.filterPaths((path, i) => {
               const fabricPath = pathObjectsRef.current[i];
               return !activeObjects.includes(fabricPath);
             });
@@ -262,7 +260,7 @@ export function GlyphView({
     bgPathsObjectsRef.current.length = 0;
     for (const path of bgPaths) {
       bgPathsObjectsRef.current.push(
-        ...toFabricPaths(path, width, height, {
+        ...path.makeFabricPaths(width, height, {
           selectable: false,
           evented: false,
           strokeWidth: 2,
@@ -286,7 +284,7 @@ export function GlyphView({
 
     const canvas = fabricRef.current;
 
-    pathRef.current = structuredClone(path);
+    pathRef.current = path?.clone() ?? null;
 
     // update canvas with new path
     for (const obj of pathObjectsRef.current) {
@@ -297,7 +295,7 @@ export function GlyphView({
     const pathSelectable = interactive;
     const fabricPaths =
       pathRef.current !== null
-        ? toFabricPaths(pathRef.current, width, height, {
+        ? pathRef.current.makeFabricPaths(width, height, {
             selectable: pathSelectable,
             evented: pathSelectable,
             fill: "black",
@@ -310,7 +308,7 @@ export function GlyphView({
     if (interactive) {
       if (pathRef.current !== null) {
         // Add a semi-transparent copy of the path for reference
-        const refPaths = toFabricPaths(pathRef.current, width, height, {
+        const refPaths = pathRef.current.makeFabricPaths(width, height, {
           selectable: false,
           evented: false,
           fill: blue[500],
@@ -357,8 +355,8 @@ export function GlyphView({
           commitPath();
         });
         fabricPath.on("modifyPath", () => {
-          if (pathRef.current && pathRef.current.paths) {
-            pathRef.current.paths[i] = fabricPath.path;
+          if (pathRef.current) {
+            pathRef.current.updatePath(i, fabricPath.path);
           }
         });
       }
@@ -380,7 +378,7 @@ export function GlyphView({
       }
       const file = files[0];
       const text = await file.text();
-      pathRef.current = svgToPathData(text);
+      pathRef.current = PathData.fromSvg(text);
       commitPath();
     };
     input.click();
@@ -415,7 +413,7 @@ export function GlyphView({
             onClick={() => {
               if (path === null) return;
               downloadStringAsFile(
-                pathDataToSVG(path),
+                path.exportSvg(),
                 glyphName ? `${glyphName}.svg` : "glyph.svg",
                 "image/svg+xml",
               );

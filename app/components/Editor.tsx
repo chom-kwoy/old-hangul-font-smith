@@ -19,6 +19,7 @@ import useComponentSize from "@/app/hooks/useComponentSize";
 import { FontProcessor } from "@/app/processors/fontProcessor";
 import { pathUpdated } from "@/app/redux/features/font/font-slice";
 import { useAppDispatch, useAppSelector } from "@/app/redux/hooks";
+import PathData from "@/app/utils/PathData";
 import { downloadArrayBufferAsFile } from "@/app/utils/download";
 import { HANGUL_DATA, unicodeNameToHangul } from "@/app/utils/hangulData";
 import {
@@ -30,7 +31,6 @@ import { uniToPua } from "@/app/utils/puaUniConv";
 import {
   ConsonantInfo,
   JamoVarsets,
-  PathData,
   VarsetType,
   VowelInfo,
 } from "@/app/utils/types";
@@ -157,7 +157,7 @@ export function Editor({
         pathUpdated({
           jamoName: selectedJamoName,
           varsetName: selectedVarsetName,
-          path: newPath,
+          path: newPath?.serialize() ?? null,
         }),
       );
     },

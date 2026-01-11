@@ -1,11 +1,11 @@
 import { PayloadAction, createSlice } from "@reduxjs/toolkit";
 import undoable from "redux-undo";
 
+import { SerializedPathData } from "@/app/utils/PathData";
 import { CONSONANT_VARSET_NAMES, VOWEL_VARSET_NAMES } from "@/app/utils/jamos";
 import {
   ConsonantVarsetType,
   JamoVarsets,
-  PathData,
   VarsetType,
   VowelVarsetType,
 } from "@/app/utils/types";
@@ -28,7 +28,7 @@ const fontSlice = createSlice({
       action: PayloadAction<{
         jamoName: string;
         varsetName: VarsetType;
-        path: PathData | null;
+        path: SerializedPathData | null;
       }>,
     ) {
       if (!state.jamoVarsets) return;

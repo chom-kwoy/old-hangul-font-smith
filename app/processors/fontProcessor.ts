@@ -1,6 +1,6 @@
 import opentype from "opentype.js";
 
-import { intersectPathData, opentypeToPathData } from "@/app/utils/bezier";
+import PathData from "@/app/utils/PathData";
 import { HANGUL_DATA } from "@/app/utils/hangulData";
 import {
   CONSONANT_JAMO_BOUNDS,
@@ -16,7 +16,6 @@ import {
   ConsonantSets,
   FontMetadata,
   JamoVarsets,
-  PathData,
   VowelSets,
 } from "@/app/utils/types";
 
@@ -104,7 +103,7 @@ export class FontProcessor {
       // canonical form
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
-        sets.canon = this.toPathData(glyph.path);
+        sets.canon = this.toPathData(glyph.path).serialize();
       }
       for (const varsetName of CONSONANT_VARSET_NAMES) {
         if (
@@ -123,7 +122,7 @@ export class FontProcessor {
           ) {
             const glyph = this.font.charToGlyph(syllable);
             const bezier = this.toPathData(glyph.path);
-            sets[varsetName] = intersectPathData(bezier, bounds);
+            sets[varsetName] = bezier.intersectBoundsList(bounds).serialize();
             break;
           }
         }
@@ -144,7 +143,7 @@ export class FontProcessor {
       // canonical form
       if (this.font.hasChar(jamo.canonical)) {
         const glyph = this.font.charToGlyph(jamo.canonical);
-        sets.canon = this.toPathData(glyph.path);
+        sets.canon = this.toPathData(glyph.path).serialize();
       }
       for (const varsetName of VOWEL_VARSET_NAMES) {
         if (varsetName === "canon" || jamo.vowel === null) {
@@ -163,7 +162,7 @@ export class FontProcessor {
               bezier,
               jamo.position,
               ["v3", "v4"].includes(varsetName),
-            );
+            ).serialize();
             break;
           }
         }
@@ -204,7 +203,7 @@ export class FontProcessor {
     // Font metric scaling (Em units usually 1000 or 2048)
     const unitsPerEm = this.font.unitsPerEm;
     const sTypoDescender = this.font.tables.os2.sTypoDescender;
-    return opentypeToPathData(path, unitsPerEm, sTypoDescender);
+    return PathData.fromOpentype(path, unitsPerEm, sTypoDescender);
   }
 }
 
@@ -215,7 +214,7 @@ function extractVowel(
 ) {
   let extracted;
   if (position === "right") {
-    extracted = intersectPathData(bezier, [
+    extracted = bezier.intersectBoundsList([
       {
         left: 500,
         right: 1000,
@@ -224,7 +223,7 @@ function extractVowel(
       },
     ]);
   } else if (position === "under") {
-    extracted = intersectPathData(bezier, [
+    extracted = bezier.intersectBoundsList([
       {
         left: 0,
         right: 1000,
@@ -233,7 +232,7 @@ function extractVowel(
       },
     ]);
   } else if (position === "mixed") {
-    extracted = intersectPathData(bezier, [
+    extracted = bezier.intersectBoundsList([
       {
         left: 500,
         right: 1000,

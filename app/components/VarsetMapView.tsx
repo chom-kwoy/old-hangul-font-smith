@@ -10,7 +10,7 @@ import React, {
   useState,
 } from "react";
 
-import { toFabricPaths } from "@/app/utils/fabricUtils";
+import PathData from "@/app/utils/PathData";
 import { HANGUL_DATA } from "@/app/utils/hangulData";
 import {
   CONSONANT_VARSET_NAMES,
@@ -20,7 +20,6 @@ import {
 import {
   ConsonantInfo,
   JamoVarsets,
-  PathData,
   VarsetType,
   VowelInfo,
 } from "@/app/utils/types";
@@ -102,7 +101,6 @@ export function VarsetMapView({
 
   const updateVarsets = useCallback(
     (newVarsets: JamoVarsets) => {
-      console.log("updateVarsets called");
       if (!fabricRef.current || !overlayFabricRef.current) return;
       const curPage = pages[curPageNum];
       const varsetNames =
@@ -255,7 +253,7 @@ export function VarsetMapView({
       // Add paths
       const makeMainPath = (path: PathData | null) => {
         if (!path) return [];
-        return toFabricPaths(path, cellSize, cellSize, {
+        return path.makeFabricPaths(cellSize, cellSize, {
           offsetX: offX * cellSize,
           offsetY: offY * cellSize,
           selectable: false,
@@ -264,7 +262,7 @@ export function VarsetMapView({
       };
       const makeZoomPath = (path: PathData | null) => {
         if (!path) return [];
-        return toFabricPaths(path, zoomSize, zoomSize, {
+        return path.makeFabricPaths(zoomSize, zoomSize, {
           offsetX: (offX + 1) * cellSize,
           offsetY: offY * cellSize,
           selectable: false,
