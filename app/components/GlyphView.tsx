@@ -99,6 +99,7 @@ export function GlyphView({
             left: width / 2,
             top: (i * height) / N_MINOR,
             stroke: "lightgrey",
+            strokeWidth: 1,
             selectable: false,
             evented: false,
           }),
@@ -108,6 +109,7 @@ export function GlyphView({
             left: (i * width) / N_MINOR,
             top: height / 2,
             stroke: "lightgrey",
+            strokeWidth: 1,
             selectable: false,
             evented: false,
           }),
@@ -121,6 +123,7 @@ export function GlyphView({
             left: width / 2,
             top: height / 2,
             stroke: "red",
+            strokeWidth: 1,
             selectable: false,
             evented: false,
           }),
@@ -254,6 +257,9 @@ export function GlyphView({
         );
       }
       state.canvas.add(...state.bgPathObjects);
+      for (const obj of state.bgPathObjects) {
+        state.canvas.sendObjectToBack(obj);
+      }
     },
     [],
   );
@@ -555,7 +561,7 @@ export function GlyphView({
         slots={{ transition: Transition }}
       >
         <AppBar sx={{ position: "relative" }}>
-          <Toolbar>
+          <Toolbar variant="dense">
             <IconButton
               edge="start"
               color="inherit"
