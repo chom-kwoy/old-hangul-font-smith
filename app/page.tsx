@@ -21,24 +21,6 @@ import { getProgress } from "@/app/utils/jamos";
 import schedulerYield from "@/app/utils/schedulerYield";
 import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
 
-// Initialize paper.js context
-// @ts-expect-error no argument is also allowed
-paper.setup();
-paper.settings.insertItems = false;
-
-// Set global fabric.js defaults
-fabric.InteractiveFabricObject.ownDefaults = {
-  ...fabric.InteractiveFabricObject.ownDefaults,
-  cornerStrokeColor: "white",
-  cornerColor: "lightblue",
-  cornerStyle: "circle",
-  cornerSize: 12,
-  padding: 0,
-  transparentCorners: false,
-  borderColor: "grey",
-  borderScaleFactor: 1.2,
-};
-
 export enum AppState {
   IDLE,
   PROCESSING_FONT,
@@ -52,6 +34,26 @@ const FONT_MIME_TYPES =
   "font/otf, font/ttf, application/x-font-opentype, application/x-font-truetype";
 
 export default function Home() {
+  useEffect(() => {
+    // Initialize paper.js context
+    // @ts-expect-error no argument is also allowed
+    paper.setup();
+    paper.settings.insertItems = false;
+
+    // Set global fabric.js defaults
+    fabric.InteractiveFabricObject.ownDefaults = {
+      ...fabric.InteractiveFabricObject.ownDefaults,
+      cornerStrokeColor: "white",
+      cornerColor: "lightblue",
+      cornerStyle: "circle",
+      cornerSize: 12,
+      padding: 0,
+      transparentCorners: false,
+      borderColor: "grey",
+      borderScaleFactor: 1.2,
+    };
+  }, []);
+
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [errorMsg, setErrorMsg] = useState<string>("Unknown error.");
   const [fontProcessor] = useState(() => new FontProcessor());
