@@ -507,46 +507,28 @@ export function GlyphView({
     input.click();
   }
 
+  function downloadSVG() {
+    if (path === null) return;
+    downloadStringAsFile(
+      path.exportSvg(),
+      glyphName ? `${glyphName}.svg` : "glyph.svg",
+      "image/svg+xml",
+    );
+  }
+
   return (
     <div {...props}>
       {/* Toolbar */}
       {interactive && (
         <div className="flex bg-stone-200">
-          <IconButton onClick={() => setDialogOpen(true)}>
-            <Tooltip title="Fullscreen">
-              <FullscreenIcon />
-            </Tooltip>
-          </IconButton>
-          <IconButton
-            onClick={(event) => {
-              if (onResetToSyllable) {
-                onResetToSyllable(event.currentTarget);
-              }
-            }}
-          >
-            <Tooltip title="Reset to Full Syllable">
-              <RestartAltIcon />
-            </Tooltip>
-          </IconButton>
-          <IconButton onClick={() => importFromSVG()} className="ml-auto">
-            <Tooltip title="Import SVG">
-              <UploadFileIcon />
-            </Tooltip>
-          </IconButton>
-          <IconButton
-            onClick={() => {
-              if (path === null) return;
-              downloadStringAsFile(
-                path.exportSvg(),
-                glyphName ? `${glyphName}.svg` : "glyph.svg",
-                "image/svg+xml",
-              );
-            }}
-          >
-            <Tooltip title="Download as SVG">
-              <DownloadIcon />
-            </Tooltip>
-          </IconButton>
+          <GlyphViewMenu
+            isFullScreen={false}
+            openFullScreen={() => setDialogOpen(true)}
+            closeFullScreen={() => setDialogOpen(false)}
+            onResetToSyllable={onResetToSyllable}
+            importFromSVG={importFromSVG}
+            downloadSVG={downloadSVG}
+          />
         </div>
       )}
 
@@ -585,41 +567,14 @@ export function GlyphView({
         <div className="h-full flex">
           {interactive && (
             <div className="flex flex-col bg-stone-200">
-              <IconButton onClick={() => setDialogOpen(false)}>
-                <Tooltip title="Exit Fullscreen" placement="right">
-                  <FullscreenExitIcon />
-                </Tooltip>
-              </IconButton>
-              <IconButton
-                onClick={(event) => {
-                  if (onResetToSyllable) {
-                    onResetToSyllable(event.currentTarget);
-                  }
-                }}
-              >
-                <Tooltip title="Reset to Full Syllable" placement="right">
-                  <RestartAltIcon />
-                </Tooltip>
-              </IconButton>
-              <IconButton onClick={() => importFromSVG()} className="ml-auto">
-                <Tooltip title="Import SVG" placement="right">
-                  <UploadFileIcon />
-                </Tooltip>
-              </IconButton>
-              <IconButton
-                onClick={() => {
-                  if (path === null) return;
-                  downloadStringAsFile(
-                    path.exportSvg(),
-                    glyphName ? `${glyphName}.svg` : "glyph.svg",
-                    "image/svg+xml",
-                  );
-                }}
-              >
-                <Tooltip title="Download as SVG" placement="right">
-                  <DownloadIcon />
-                </Tooltip>
-              </IconButton>
+              <GlyphViewMenu
+                isFullScreen={true}
+                openFullScreen={() => setDialogOpen(true)}
+                closeFullScreen={() => setDialogOpen(false)}
+                onResetToSyllable={onResetToSyllable}
+                importFromSVG={importFromSVG}
+                downloadSVG={downloadSVG}
+              />
             </div>
           )}
           <div
@@ -631,6 +586,62 @@ export function GlyphView({
         </div>
       </Dialog>
     </div>
+  );
+}
+
+function GlyphViewMenu({
+  isFullScreen,
+  openFullScreen,
+  closeFullScreen,
+  onResetToSyllable,
+  importFromSVG,
+  downloadSVG,
+}: {
+  isFullScreen: boolean;
+  openFullScreen: () => void;
+  closeFullScreen: () => void;
+  onResetToSyllable?: (target: HTMLElement) => void;
+  importFromSVG: () => void;
+  downloadSVG: () => void;
+}) {
+  return (
+    <>
+      {!isFullScreen && (
+        <IconButton onClick={openFullScreen}>
+          <Tooltip title="Fullscreen">
+            <FullscreenIcon />
+          </Tooltip>
+        </IconButton>
+      )}
+      {isFullScreen && (
+        <IconButton onClick={closeFullScreen}>
+          <Tooltip title="Exit Fullscreen" placement="right">
+            <FullscreenExitIcon />
+          </Tooltip>
+        </IconButton>
+      )}
+      <IconButton
+        onClick={(event) => {
+          if (onResetToSyllable) {
+            onResetToSyllable(event.currentTarget);
+          }
+        }}
+      >
+        <Tooltip title="Reset to Full Syllable" placement="right">
+          <RestartAltIcon />
+        </Tooltip>
+      </IconButton>
+      <IconButton onClick={importFromSVG} className="ml-auto">
+        <Tooltip title="Import SVG" placement="right">
+          <UploadFileIcon />
+        </Tooltip>
+      </IconButton>
+      <IconButton onClick={downloadSVG}>
+        <Tooltip title="Download as SVG" placement="right">
+          <DownloadIcon />
+        </Tooltip>
+      </IconButton>
+    </>
   );
 }
 
