@@ -16,7 +16,7 @@ import { Editor } from "@/app/components/Editor";
 import { VisuallyHiddenInput } from "@/app/components/VisuallyHiddenInput";
 import { FontProcessor } from "@/app/processors/fontProcessor";
 import { fontLoaded } from "@/app/redux/features/font/font-slice";
-import { useAppDispatch, useAppSelector } from "@/app/redux/hooks";
+import { useAppDispatch, useAppStore } from "@/app/redux/hooks";
 import { getProgress } from "@/app/utils/jamos";
 import schedulerYield from "@/app/utils/schedulerYield";
 import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
@@ -62,9 +62,7 @@ export default function Home() {
 
   // Redux dispatch action
   const dispatch = useAppDispatch();
-  const jamoVarsets = useAppSelector(
-    (state) => state.font.present.jamoVarsets!,
-  );
+  const store = useAppStore();
 
   // State for the saved fonts popup menu
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
@@ -361,9 +359,13 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => {
-                    saveFont(jamoVarsets);
-                    setAppState(AppState.IDLE);
-                    setCurSavedFontIdx(null);
+                    const jamoVarsets =
+                      store.getState().font.present.jamoVarsets;
+                    if (jamoVarsets) {
+                      saveFont(jamoVarsets);
+                      setAppState(AppState.IDLE);
+                      setCurSavedFontIdx(null);
+                    }
                   }}
                   className="text-sm text-stone-500 hover:text-stone-800 underline"
                 >

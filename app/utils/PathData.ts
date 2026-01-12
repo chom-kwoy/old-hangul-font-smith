@@ -3,12 +3,12 @@ import * as fabric from "fabric";
 import opentype from "opentype.js";
 import paper from "paper";
 
-import { intersectCompoundPath } from "@/app/utils/bezier";
 import {
-  fabricToCompoundPath,
-  fabricToSVG,
-  paperToFabricPath,
-} from "@/app/utils/fabricUtils";
+  fabricPathDataToPaper,
+  fabricPathDataToSVG,
+  intersectCompoundPath,
+  paperToFabricPathData,
+} from "@/app/utils/bezier";
 import { Bounds } from "@/app/utils/types";
 
 export type SerializedPathData = {
@@ -93,7 +93,7 @@ export default class PathData {
       if (d) {
         const compoundPath = new paper.CompoundPath(d);
         compoundPath.closePath();
-        result.push(paperToFabricPath(compoundPath));
+        result.push(paperToFabricPathData(compoundPath));
       }
     }
 
@@ -113,14 +113,12 @@ export default class PathData {
     offsetY = offsetY || 0;
     const result: fabric.Path[] = [];
     for (const comp of this.#paths) {
-      const bbox = new paper.CompoundPath(fabricToSVG(comp)).bounds;
-      const bboxWidth = bbox.right - bbox.left;
-      const bboxHeight = bbox.bottom - bbox.top;
+      const bbox = fabricPathDataToPaper(comp).bounds;
       result.push(
         new fabric.Path(comp, {
           ...options,
-          left: offsetX + (bbox.left + bboxWidth / 2) * (width / 1000),
-          top: offsetY + (bbox.top + bboxHeight / 2) * (height / 1000),
+          left: offsetX + (bbox.left + bbox.width / 2) * (width / 1000),
+          top: offsetY + (bbox.top + bbox.height / 2) * (height / 1000),
           scaleX: width / 1000,
           scaleY: height / 1000,
         }),
@@ -132,7 +130,7 @@ export default class PathData {
   exportSvg(): string {
     let svgData = "";
     for (const comp of this.#paths) {
-      svgData += `<path d="${fabricToSVG(comp)}" />\n`;
+      svgData += `<path d="${fabricPathDataToSVG(comp)}" />\n`;
     }
     return `\
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
@@ -144,9 +142,9 @@ export default class PathData {
     const result: TSimplePathData[] = [];
     for (const compoundPath of this.#paths) {
       result.push(
-        paperToFabricPath(
+        paperToFabricPathData(
           intersectCompoundPath(
-            fabricToCompoundPath(compoundPath),
+            fabricPathDataToPaper(compoundPath),
             boundsList,
             threshold,
           ),
@@ -160,11 +158,84 @@ export default class PathData {
     this.#paths = this.#paths.filter((path, index) => pred(path, index));
   }
 
-  updatePath(index: number, newPath: TSimplePathData): void {
+  updatePath(index: number, newPath: TSimplePathData | fabric.Path): void {
     if (index >= 0 && index < this.#paths.length) {
+      if (newPath instanceof fabric.Path) {
+        if (!newPath.canvas) {
+          throw new Error("fabric.Path must be added to a canvas");
+        }
+        const [canvasWidth, canvasHeight] = [
+          newPath.canvas.width,
+          newPath.canvas.height,
+        ];
+        const bbox = fabricPathDataToPaper(newPath.path).bounds;
+        const [offsetX, offsetY] = [
+          newPath.left * (1000 / canvasWidth) - bbox.width / 2 - bbox.left,
+          newPath.top * (1000 / canvasHeight) - bbox.height / 2 - bbox.top,
+        ];
+        const [scaleX, scaleY] = [
+          newPath.scaleX / (canvasWidth / 1000),
+          newPath.scaleY / (canvasHeight / 1000),
+        ];
+        newPath = transformFabricPathData(
+          newPath.path,
+          offsetX,
+          offsetY,
+          bbox.center.x,
+          bbox.center.y,
+          scaleX,
+          scaleY,
+        );
+      }
       this.#paths[index] = newPath;
     }
   }
+}
+
+function transformFabricPathData(
+  path: TSimplePathData,
+  dx: number,
+  dy: number,
+  cx: number,
+  cy: number,
+  sx: number,
+  sy: number,
+): TSimplePathData {
+  const result: TSimplePathData = [];
+  function trX(x: number): number {
+    return (x - cx) * sx + cx + dx;
+  }
+  function trY(y: number): number {
+    return (y - cy) * sy + cy + dy;
+  }
+  for (const cmd of path) {
+    switch (cmd[0]) {
+      case "M": // move to
+        result.push(["M", trX(cmd[1]), trY(cmd[2])]);
+        break;
+      case "L": // line to
+        result.push(["L", trX(cmd[1]), trY(cmd[2])]);
+        break;
+      case "Q": // quadratic bezier curve
+        result.push(["Q", trX(cmd[1]), trY(cmd[2]), trX(cmd[3]), trY(cmd[4])]);
+        break;
+      case "C": // cubic bezier curve
+        result.push([
+          "C",
+          trX(cmd[1]),
+          trY(cmd[2]),
+          trX(cmd[3]),
+          trY(cmd[4]),
+          trX(cmd[5]),
+          trY(cmd[6]),
+        ]);
+        break;
+      case "Z": // close path
+        result.push(["Z"]);
+        break;
+    }
+  }
+  return result;
 }
 
 // splits a single compound path into multiple paths, preserving holes
@@ -185,7 +256,7 @@ export function splitPaths(path: TSimplePathData): TSimplePathData[] {
   }
 
   // 1. Build adjacency list of subpaths based on containment
-  const paperSubpaths = subpaths.map((sp) => fabricToCompoundPath(sp));
+  const paperSubpaths = subpaths.map((sp) => fabricPathDataToPaper(sp));
   const tree = new Map<number, number[]>();
   tree.set(-1, []); // root
   for (let i = 0; i < subpaths.length; i++) {

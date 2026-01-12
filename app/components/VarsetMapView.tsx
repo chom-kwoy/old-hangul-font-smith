@@ -1,5 +1,6 @@
 import { MobileStepper } from "@mui/material";
 import Button from "@mui/material/Button";
+import { amber } from "@mui/material/colors";
 import { Stack } from "@mui/system";
 import * as fabric from "fabric";
 import React, {
@@ -115,7 +116,7 @@ export function VarsetMapView({
           if (objects) {
             const newVarset = newVarsets[jamo.name];
             const newPath = getVarset(newVarset, varsetName);
-            if (objects.path !== newPath) {
+            if (JSON.stringify(objects.path) !== JSON.stringify(newPath)) {
               objects.path = newPath;
               objects.mainPaths.removeAll();
               objects.mainPaths.add(...objects.makeMainPath(newPath));
@@ -139,7 +140,7 @@ export function VarsetMapView({
         `${newSelectedVarset.jamoName}/${newSelectedVarset.varsetName}`,
       );
       if (objects) {
-        objects.overlayRect.set("stroke", "red");
+        objects.overlayRect.set("stroke", amber[700]);
         overlayFabricRef.current.add(objects.overlayRect);
         overlayFabricRef.current.requestRenderAll();
 
@@ -309,7 +310,7 @@ export function VarsetMapView({
           selectedVarsetRef.current.jamoName == jamoInfo.name &&
           selectedVarsetRef.current.varsetName === varsetName
         ) {
-          overlayRect.set("stroke", "red");
+          overlayRect.set("stroke", amber[700]);
         } else {
           overlayRect.set("stroke", "grey");
         }
@@ -388,8 +389,16 @@ export function VarsetMapView({
   ]);
 
   useEffect(() => {
-    varsetRef.current = varsets;
-    updateVarsets(varsetRef.current);
+    const start = performance.now();
+
+    async function update() {
+      varsetRef.current = varsets;
+      updateVarsets(varsetRef.current);
+    }
+    update();
+
+    const duration = performance.now() - start;
+    console.debug(`updateVarsets Execution time: ${duration} milliseconds`);
   }, [varsets, updateVarsets]);
 
   useEffect(() => {

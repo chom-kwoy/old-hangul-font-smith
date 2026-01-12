@@ -18,7 +18,7 @@ import { VarsetMapView } from "@/app/components/VarsetMapView";
 import useComponentSize from "@/app/hooks/useComponentSize";
 import { FontProcessor } from "@/app/processors/fontProcessor";
 import { pathUpdated } from "@/app/redux/features/font/font-slice";
-import { useAppDispatch, useAppSelector } from "@/app/redux/hooks";
+import { useAppDispatch, useAppSelector, useAppStore } from "@/app/redux/hooks";
 import PathData from "@/app/utils/PathData";
 import { downloadArrayBufferAsFile } from "@/app/utils/download";
 import { HANGUL_DATA, unicodeNameToHangul } from "@/app/utils/hangulData";
@@ -44,10 +44,7 @@ export function Editor({
   previewImage: string;
   onSaveFont: (jamoVarsets: JamoVarsets) => void;
 }) {
-  const jamoVarsets = useAppSelector(
-    (state) => state.font.present.jamoVarsets!,
-  );
-  const pastStates = useAppSelector((state) => state.font.past);
+  const store = useAppStore();
   const dispatch = useAppDispatch();
 
   // handle what happens on key press
@@ -55,6 +52,7 @@ export function Editor({
     (event: KeyboardEvent) => {
       if (event.key === "z" && event.ctrlKey && !event.shiftKey) {
         // Ctrl+Z pressed
+        const pastStates = store.getState().font.past;
         if (pastStates.length > 1) {
           dispatch(ActionCreators.undo());
         }
@@ -67,11 +65,14 @@ export function Editor({
         dispatch(ActionCreators.redo());
         event.preventDefault();
       } else if (event.key === "s" && event.ctrlKey) {
-        onSaveFont(jamoVarsets);
-        event.preventDefault();
+        const jamoVarsets = store.getState().font.present.jamoVarsets;
+        if (jamoVarsets) {
+          onSaveFont(jamoVarsets);
+          event.preventDefault();
+        }
       }
     },
-    [onSaveFont, jamoVarsets, pastStates, dispatch],
+    [onSaveFont, store, dispatch],
   );
 
   useEffect(() => {
@@ -118,6 +119,9 @@ export function Editor({
     HANGUL_DATA.vowelInfo.get(selectedJamoName);
   const varsetList = getAvailableVarsetList(selectedJamoInfo);
 
+  const jamoVarsets = useAppSelector(
+    (state) => state.font.present.jamoVarsets,
+  )!;
   const curVarsets = jamoVarsets[selectedJamoName];
   const selectedVarset = getVarset(curVarsets, selectedVarsetName);
 

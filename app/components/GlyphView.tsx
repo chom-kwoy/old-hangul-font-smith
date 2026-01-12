@@ -47,6 +47,9 @@ export function GlyphView({
   glyphName?: string;
 } & React.ComponentProps<"div">) {
   bgPaths = bgPaths || [];
+  width = Math.max(width, 1);
+  height = Math.max(height, 1);
+
   const canvasElemRef = useRef<HTMLCanvasElement | null>(null);
   const viewportRef = useRef<fabric.TMat2D | null>(null);
 
@@ -69,6 +72,28 @@ export function GlyphView({
     },
     [onPathChanged],
   );
+
+  const adjustStrokes = useCallback((canvas: fabric.Canvas) => {
+    // Keep stroke width appear constant regardless of zoom
+    canvas.forEachObject(function (obj_) {
+      // typescript hack
+      const obj = obj_ as typeof obj_ & {
+        originalScale: number | undefined;
+        originalStrokeWidth: number | undefined;
+      };
+      if (
+        obj.originalStrokeWidth === undefined ||
+        obj.originalScale === undefined
+      ) {
+        obj.originalScale = (obj.scaleX + obj.scaleY) / 2;
+        obj.originalStrokeWidth = obj.strokeWidth;
+      }
+      const canvasSize = (canvas.getWidth() + canvas.getHeight()) / 2;
+      const objScale = (obj.scaleX + obj.scaleY) / 2 / obj.originalScale;
+      const multiplier = (300 / canvas.getZoom() / canvasSize) * objScale;
+      obj.set("strokeWidth", obj.originalStrokeWidth * multiplier);
+    });
+  }, []);
 
   const initializeCanvas = useCallback(
     (canvasElement: HTMLCanvasElement, width: number, height: number) => {
@@ -139,19 +164,6 @@ export function GlyphView({
         vpt[5] = Math.min(vpt[5], 0);
         vpt[5] = Math.max(vpt[5], height * (1 - vpt[1] - vpt[3]));
       }
-      function adjustStrokes(zoom: number) {
-        // Keep stroke width appear constant regardless of zoom
-        canvas.forEachObject(function (obj_) {
-          // typescript hack
-          const obj = obj_ as typeof obj_ & {
-            originalStrokeWidth: number | undefined;
-          };
-          if (obj.originalStrokeWidth === undefined) {
-            obj.originalStrokeWidth = obj_.strokeWidth;
-          }
-          obj.set("strokeWidth", obj.originalStrokeWidth / zoom);
-        });
-      }
       canvas.on("mouse:wheel", function (opt) {
         if (opt.e.ctrlKey) {
           const delta = opt.e.deltaY;
@@ -169,7 +181,7 @@ export function GlyphView({
           constrainViewport(canvas.viewportTransform);
           viewportRef.current = canvas.viewportTransform;
           // Keep stroke width appear constant regardless of zoom
-          adjustStrokes(zoom);
+          adjustStrokes(canvas);
           canvas.requestRenderAll();
         }
       });
@@ -225,12 +237,12 @@ export function GlyphView({
 
       // Set the viewport transform if it exists
       canvas.viewportTransform = viewportRef.current || [1, 0, 0, 1, 0, 0];
-      adjustStrokes(canvas.getZoom());
+      adjustStrokes(canvas);
 
       // Clean up on unmount to prevent memory leaks
       return canvas;
     },
-    [interactive],
+    [interactive, adjustStrokes],
   );
 
   const updateBgPaths = useCallback(
@@ -260,8 +272,10 @@ export function GlyphView({
       for (const obj of state.bgPathObjects) {
         state.canvas.sendObjectToBack(obj);
       }
+
+      adjustStrokes(state.canvas);
     },
-    [],
+    [adjustStrokes],
   );
 
   const updatePath = useCallback(
@@ -288,8 +302,8 @@ export function GlyphView({
               selectable: pathSelectable,
               evented: pathSelectable,
               fill: "black",
-              stroke: amber[800],
-              strokeWidth: 8,
+              stroke: amber[600],
+              strokeWidth: 6,
             })
           : [];
       state.pathObjects.push(...fabricPaths);
@@ -311,7 +325,6 @@ export function GlyphView({
         for (let i = 0; i < fabricPaths.length; ++i) {
           const fabricPath = fabricPaths[i];
           let editing = false;
-          let pathModified = false;
           fabricPath.on("mousedblclick", () => {
             editing = !editing;
             if (editing) {
@@ -342,23 +355,21 @@ export function GlyphView({
           });
           fabricPath.on("deselected", () => {
             deselectPathControls();
-            if (pathModified) {
-              pathModified = false;
-              commitPath(state);
-            }
           });
-          fabricPath.on("modifyPath", () => {
-            if (state.path) {
-              state.path.updatePath(i, fabricPath.path);
-              pathModified = true;
+          fabricPath.on("modified", (event) => {
+            if (event.transform && state.path) {
+              state.path.updatePath(i, fabricPath);
+              commitPath(state);
             }
           });
         }
       }
 
       state.canvas.add(...fabricPaths);
+
+      adjustStrokes(state.canvas);
     },
-    [interactive, commitPath],
+    [interactive, commitPath, adjustStrokes],
   );
 
   const pathRef = useRef<PathData | null>(path);
