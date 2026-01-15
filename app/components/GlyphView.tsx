@@ -81,16 +81,11 @@ export function GlyphView({
         originalScale: number | undefined;
         originalStrokeWidth: number | undefined;
       };
-      if (
-        obj.originalStrokeWidth === undefined ||
-        obj.originalScale === undefined
-      ) {
-        obj.originalScale = (obj.scaleX + obj.scaleY) / 2;
+      if (obj.originalStrokeWidth === undefined) {
         obj.originalStrokeWidth = obj.strokeWidth;
       }
-      const canvasSize = (canvas.getWidth() + canvas.getHeight()) / 2;
-      const objScale = (obj.scaleX + obj.scaleY) / 2 / obj.originalScale;
-      const multiplier = (300 / canvas.getZoom() / canvasSize) * objScale;
+      const objScale = (obj.scaleX + obj.scaleY) / 2;
+      const multiplier = 1 / canvas.getZoom() / objScale;
       obj.set("strokeWidth", obj.originalStrokeWidth * multiplier);
     });
   }, []);
@@ -158,11 +153,13 @@ export function GlyphView({
       let isDragging = false;
       let lastPosX: number | null = null;
       let lastPosY: number | null = null;
-      function constrainViewport(vpt: fabric.TMat2D) {
+      function constrainViewport(canvas: fabric.Canvas) {
+        const vpt = canvas.viewportTransform;
         vpt[4] = Math.min(vpt[4], 0);
         vpt[4] = Math.max(vpt[4], width * (1 - vpt[0] - vpt[2]));
         vpt[5] = Math.min(vpt[5], 0);
         vpt[5] = Math.max(vpt[5], height * (1 - vpt[1] - vpt[3]));
+        canvas.setViewportTransform(canvas.viewportTransform);
       }
       canvas.on("mouse:wheel", function (opt) {
         if (opt.e.ctrlKey) {
@@ -175,14 +172,15 @@ export function GlyphView({
             new fabric.Point(opt.e.offsetX, opt.e.offsetY),
             zoom,
           );
-          opt.e.preventDefault();
-          opt.e.stopPropagation();
           // constrain to glyph area
-          constrainViewport(canvas.viewportTransform);
+          constrainViewport(canvas);
+          canvas.setViewportTransform(canvas.viewportTransform);
           viewportRef.current = canvas.viewportTransform;
           // Keep stroke width appear constant regardless of zoom
           adjustStrokes(canvas);
           canvas.requestRenderAll();
+          opt.e.preventDefault();
+          opt.e.stopPropagation();
         }
       });
       canvas.on("mouse:down:before", function (opt) {
@@ -212,8 +210,7 @@ export function GlyphView({
             const vpt = canvas.viewportTransform;
             vpt[4] += e.clientX - lastPosX;
             vpt[5] += e.clientY - lastPosY;
-            constrainViewport(vpt);
-            canvas.setViewportTransform(vpt);
+            constrainViewport(canvas);
             viewportRef.current = vpt;
             canvas.requestRenderAll();
             lastPosX = e.clientX;
@@ -303,7 +300,7 @@ export function GlyphView({
               evented: pathSelectable,
               fill: "black",
               stroke: amber[600],
-              strokeWidth: 6,
+              strokeWidth: interactive ? 3 : 0,
             })
           : [];
       state.pathObjects.push(...fabricPaths);
