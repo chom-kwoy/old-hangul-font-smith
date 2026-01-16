@@ -21,9 +21,16 @@ import {
 
 export class FontProcessor {
   font: opentype.Font | null = null;
+  worker: Worker | null = null;
+  buffer: ArrayBuffer | null = null;
 
   async loadFont(file: File): Promise<FontMetadata> {
+    this.worker = new Worker(new URL("fontWorker.ts", import.meta.url), {
+      type: "module",
+    });
+
     const buffer = await file.arrayBuffer();
+    this.buffer = buffer;
 
     return new Promise((resolve, reject) => {
       try {
@@ -174,18 +181,33 @@ export class FontProcessor {
     return result;
   }
 
-  addOldHangulSupport() {
-    if (!this.font) {
+  async downloadFont() {
+    if (!this.buffer || !this.worker) {
       throw new Error("Call loadFont() first.");
     }
 
-    // Set bit for Hangul Jamo support
-    this.font.tables.os2.ulUnicodeRange1 =
-      (this.font.tables.os2.ulUnicodeRange1 | (1 << 28)) >>> 0;
+    this.worker.postMessage({
+      type: "generateFont",
+      buffer: this.buffer,
+    });
 
-    // TODO
+    const stream = await new Promise<ReadableStream>((resolve) => {
+      if (!this.worker) {
+        throw new Error("Worker not initialized.");
+      }
+      this.worker.onmessage = (event: MessageEvent) => {
+        if (event.data.type === "fontStream") {
+          resolve(event.data.stream);
+        }
+      };
+    });
 
-    return this.font.toArrayBuffer();
+    const downloadedBlob = await readableStreamToBlob(stream);
+    const link = document.createElement("a");
+    link.href = window.URL.createObjectURL(downloadedBlob);
+    link.download = "generated_font.otf";
+    link.click();
+    link.remove();
   }
 
   getPath(c: string): PathData {
@@ -205,6 +227,19 @@ export class FontProcessor {
     const sTypoDescender = this.font.tables.os2.sTypoDescender;
     return PathData.fromOpentype(path, unitsPerEm, sTypoDescender);
   }
+}
+
+async function readableStreamToBlob(
+  readableStream: ReadableStream,
+  mimeType: string | null = null,
+) {
+  // Create a Response object from the ReadableStream
+  const response = new Response(readableStream, {
+    headers: { "Content-Type": mimeType || "application/octet-stream" },
+  });
+
+  // Get the Blob from the Response object
+  return await response.blob();
 }
 
 function extractVowel(

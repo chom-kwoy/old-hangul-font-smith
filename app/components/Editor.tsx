@@ -320,14 +320,7 @@ export function Editor({
           <Button
             variant="contained"
             startIcon={<DownloadIcon />}
-            onClick={() => {
-              const buffer = fontProcessor.addOldHangulSupport();
-              downloadArrayBufferAsFile(
-                buffer,
-                "font.otf",
-                "application/octet-stream",
-              );
-            }}
+            onClick={() => fontProcessor.downloadFont()}
           >
             Download Font
           </Button>

@@ -536,6 +536,7 @@ export function GlyphView({
             onResetToSyllable={onResetToSyllable}
             importFromSVG={importFromSVG}
             downloadSVG={downloadSVG}
+            tooltipPlacement="top"
           />
         </div>
       )}
@@ -582,6 +583,7 @@ export function GlyphView({
                 onResetToSyllable={onResetToSyllable}
                 importFromSVG={importFromSVG}
                 downloadSVG={downloadSVG}
+                tooltipPlacement="right"
               />
             </div>
           )}
@@ -604,6 +606,7 @@ function GlyphViewMenu({
   onResetToSyllable,
   importFromSVG,
   downloadSVG,
+  tooltipPlacement,
 }: {
   isFullScreen: boolean;
   openFullScreen: () => void;
@@ -611,19 +614,20 @@ function GlyphViewMenu({
   onResetToSyllable?: (target: HTMLElement) => void;
   importFromSVG: () => void;
   downloadSVG: () => void;
+  tooltipPlacement: "right" | "left" | "top" | "bottom";
 }) {
   return (
     <>
       {!isFullScreen && (
         <IconButton onClick={openFullScreen}>
-          <Tooltip title="Fullscreen">
+          <Tooltip title="Fullscreen" placement={tooltipPlacement}>
             <FullscreenIcon />
           </Tooltip>
         </IconButton>
       )}
       {isFullScreen && (
         <IconButton onClick={closeFullScreen}>
-          <Tooltip title="Exit Fullscreen" placement="right">
+          <Tooltip title="Exit Fullscreen" placement={tooltipPlacement}>
             <FullscreenExitIcon />
           </Tooltip>
         </IconButton>
@@ -635,17 +639,17 @@ function GlyphViewMenu({
           }
         }}
       >
-        <Tooltip title="Reset to Full Syllable" placement="right">
+        <Tooltip title="Reset to Full Syllable" placement={tooltipPlacement}>
           <RestartAltIcon />
         </Tooltip>
       </IconButton>
       <IconButton onClick={importFromSVG} className="ml-auto">
-        <Tooltip title="Import SVG" placement="right">
+        <Tooltip title="Import SVG" placement={tooltipPlacement}>
           <UploadFileIcon />
         </Tooltip>
       </IconButton>
       <IconButton onClick={downloadSVG}>
-        <Tooltip title="Download as SVG" placement="right">
+        <Tooltip title="Download as SVG" placement={tooltipPlacement}>
           <DownloadIcon />
         </Tooltip>
       </IconButton>

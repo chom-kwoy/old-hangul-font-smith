@@ -30,8 +30,7 @@ export enum AppState {
   ERROR,
 }
 
-const FONT_MIME_TYPES =
-  "font/otf, font/ttf, application/x-font-opentype, application/x-font-truetype";
+const FONT_MIME_TYPES = ".otf,.ttf,font/otf,font/ttf";
 
 export default function Home() {
   useEffect(() => {
