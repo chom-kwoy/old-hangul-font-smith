@@ -24,11 +24,15 @@ export class FontProcessor {
   worker: Worker | null = null;
   buffer: ArrayBuffer | null = null;
 
-  async loadFont(file: File): Promise<FontMetadata> {
-    this.worker = new Worker(new URL("fontWorker.ts", import.meta.url), {
-      type: "module",
-    });
+  constructor() {
+    if (typeof window !== "undefined") {
+      this.worker = new Worker(new URL("fontWorker.ts", import.meta.url), {
+        type: "module",
+      });
+    }
+  }
 
+  async loadFont(file: File): Promise<FontMetadata> {
     const buffer = await file.arrayBuffer();
     this.buffer = buffer;
 
