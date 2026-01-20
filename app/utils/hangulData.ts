@@ -1,4 +1,5 @@
 import { uniToPua } from "@/app/utils/puaUniConv";
+import { PUA_CONV_TAB } from "@/app/utils/puaUniTable";
 import { ConsonantInfo, VowelInfo } from "@/app/utils/types";
 
 function getHangulData(): {
@@ -460,4 +461,88 @@ export function unicodeNameToHangul(unicodeName: string): string {
     .split("-")
     .map((part) => nameMap.get(part) ?? part)
     .join("-");
+}
+
+export function* modernSyllables(): Generator<{
+  jamos: string;
+  comp: string;
+}> {
+  // prettier-ignore
+  const STANDARD_LEADINGS = [
+    'ᄀ', 'ᄂ', 'ᄃ', 'ᄅ', 'ᄆ', 'ᄇ', 'ᄉ', 'ᄋ',
+    'ᄌ', 'ᄎ', 'ᄏ', 'ᄐ', 'ᄑ', 'ᄒ', 'ᄁ', 'ᄄ',
+    'ᄈ', 'ᄊ', 'ᄍ',
+  ];
+  // prettier-ignore
+  const STANDARD_VOWELS = [
+    'ᅡ', 'ᅣ', 'ᅥ', 'ᅧ', 'ᅵ', 'ᅢ', 'ᅤ', 'ᅦ',
+    'ᅨ', 'ᅩ', 'ᅭ', 'ᅮ', 'ᅲ', 'ᅳ', 'ᅪ', 'ᅬ',
+    'ᅯ', 'ᅱ', 'ᅴ', 'ᅫ', 'ᅰ',
+  ];
+  // prettier-ignore
+  const STANDARD_TRAILINGS = [
+    '', 'ᆨ', 'ᆫ', 'ᆮ', 'ᆯ', 'ᆷ', 'ᆸ', 'ᆺ', 'ᆼ',
+    'ᆽ', 'ᆾ', 'ᆿ', 'ᇀ', 'ᇁ', 'ᇂ', 'ᆩ', 'ᆪ',
+    'ᆬ', 'ᆭ', 'ᆰ', 'ᆱ', 'ᆲ', 'ᆳ', 'ᆴ', 'ᆵ',
+    'ᆶ', 'ᆹ', 'ᆻ',
+  ];
+  for (const leading of STANDARD_LEADINGS) {
+    for (const vowel of STANDARD_VOWELS) {
+      for (const trailing of STANDARD_TRAILINGS) {
+        let jamos = leading + vowel;
+        const lIdx = leading.codePointAt(0)! - "ᄀ".codePointAt(0)!;
+        const vIdx = vowel.codePointAt(0)! - "ᅡ".codePointAt(0)!;
+        let tIdx = 0;
+        if (trailing !== "") {
+          jamos = jamos + trailing;
+          tIdx = 1 + trailing.codePointAt(0)! - "ᆨ".codePointAt(0)!;
+        }
+        let codePoint = lIdx;
+        codePoint = codePoint * STANDARD_VOWELS.length + vIdx;
+        codePoint = codePoint * STANDARD_TRAILINGS.length + tIdx;
+        codePoint += 0xac00;
+        yield {
+          jamos: jamos,
+          comp: String.fromCodePoint(codePoint),
+        };
+      }
+    }
+  }
+}
+
+export function precomposedLigatures(
+  length: number,
+): Map<string, Array<{ rest: Array<string>; composed: string }>> {
+  const PUA_LIGATURES = new Map<
+    string,
+    Array<{ rest: Array<string>; composed: string }>
+  >();
+
+  function addToMapEntry(uni: string, pua: string) {
+    const key = uni[0];
+    const rest = Array.from(uni).slice(1);
+    if (!PUA_LIGATURES.has(key)) {
+      PUA_LIGATURES.set(key, []);
+    }
+    PUA_LIGATURES.get(key)!.push({
+      rest: rest,
+      composed: pua,
+    });
+  }
+
+  // Convert longer sequences first
+  for (const [pua, uni] of PUA_CONV_TAB.entries()) {
+    if (uni.length === length) {
+      addToMapEntry(uni, pua);
+    }
+  }
+
+  // FIXME: is this needed?
+  // for (const {jamos, comp} of standardSyllables()) {
+  //     if (jamos.length === length) {
+  //         addToMapEntry(jamos, comp);
+  //     }
+  // }
+
+  return PUA_LIGATURES;
 }

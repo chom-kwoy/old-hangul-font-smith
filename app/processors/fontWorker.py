@@ -3,25 +3,24 @@ import io
 
 
 class PyodideTTXProcessor:
-    def getGsubTable(self, font_data: bytes, font_number=0) -> str:
-        try:
-            font_io = io.BytesIO(font_data)
+    def __init__(self, font_data: bytes, font_number=0):
+        font_io = io.BytesIO(font_data)
 
-            # Open font with FontTools
-            font = TTFont(font_io, fontNumber=font_number)
+        # Open font with FontTools
+        self.font = TTFont(font_io, fontNumber=font_number)
+        self.cmap: dict[int, str] = self.font.getBestCmap()
 
-            # Create XML output
-            output = io.StringIO()
+    def getGsubTable(self) -> str:
+        # Create XML output
+        output = io.StringIO()
 
-            # Dump to TTX format
-            font.saveXML(output, tables=['GSUB'])
+        # Dump to TTX format
+        self.font.saveXML(output, tables=['GSUB'])
 
-            font.close()
-            return output.getvalue()
+        return output.getvalue()
 
-        except Exception as e:
-            raise Exception(f"Failed to dump to TTX: {e}")
+    def getCmap(self) -> dict[int, str]:
+        return self.cmap
 
-
-# Create global processor instance
-ttx_processor = PyodideTTXProcessor()
+    def close(self):
+        self.font.close()

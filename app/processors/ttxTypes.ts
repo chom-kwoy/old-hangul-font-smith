@@ -30,31 +30,35 @@ export type Gsub = {
     }[];
   }[];
   FeatureList: {
-    FeatureRecord: {
-      "@_index": string;
-      FeatureTag: {
-        "@_value": string;
-      }[];
-      Feature: {
-        LookupListIndex: {
-          "@_index": string;
-          "@_value": string;
-        }[];
-      }[];
-    }[];
+    FeatureRecord: FeatureRecord[];
   }[];
   LookupList: {
-    Lookup: {
+    Lookup: Lookup[];
+  }[];
+};
+
+export type Lookup = {
+  "@_index": string;
+  LookupType: {
+    "@_value": string;
+  }[];
+  LookupFlag: {
+    "@_value": string;
+  }[];
+  SingleSubst?: SingleSubst[];
+  ChainContextSubst?: ChainContextSubst[];
+  LigatureSubst?: LigatureSubst[];
+};
+
+export type FeatureRecord = {
+  "@_index": string;
+  FeatureTag: {
+    "@_value": string;
+  }[];
+  Feature: {
+    LookupListIndex: {
       "@_index": string;
-      LookupType: {
-        "@_value": string;
-      }[];
-      LookupFlag: {
-        "@_value": string;
-      }[];
-      SingleSubst?: SingleSubst[];
-      ChainContextSubst?: ChainContextSubst[];
-      LigatureSubst?: LigatureSubst[];
+      "@_value": string;
     }[];
   }[];
 };
