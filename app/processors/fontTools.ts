@@ -3,6 +3,7 @@ import { loadPyodide } from "pyodide";
 
 import PYTHON_SRC from "@/app/processors/fontWorker.py";
 import { Gsub, Ttx } from "@/app/processors/ttxTypes";
+import PathData from "@/app/utils/PathData";
 
 type Pyodide = Awaited<ReturnType<typeof loadPyodide>>;
 
@@ -143,5 +144,11 @@ export class FontObject {
     const codepoint = ch.codePointAt(0);
     if (codepoint === undefined) return undefined;
     return this.cmap[codepoint];
+  }
+
+  addGlyph(pathData: PathData): string {
+    // TODO: implement adding glyphs via Python FontTools
+    // return new glyph name
+    return "";
   }
 }

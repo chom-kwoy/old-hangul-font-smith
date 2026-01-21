@@ -4,8 +4,10 @@ import {
   MessageToMainThread,
 } from "@/app/processors/fontWorkerTypes";
 import { FeatureRecord, Gsub, Lookup } from "@/app/processors/ttxTypes";
+import PathData from "@/app/utils/PathData";
 import { HANGUL_DATA, precomposedLigatures } from "@/app/utils/hangulData";
-import { JamoVarsets } from "@/app/utils/types";
+import { LEADING_VARSET_NAMES, getJamoVarsetEnv } from "@/app/utils/jamos";
+import { ConsonantSets, JamoVarsets } from "@/app/utils/types";
 
 function addThreeJamoSubst(
   gsub: Gsub,
@@ -14,7 +16,7 @@ function addThreeJamoSubst(
 ) {
   // Add 3-jamo ligatures
   const ligatureSubstLookup3: Lookup = {
-    "@_index": gsub.LookupList[0].Lookup.length.toFixed(0),
+    "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
     LookupType: [{ "@_value": "4" }],
     LookupFlag: [{ "@_value": "0" }],
     LigatureSubst: [
@@ -62,7 +64,7 @@ function addThreeJamoSubst(
   }
 
   ccmpFeature.Feature[0].LookupListIndex.push({
-    "@_index": ccmpFeature.Feature[0].LookupListIndex.length.toFixed(0),
+    "@_index": ccmpFeature.Feature[0].LookupListIndex.length.toFixed(),
     "@_value": ligatureSubstLookup3["@_index"],
   });
 }
@@ -74,7 +76,7 @@ function addTwoJamoSubst(
 ) {
   // Add ligatures for 2-jamo precomposed glyphs
   const chainSubstLookup: Lookup = {
-    "@_index": gsub.LookupList[0].Lookup.length.toFixed(0),
+    "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
     LookupType: [{ "@_value": "6" }],
     LookupFlag: [{ "@_value": "0" }],
     ChainContextSubst: [],
@@ -82,7 +84,7 @@ function addTwoJamoSubst(
   gsub.LookupList[0].Lookup.push(chainSubstLookup);
 
   const ligatureSubstLookup2: Lookup = {
-    "@_index": gsub.LookupList[0].Lookup.length.toFixed(0),
+    "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
     LookupType: [{ "@_value": "4" }],
     LookupFlag: [{ "@_value": "0" }],
     LigatureSubst: [
@@ -120,7 +122,7 @@ function addTwoJamoSubst(
       }
 
       chainSubstLookup.ChainContextSubst!.push({
-        "@_index": chainSubstLookup.ChainContextSubst!.length.toFixed(0),
+        "@_index": chainSubstLookup.ChainContextSubst!.length.toFixed(),
         "@_Format": "3", // use coverage tables
         InputCoverage: [
           { "@_index": "0", Glyph: [{ "@_value": firstGlyphName }] },
@@ -161,7 +163,7 @@ function addTwoJamoSubst(
       }
 
       chainSubstLookup.ChainContextSubst!.push({
-        "@_index": chainSubstLookup.ChainContextSubst!.length.toFixed(0),
+        "@_index": chainSubstLookup.ChainContextSubst!.length.toFixed(),
         "@_Format": "3", // use coverage tables
         InputCoverage: [
           { "@_index": "0", Glyph: [{ "@_value": firstGlyphName }] },
@@ -197,7 +199,7 @@ function addTwoJamoSubst(
   }
 
   ccmpFeature.Feature[0].LookupListIndex.push({
-    "@_index": ccmpFeature.Feature[0].LookupListIndex.length.toFixed(0),
+    "@_index": ccmpFeature.Feature[0].LookupListIndex.length.toFixed(),
     "@_value": chainSubstLookup["@_index"],
   });
 }
@@ -214,7 +216,7 @@ async function makeFont(
 
   // Add ljmo feature to the feature list
   const ljmoFeature: FeatureRecord = {
-    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(0),
+    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(),
     FeatureTag: [{ "@_value": "ljmo" }],
     Feature: [{ LookupListIndex: [] }],
   };
@@ -222,7 +224,7 @@ async function makeFont(
 
   // Add vjmo feature to the feature list
   const vjmoFeature: FeatureRecord = {
-    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(0),
+    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(),
     FeatureTag: [{ "@_value": "vjmo" }],
     Feature: [{ LookupListIndex: [] }],
   };
@@ -230,7 +232,7 @@ async function makeFont(
 
   // Add tjmo feature to the feature list
   const tjmoFeature: FeatureRecord = {
-    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(0),
+    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(),
     FeatureTag: [{ "@_value": "tjmo" }],
     Feature: [{ LookupListIndex: [] }],
   };
@@ -238,7 +240,7 @@ async function makeFont(
 
   // Add ligature feature to the feature list
   const ccmpFeature: FeatureRecord = {
-    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(0),
+    "@_index": gsub.FeatureList[0].FeatureRecord.length.toFixed(),
     FeatureTag: [{ "@_value": "ccmp" }],
     Feature: [{ LookupListIndex: [] }],
   };
@@ -248,19 +250,19 @@ async function makeFont(
   const defaultFeatures =
     gsub.ScriptList[0].ScriptRecord[0].Script[0].DefaultLangSys[0].FeatureIndex;
   defaultFeatures.push({
-    "@_index": defaultFeatures.length.toFixed(0),
+    "@_index": defaultFeatures.length.toFixed(),
     "@_value": ccmpFeature["@_index"],
   });
   defaultFeatures.push({
-    "@_index": defaultFeatures.length.toFixed(0),
+    "@_index": defaultFeatures.length.toFixed(),
     "@_value": ljmoFeature["@_index"],
   });
   defaultFeatures.push({
-    "@_index": defaultFeatures.length.toFixed(0),
+    "@_index": defaultFeatures.length.toFixed(),
     "@_value": vjmoFeature["@_index"],
   });
   defaultFeatures.push({
-    "@_index": defaultFeatures.length.toFixed(0),
+    "@_index": defaultFeatures.length.toFixed(),
     "@_value": tjmoFeature["@_index"],
   });
 
@@ -271,7 +273,119 @@ async function makeFont(
   console.log("Added 2-jamo ligature substitutions.");
 
   const substitutions: Map<string, Array<string>> = new Map();
-  jamoVarsets;
+
+  for (const varsetName of LEADING_VARSET_NAMES) {
+    const jamoInfos = HANGUL_DATA.consonantInfo
+      .values()
+      .filter((info) => info.leading !== null)
+      .toArray();
+
+    const inputCoverage: {
+      "@_value": string;
+    }[] = jamoInfos
+      .map((info) => {
+        const glyphName = ttx.findGlyphName(info.leading!);
+        if (glyphName === undefined) {
+          console.log(`Glyph for jamo ${info.name} not found`);
+        }
+        return glyphName;
+      })
+      .filter((glyph) => glyph !== undefined)
+      .map((glyph) => ({ "@_value": glyph }));
+
+    const env = getJamoVarsetEnv(varsetName);
+
+    const backtrackCoverage: {
+      "@_index": string;
+      Glyph: { "@_value": string }[];
+    }[] = env.prevJamoNames.reverse().map((jamoList, index) => ({
+      "@_index": index.toFixed(),
+      Glyph: jamoList
+        .map((jamo) => {
+          const glyphName = ttx.findGlyphName(jamo);
+          if (glyphName === undefined) {
+            console.log(`Glyph for jamo ${jamo} not found`);
+          }
+          return glyphName;
+        })
+        .filter((glyph) => glyph !== undefined)
+        .map((glyph) => ({ "@_value": glyph })),
+    }));
+    const lookAheadCoverage: {
+      "@_index": string;
+      Glyph: { "@_value": string }[];
+    }[] = env.nextJamoNames.map((jamoList, index) => ({
+      "@_index": index.toFixed(),
+      Glyph: jamoList
+        .map((jamo) => {
+          const glyphName = ttx.findGlyphName(jamo);
+          if (glyphName === undefined) {
+            console.log(`Glyph for jamo ${jamo} not found`);
+          }
+          return glyphName;
+        })
+        .filter((glyph) => glyph !== undefined)
+        .map((glyph) => ({ "@_value": glyph })),
+    }));
+
+    const substArray: {
+      "@_in": string;
+      "@_out": string;
+    }[] = jamoInfos
+      .map((info) => {
+        const glyphName = ttx.findGlyphName(info.leading!);
+        if (glyphName === undefined) {
+          return undefined;
+        }
+        const varset = jamoVarsets[info.name] as ConsonantSets;
+        const path = varset[varsetName];
+        if (path === null) {
+          return undefined;
+        }
+        return {
+          "@_in": glyphName,
+          "@_out": ttx.addGlyph(PathData.deserialize(path)),
+        };
+      })
+      .filter((subst) => subst !== undefined);
+
+    // Add lookups
+    const singleSubstLookup: Lookup = {
+      "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
+      LookupType: [{ "@_value": "1" }],
+      LookupFlag: [{ "@_value": "0" }],
+      SingleSubst: [{ Substitution: substArray }],
+    };
+    gsub.LookupList[0].Lookup.push(singleSubstLookup);
+
+    const chainSubstLookup = {
+      "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
+      LookupType: [{ "@_value": "6" }],
+      LookupFlag: [{ "@_value": "0" }],
+      ChainContextSubst: [
+        {
+          "@_index": "0",
+          "@_Format": "3", // use coverage tables
+          InputCoverage: [{ "@_index": "0", Glyph: inputCoverage }],
+          BacktrackCoverage: backtrackCoverage,
+          LookAheadCoverage: lookAheadCoverage,
+          SubstLookupRecord: [
+            {
+              "@_index": "0",
+              SequenceIndex: [{ "@_value": "0" }],
+              LookupListIndex: [{ "@_value": singleSubstLookup["@_index"] }],
+            },
+          ],
+        },
+      ],
+    };
+    gsub.LookupList[0].Lookup.push(chainSubstLookup);
+
+    ljmoFeature.Feature[0].LookupListIndex.push({
+      "@_index": ljmoFeature.Feature[0].LookupListIndex.length.toFixed(),
+      "@_value": chainSubstLookup["@_index"],
+    });
+  }
 
   // Add the modified GSUB table back to the font
   const result = ttx.addGsubTable(gsub);

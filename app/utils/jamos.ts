@@ -11,39 +11,37 @@ import {
   getVowel,
 } from "@/app/utils/hangulData";
 import {
-  ConsonantInfo,
   ConsonantSets,
   ConsonantVarsetType,
   JamoPref,
   JamoVarsets,
   VarsetType,
-  VowelInfo,
   VowelSets,
   VowelVarsetType,
 } from "@/app/utils/types";
 
+// prettier-ignore
+export const LEADING_VARSET_NAMES: ConsonantVarsetType[] = [
+  "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8",
+];
+// prettier-ignore
+export const VOWELJAMO_VARSET_NAMES: VowelVarsetType[] = [
+  "v1", "v2", "v3", "v4",
+];
+// prettier-ignore
+export const TRAILING_VARSET_NAMES: ConsonantVarsetType[] = [
+  "t1", "t2", "t3", "t4",
+];
+
 export const CONSONANT_VARSET_NAMES: ConsonantVarsetType[] = [
   "canon",
-  "l1",
-  "l2",
-  "l3",
-  "l4",
-  "l5",
-  "l6",
-  "l7",
-  "l8",
-  "t1",
-  "t2",
-  "t3",
-  "t4",
+  ...LEADING_VARSET_NAMES,
+  ...TRAILING_VARSET_NAMES,
 ];
 
 export const VOWEL_VARSET_NAMES: VowelVarsetType[] = [
   "canon",
-  "v1",
-  "v2",
-  "v3",
-  "v4",
+  ...VOWELJAMO_VARSET_NAMES,
 ];
 
 export function getVarset(
