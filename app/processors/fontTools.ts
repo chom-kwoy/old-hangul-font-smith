@@ -56,6 +56,12 @@ export class FontObject {
       .toJs();
   }
 
+  close(): void {
+    this.pyodide.runPython(`ttxProcessor.close()`, {
+      locals: this.pyodide.toPy({ ttxProcessor: this.ttxProcessor }),
+    });
+  }
+
   getGsubTable(): Gsub {
     const xml: string = this.pyodide.runPython(`ttxProcessor.getGsubTable()`, {
       locals: this.pyodide.toPy({ ttxProcessor: this.ttxProcessor }),

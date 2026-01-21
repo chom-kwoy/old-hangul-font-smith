@@ -108,6 +108,211 @@ function getJamoForm(
   }
 }
 
+export function getJamoVarsetEnv(varsetName: VarsetType): {
+  prevJamoNames: string[][];
+  nextJamoNames: string[][];
+} {
+  const results = {
+    prevJamoNames: [] as string[][],
+    nextJamoNames: [] as string[][],
+  };
+
+  const leadings = HANGUL_DATA.consonantInfo.values().toArray();
+  const vowels = HANGUL_DATA.vowelInfo.values().toArray();
+  const trailings = HANGUL_DATA.consonantInfo.values().toArray();
+
+  switch (varsetName) {
+    case "l1": // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
+      results.nextJamoNames.push(
+        vowels
+          .filter((info) => info.position === "right")
+          .map((info) => info.name),
+      );
+      results.nextJamoNames.push([""]);
+      break;
+    case "l2": // 받침없는 ㅗ ㅛ ㅡ
+      results.nextJamoNames.push(
+        vowels
+          .filter((info) => info.position === "under" && !info.pokingDown)
+          .map((info) => info.name),
+      );
+      results.nextJamoNames.push([""]);
+      break;
+    case "l3": // 받침없는 ㅜ ㅠ
+      results.nextJamoNames.push(
+        vowels
+          .filter((info) => info.position === "under" && info.pokingDown)
+          .map((info) => info.name),
+      );
+      results.nextJamoNames.push([""]);
+      break;
+    case "l4": // 받침없는 ㅘ ㅙ ㅚ ㅢ
+      results.nextJamoNames.push(
+        vowels
+          .filter((info) => info.position === "mixed" && !info.pokingDown)
+          .map((info) => info.name),
+      );
+      results.nextJamoNames.push([""]);
+      break;
+    case "l5": // 받침없는 ㅝ ㅞ ㅟ
+      results.nextJamoNames.push(
+        vowels
+          .filter((info) => info.position === "mixed" && info.pokingDown)
+          .map((info) => info.name),
+      );
+      results.nextJamoNames.push([""]);
+      break;
+    case "l6": // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
+      results.nextJamoNames.push(
+        vowels
+          .filter((vinfo) => vinfo.position === "right")
+          .map((vinfo) => vinfo.name),
+      );
+      results.nextJamoNames.push(
+        trailings
+          .filter((tinfo) => tinfo.trailing !== null)
+          .map((tinfo) => tinfo.name),
+      );
+      break;
+    case "l7": // 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
+      results.nextJamoNames.push(
+        vowels
+          .filter((vinfo) => vinfo.position === "under")
+          .map((vinfo) => vinfo.name),
+      );
+      results.nextJamoNames.push(
+        trailings
+          .filter((tinfo) => tinfo.trailing !== null)
+          .map((tinfo) => tinfo.name),
+      );
+      break;
+    case "l8": // 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
+      results.nextJamoNames.push(
+        vowels
+          .filter((vinfo) => vinfo.position === "mixed")
+          .map((vinfo) => vinfo.name),
+      );
+      results.nextJamoNames.push(
+        trailings
+          .filter((tinfo) => tinfo.trailing !== null)
+          .map((tinfo) => tinfo.name),
+      );
+      break;
+    case "v1": // 받침없는 [ㄱ ㅋ]과 결합
+      results.prevJamoNames.push(
+        leadings
+          .filter(
+            (info) => info.leading !== null && KIYEOK_LIKE.includes(info.name),
+          )
+          .map((info) => info.name),
+      );
+      results.nextJamoNames.push([""]);
+      break;
+    case "v2": // 받침없는 [ㄱ ㅋ] 제외
+      results.prevJamoNames.push(
+        leadings
+          .filter(
+            (info) => info.leading !== null && !KIYEOK_LIKE.includes(info.name),
+          )
+          .map((info) => info.name),
+      );
+      results.nextJamoNames.push([""]);
+      break;
+    case "v3": // 받침있는 [ㄱ ㅋ]과 결합
+      results.prevJamoNames.push(
+        leadings
+          .filter(
+            (linfo) =>
+              linfo.leading !== null && KIYEOK_LIKE.includes(linfo.name),
+          )
+          .map((linfo) => linfo.name),
+      );
+      results.nextJamoNames.push(
+        trailings
+          .filter((tinfo) => tinfo.trailing !== null)
+          .map((tinfo) => tinfo.name),
+      );
+      break;
+    case "v4": // 받침있는 [ㄱ ㅋ] 제외
+      results.prevJamoNames.push(
+        leadings
+          .filter(
+            (linfo) =>
+              linfo.leading !== null && !KIYEOK_LIKE.includes(linfo.name),
+          )
+          .map((linfo) => linfo.name),
+      );
+      results.nextJamoNames.push(
+        trailings
+          .filter((tinfo) => tinfo.trailing !== null)
+          .map((tinfo) => tinfo.name),
+      );
+      break;
+    case "t1": // 중성 ㅏ ㅑ ㅘ 와 결합
+      results.prevJamoNames.push(
+        leadings
+          .filter((linfo) => linfo.leading !== null)
+          .map((linfo) => linfo.name),
+      );
+      results.prevJamoNames.push(
+        vowels
+          .filter(
+            (vinfo) =>
+              !vinfo.doubleVertical &&
+              vinfo.position !== "under" &&
+              vinfo.pokingRight,
+          )
+          .map((vinfo) => vinfo.name),
+      );
+      break;
+    case "t2": // 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
+      results.prevJamoNames.push(
+        leadings
+          .filter((linfo) => linfo.leading !== null)
+          .map((linfo) => linfo.name),
+      );
+      results.prevJamoNames.push(
+        vowels
+          .filter(
+            (vinfo) =>
+              !vinfo.doubleVertical &&
+              vinfo.position !== "under" &&
+              !vinfo.pokingRight,
+          )
+          .map((vinfo) => vinfo.name),
+      );
+      break;
+    case "t3": // 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
+      results.prevJamoNames.push(
+        leadings
+          .filter((linfo) => linfo.leading !== null)
+          .map((linfo) => linfo.name),
+      );
+      results.prevJamoNames.push(
+        vowels
+          .filter((vinfo) => vinfo.doubleVertical)
+          .map((vinfo) => vinfo.name),
+      );
+      break;
+    case "t4": // 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
+      results.prevJamoNames.push(
+        leadings
+          .filter((linfo) => linfo.leading !== null)
+          .map((linfo) => linfo.name),
+      );
+      results.prevJamoNames.push(
+        vowels
+          .filter(
+            (vinfo) => !vinfo.doubleVertical && vinfo.position === "under",
+          )
+          .map((vinfo) => vinfo.name),
+      );
+      break;
+  }
+
+  return results;
+}
+
 export function* getSyllablesFor(
   jamoName: string,
   varsetName: VarsetType,
@@ -119,191 +324,79 @@ export function* getSyllablesFor(
     return;
   }
 
-  const leadings = new Set([
-    ...(leadingPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
-    ...HANGUL_DATA.consonantInfo.values(),
-  ]) as Set<ConsonantInfo>;
-  const vowels = new Set([
-    ...(vowelPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
-    ...HANGUL_DATA.vowelInfo.values().toArray(),
-  ]) as Set<VowelInfo>;
-  const trailings = new Set([
-    ...(trailingPref?.map((jamo) => getJamoInfo(jamo)) ?? []),
-    ...HANGUL_DATA.consonantInfo.values(),
-  ]) as Set<ConsonantInfo>;
+  const env = getJamoVarsetEnv(varsetName);
 
-  switch (varsetName) {
-    case "l1": // 받침없는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-      for (const info of vowels) {
-        if (info.position === "right") {
-          yield composeHangul(jamoName, info.name, null, precompose);
-        }
-      }
-      break;
+  let leadings: string[] = [];
+  let vowels: string[] = [];
+  let trailings: string[] = [];
+  if (varsetName.startsWith("l")) {
+    vowels = env.nextJamoNames[0];
+    trailings = env.nextJamoNames[1];
+  } else if (varsetName.startsWith("v")) {
+    leadings = env.prevJamoNames[0];
+    trailings = env.nextJamoNames[0];
+  } else if (varsetName.startsWith("t")) {
+    leadings = env.prevJamoNames[0];
+    vowels = env.prevJamoNames[1];
+  }
 
-    case "l2": // 받침없는 ㅗ ㅛ ㅡ
-      for (const info of vowels) {
-        if (info.position === "under" && !info.pokingDown) {
-          yield composeHangul(jamoName, info.name, null, precompose);
-        }
-      }
-      break;
+  const getName = (jamo: string) => getJamoInfo(jamo)!.name;
+  leadingPref = leadingPref?.map(getName) ?? leadings;
+  vowelPref = vowelPref?.map(getName) ?? vowels;
+  trailingPref = trailingPref?.map(getName) ?? trailings;
 
-    case "l3": // 받침없는 ㅜ ㅠ
-      for (const info of vowels) {
-        if (info.position === "under" && info.pokingDown) {
-          yield composeHangul(jamoName, info.name, null, precompose);
-        }
-      }
-      break;
+  const leadingRest = leadings.filter((jamo) => !leadingPref.includes(jamo));
+  const vowelRest = vowels.filter((jamo) => !vowelPref.includes(jamo));
+  const trailingRest = trailings.filter((jamo) => !trailingPref.includes(jamo));
 
-    case "l4": // 받침없는 ㅘ ㅙ ㅚ ㅢ
-      for (const info of vowels) {
-        if (info.position === "mixed" && !info.pokingDown) {
-          yield composeHangul(jamoName, info.name, null, precompose);
-        }
+  if (varsetName.startsWith("l")) {
+    for (const v of vowelPref) {
+      for (const t of trailingPref) {
+        yield composeHangul(jamoName, v, t, precompose);
       }
-      break;
-
-    case "l5": // 받침없는 ㅝ ㅞ ㅟ
-      for (const info of vowels) {
-        if (info.position === "mixed" && info.pokingDown) {
-          yield composeHangul(jamoName, info.name, null, precompose);
-        }
+    }
+    for (const v of vowelPref) {
+      for (const t of trailingRest) {
+        yield composeHangul(jamoName, v, t, precompose);
       }
-      break;
-
-    case "l6": // 받침있는 ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅣ
-      for (const vinfo of vowels) {
-        if (vinfo.position === "right") {
-          for (const tinfo of trailings) {
-            if (tinfo.trailing !== null) {
-              yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
-            }
-          }
-        }
+    }
+    for (const v of vowelRest) {
+      for (const t of [...trailingPref, ...trailingRest]) {
+        yield composeHangul(jamoName, v, t, precompose);
       }
-      break;
-
-    case "l7": // 받침있는 ㅗ ㅛ ㅜ ㅠ ㅡ
-      for (const vinfo of vowels) {
-        if (vinfo.position === "under") {
-          for (const tinfo of trailings) {
-            if (tinfo.trailing !== null) {
-              yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
-            }
-          }
-        }
+    }
+  } else if (varsetName.startsWith("v")) {
+    for (const l of leadingPref) {
+      for (const t of trailingPref) {
+        yield composeHangul(l, jamoName, t, precompose);
       }
-      break;
-
-    case "l8": // 받침있는 ㅘ ㅙ ㅚ ㅢ ㅝ ㅞ ㅟ
-      for (const vinfo of vowels) {
-        if (vinfo.position === "mixed") {
-          for (const tinfo of trailings) {
-            if (tinfo.trailing !== null) {
-              yield composeHangul(jamoName, vinfo.name, tinfo.name, precompose);
-            }
-          }
-        }
+    }
+    for (const l of leadingPref) {
+      for (const t of trailingRest) {
+        yield composeHangul(l, jamoName, t, precompose);
       }
-      break;
-
-    case "v1": // 받침없는 [ㄱ ㅋ]과 결합
-      for (const info of leadings) {
-        if (info.leading !== null && KIYEOK_LIKE.includes(info.name)) {
-          yield composeHangul(info.name, jamoName, null, precompose);
-        }
+    }
+    for (const l of leadingRest) {
+      for (const t of [...trailingPref, ...trailingRest]) {
+        yield composeHangul(l, jamoName, t, precompose);
       }
-      break;
-
-    case "v2": // 받침없는 [ㄱ ㅋ] 제외
-      for (const info of leadings) {
-        if (info.leading !== null && !KIYEOK_LIKE.includes(info.name)) {
-          yield composeHangul(info.name, jamoName, null, precompose);
-        }
+    }
+  } else if (varsetName.startsWith("t")) {
+    for (const l of leadingPref) {
+      for (const v of vowelPref) {
+        yield composeHangul(l, v, jamoName, precompose);
       }
-      break;
-
-    case "v3": // 받침있는 [ㄱ ㅋ]과 결합
-      for (const linfo of leadings) {
-        if (linfo.leading !== null && KIYEOK_LIKE.includes(linfo.name)) {
-          for (const tinfo of trailings) {
-            if (tinfo.trailing !== null) {
-              yield composeHangul(linfo.name, jamoName, tinfo.name, precompose);
-            }
-          }
-        }
+    }
+    for (const l of leadingPref) {
+      for (const v of vowelRest) {
+        yield composeHangul(l, v, jamoName, precompose);
       }
-      break;
-
-    case "v4": // 받침있는 [ㄱ ㅋ] 제외
-      for (const linfo of leadings) {
-        if (linfo.leading !== null && !KIYEOK_LIKE.includes(linfo.name)) {
-          for (const tinfo of trailings) {
-            if (tinfo.trailing !== null) {
-              yield composeHangul(linfo.name, jamoName, tinfo.name, precompose);
-            }
-          }
-        }
+    }
+    for (const l of leadingRest) {
+      for (const v of [...vowelPref, ...vowelRest]) {
+        yield composeHangul(l, v, jamoName, precompose);
       }
-      break;
-
-    case "t1": // 중성 ㅏ ㅑ ㅘ 와 결합
-      for (const linfo of leadings) {
-        if (linfo.leading !== null) {
-          for (const vinfo of vowels) {
-            if (
-              !vinfo.doubleVertical &&
-              vinfo.position !== "under" &&
-              vinfo.pokingRight
-            ) {
-              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
-            }
-          }
-        }
-      }
-      break;
-
-    case "t2": // 중성 ㅓ ㅕ ㅚ ㅝ ㅟ ㅢ ㅣ 와 결합
-      for (const linfo of leadings) {
-        if (linfo.leading !== null) {
-          for (const vinfo of vowels) {
-            if (
-              !vinfo.doubleVertical &&
-              vinfo.position !== "under" &&
-              !vinfo.pokingRight
-            ) {
-              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
-            }
-          }
-        }
-      }
-      break;
-
-    case "t3": // 중성 ㅐ ㅒ ㅔ ㅖ ㅙ ㅞ 와 결합
-      for (const linfo of leadings) {
-        if (linfo.leading !== null) {
-          for (const vinfo of vowels) {
-            if (vinfo.doubleVertical) {
-              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
-            }
-          }
-        }
-      }
-      break;
-
-    case "t4": // 중성 ㅗ ㅛ ㅜ ㅠ ㅡ 와 결합
-      for (const linfo of leadings) {
-        if (linfo.leading !== null) {
-          for (const vinfo of vowels) {
-            if (!vinfo.doubleVertical && vinfo.position === "under") {
-              yield composeHangul(linfo.name, vinfo.name, jamoName, precompose);
-            }
-          }
-        }
-      }
-      break;
+    }
   }
 }
 

@@ -323,7 +323,8 @@ export function Editor({
             startIcon={<DownloadIcon />}
             onClick={() => {
               setIsDownloadLoading(true);
-              fontProcessor.downloadFont().finally(() => {
+              const jamoVarsets = store.getState().font.present.jamoVarsets;
+              fontProcessor.downloadFont(jamoVarsets!).finally(() => {
                 setIsDownloadLoading(false);
               });
             }}

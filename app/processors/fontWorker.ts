@@ -5,6 +5,7 @@ import {
 } from "@/app/processors/fontWorkerTypes";
 import { FeatureRecord, Gsub, Lookup } from "@/app/processors/ttxTypes";
 import { HANGUL_DATA, precomposedLigatures } from "@/app/utils/hangulData";
+import { JamoVarsets } from "@/app/utils/types";
 
 function addThreeJamoSubst(
   gsub: Gsub,
@@ -201,7 +202,10 @@ function addTwoJamoSubst(
   });
 }
 
-async function makeFont(fontData: ArrayBuffer): Promise<Blob> {
+async function makeFont(
+  fontData: ArrayBuffer,
+  jamoVarsets: JamoVarsets,
+): Promise<Blob> {
   const ttx = await FontObject.create(new Uint8Array(fontData));
 
   // dump the font to TTX
@@ -267,10 +271,13 @@ async function makeFont(fontData: ArrayBuffer): Promise<Blob> {
   console.log("Added 2-jamo ligature substitutions.");
 
   const substitutions: Map<string, Array<string>> = new Map();
+  jamoVarsets;
 
   // Add the modified GSUB table back to the font
   const result = ttx.addGsubTable(gsub);
   console.log("Modified GSUB table added back to font.");
+
+  ttx.close(); // Clean up resources
 
   // Return the modified font data
   return new Blob([result], { type: "font/otf" });
@@ -282,7 +289,7 @@ addEventListener(
     console.log("Font worker received message:", event.data);
     if (event.data.type === "generateFont") {
       console.log("Generating font from buffer...");
-      const result = await makeFont(event.data.buffer);
+      const result = await makeFont(event.data.buffer, event.data.jamoVarsets);
       console.log("Font generation completed, sending back result...");
       postMessage({
         type: "fontBlob",

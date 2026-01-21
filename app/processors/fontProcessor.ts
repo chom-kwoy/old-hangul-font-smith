@@ -188,7 +188,7 @@ export class FontProcessor {
     return result;
   }
 
-  async downloadFont() {
+  async downloadFont(jamoVarsets: JamoVarsets): Promise<void> {
     if (!this.buffer || !this.worker || !this.fontName) {
       throw new Error("Call loadFont() first.");
     }
@@ -196,6 +196,7 @@ export class FontProcessor {
     this.worker.postMessage({
       type: "generateFont",
       buffer: this.buffer,
+      jamoVarsets: jamoVarsets,
     });
 
     const blob = await new Promise<Blob>((resolve) => {
