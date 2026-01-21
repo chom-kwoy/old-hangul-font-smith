@@ -20,7 +20,6 @@ import { FontProcessor } from "@/app/processors/fontProcessor";
 import { pathUpdated } from "@/app/redux/features/font/font-slice";
 import { useAppDispatch, useAppSelector, useAppStore } from "@/app/redux/hooks";
 import PathData from "@/app/utils/PathData";
-import { downloadArrayBufferAsFile } from "@/app/utils/download";
 import { HANGUL_DATA, unicodeNameToHangul } from "@/app/utils/hangulData";
 import {
   getExampleEnvPaths,
