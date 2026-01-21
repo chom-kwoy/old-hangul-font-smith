@@ -1,5 +1,6 @@
 import opentype from "opentype.js";
 
+import { MessageToMainThread } from "@/app/processors/fontWorkerTypes";
 import PathData from "@/app/utils/PathData";
 import { HANGUL_DATA } from "@/app/utils/hangulData";
 import {
@@ -21,6 +22,7 @@ import {
 
 export class FontProcessor {
   font: opentype.Font | null = null;
+  fontName: string | null = null;
   worker: Worker | null = null;
   buffer: ArrayBuffer | null = null;
 
@@ -35,6 +37,7 @@ export class FontProcessor {
   async loadFont(file: File): Promise<FontMetadata> {
     const buffer = await file.arrayBuffer();
     this.buffer = buffer;
+    this.fontName = file.name;
 
     return new Promise((resolve, reject) => {
       try {
@@ -186,7 +189,7 @@ export class FontProcessor {
   }
 
   async downloadFont() {
-    if (!this.buffer || !this.worker) {
+    if (!this.buffer || !this.worker || !this.fontName) {
       throw new Error("Call loadFont() first.");
     }
 
@@ -195,21 +198,26 @@ export class FontProcessor {
       buffer: this.buffer,
     });
 
-    const stream = await new Promise<ReadableStream>((resolve) => {
+    const blob = await new Promise<Blob>((resolve) => {
       if (!this.worker) {
         throw new Error("Worker not initialized.");
       }
       this.worker.onmessage = (event: MessageEvent) => {
-        if (event.data.type === "fontStream") {
-          resolve(event.data.stream);
+        const msg: MessageToMainThread = event.data;
+        if (msg.type === "fontBlob") {
+          resolve(msg.blob);
         }
       };
     });
 
-    const downloadedBlob = await readableStreamToBlob(stream);
+    const newFileName = this.fontName.replace(
+      /\.([a-zA-Z]*?)$/i,
+      "_modified.$1",
+    );
+
     const link = document.createElement("a");
-    link.href = window.URL.createObjectURL(downloadedBlob);
-    link.download = "generated_font.otf";
+    link.href = window.URL.createObjectURL(blob);
+    link.download = newFileName;
     link.click();
     link.remove();
   }
@@ -231,19 +239,6 @@ export class FontProcessor {
     const sTypoDescender = this.font.tables.os2.sTypoDescender;
     return PathData.fromOpentype(path, unitsPerEm, sTypoDescender);
   }
-}
-
-async function readableStreamToBlob(
-  readableStream: ReadableStream,
-  mimeType: string | null = null,
-) {
-  // Create a Response object from the ReadableStream
-  const response = new Response(readableStream, {
-    headers: { "Content-Type": mimeType || "application/octet-stream" },
-  });
-
-  // Get the Blob from the Response object
-  return await response.blob();
 }
 
 function extractVowel(

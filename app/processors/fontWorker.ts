@@ -1,6 +1,10 @@
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { loadPyodide } from "pyodide";
 
+import {
+  MessageToFontWorker,
+  MessageToMainThread,
+} from "@/app/processors/fontWorkerTypes";
 import { FeatureRecord, Gsub, Lookup, Ttx } from "@/app/processors/ttxTypes";
 import { precomposedLigatures } from "@/app/utils/hangulData";
 
@@ -66,6 +70,7 @@ class FontObject {
     });
 
     const ttx: Ttx = parser.parse(xml);
+    console.log(ttx);
     const gsub = ttx.ttFont[0].GSUB;
 
     // prettier-ignore
@@ -100,6 +105,34 @@ class FontObject {
     return gsub ? gsub[0] : emptyGsub;
   }
 
+  addGsubTable(gsub: Gsub): Uint8Array<ArrayBuffer> {
+    const builder = new XMLBuilder({
+      ignoreAttributes: false,
+      format: true,
+    });
+    const gsubXml = builder.build({
+      "?xml": [{ "@_version": "1.0", "@_encoding": "UTF-8" }],
+      ttFont: [
+        {
+          "@_sfntVersion": "OTTO",
+          "@_ttLibVersion": "4.56",
+          GSUB: [gsub],
+        },
+      ],
+    });
+
+    const output = this.pyodide.runPython(
+      `ttxProcessor.addGsubTable(gsub_xml)`,
+      {
+        locals: this.pyodide.toPy({
+          ttxProcessor: this.ttxProcessor,
+          gsub_xml: gsubXml,
+        }),
+      },
+    );
+    return output.toJs();
+  }
+
   findGlyphName(ch: string): string | undefined {
     const codepoint = ch.codePointAt(0);
     if (codepoint === undefined) return undefined;
@@ -107,7 +140,7 @@ class FontObject {
   }
 }
 
-async function makeFont(fontData: ArrayBuffer) {
+async function makeFont(fontData: ArrayBuffer): Promise<Blob> {
   const pyodide = await loadPyodidePromise;
   const ttx = new FontObject(pyodide, new Uint8Array(fontData));
 
@@ -224,19 +257,28 @@ async function makeFont(fontData: ArrayBuffer) {
   });
 
   console.log("Added 3-jamo ligature substitutions.");
+
+  // Add the modified GSUB table back to the font
+  const result = ttx.addGsubTable(gsub);
+  console.log("Modified GSUB table added back to font.");
+
+  // Return the modified font data
+  return new Blob([result], { type: "font/otf" });
 }
 
-type FontWorkerMessage = GenerateFontMessage;
-
-interface GenerateFontMessage {
-  type: "generateFont";
-  buffer: ArrayBuffer;
-}
-
-addEventListener("message", async (event: MessageEvent<FontWorkerMessage>) => {
-  console.log("Font worker received message:", event.data);
-  if (event.data.type === "generateFont") {
-    console.log("Generating font from buffer...");
-    await makeFont(event.data.buffer);
-  }
-});
+addEventListener(
+  "message",
+  async (event: MessageEvent<MessageToFontWorker>) => {
+    console.log("Font worker received message:", event.data);
+    if (event.data.type === "generateFont") {
+      console.log("Generating font from buffer...");
+      const result = await makeFont(event.data.buffer);
+      console.log("Font generation completed, sending back result...");
+      postMessage({
+        type: "fontBlob",
+        blob: result,
+      } as MessageToMainThread);
+      console.log("Font blob sent back to main thread.");
+    }
+  },
+);

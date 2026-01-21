@@ -22,5 +22,18 @@ class PyodideTTXProcessor:
     def getCmap(self) -> dict[int, str]:
         return self.cmap
 
+    def addGsubTable(self, gsub_ttx: str):
+        # Load GSUB table from TTX format
+        gsub_io = io.StringIO(gsub_ttx)
+        gsub_font = TTFont()
+        gsub_font.importXML(gsub_io)
+
+        self.font['GSUB'] = gsub_font['GSUB']
+
+        output = io.BytesIO()
+        self.font.save(output)
+
+        return output.getvalue()
+
     def close(self):
         self.font.close()

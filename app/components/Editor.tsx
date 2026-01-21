@@ -168,6 +168,8 @@ export function Editor({
     [dispatch, selectedJamoName, selectedVarsetName],
   );
 
+  const [isDownloadLoading, setIsDownloadLoading] = useState<boolean>(false);
+
   return (
     <>
       <div className="flex items-center gap-3 mb-6">
@@ -320,7 +322,13 @@ export function Editor({
           <Button
             variant="contained"
             startIcon={<DownloadIcon />}
-            onClick={() => fontProcessor.downloadFont()}
+            onClick={() => {
+              setIsDownloadLoading(true);
+              fontProcessor.downloadFont().finally(() => {
+                setIsDownloadLoading(false);
+              });
+            }}
+            loading={isDownloadLoading}
           >
             Download Font
           </Button>
