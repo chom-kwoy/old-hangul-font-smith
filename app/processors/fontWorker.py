@@ -10,6 +10,9 @@ class PyodideTTXProcessor:
         self.font = TTFont(font_io, fontNumber=font_number)
         self.cmap: dict[int, str] = self.font.getBestCmap()
 
+        # Set bit for Hangul Jamo
+        self.font['OS/2'].ulUnicodeRange1 |= 1 << 28
+
     def getGsubTable(self) -> str:
         # Create XML output
         output = io.StringIO()

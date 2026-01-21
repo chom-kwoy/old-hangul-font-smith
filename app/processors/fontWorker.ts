@@ -99,8 +99,9 @@ function addTwoJamoSubst(
     .filter((jamo) => jamo !== null)
     .map((jamo) => ttx.findGlyphName(jamo))
     .filter((jamo) => jamo !== undefined)
-    .map((jamo) => ({ "@_value": jamo }))
-    .toArray();
+    .toArray()
+    .toSorted() // Sort by glyph ids
+    .map((jamo) => ({ "@_value": jamo }));
 
   // Skip composition if trailing jamo is present
   for (const [first, ligatures] of precomposedLigatures(2).entries()) {
