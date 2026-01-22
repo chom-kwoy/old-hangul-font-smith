@@ -111,7 +111,7 @@ def register_cff_glyph(
         # For CID fonts, the charset holds integers (CIDs), not strings.
         new_cid = int(top_dict.charset[-1].replace("cid", "")) + 1
         new_glyph_name = f"cid{new_cid}"
-        top_dict.charset.append(new_glyph_name)
+        top_dict.charset.append(new_glyph_name)  # this also appends to the glyph order internally
         # Update FDSelect (Critical for CID fonts)
         # We must assign the new glyph to a Font Dict. We'll reuse the last one used.
         if hasattr(top_dict, 'FDSelect'):
@@ -122,7 +122,7 @@ def register_cff_glyph(
         top_dict.CIDCount = top_dict.CIDCount + 1
     else:
         # For standard fonts (Name-keyed), charset holds strings
-        top_dict.charset.append(new_glyph_name)
+        top_dict.charset.append(new_glyph_name)  # this also appends to the glyph order internally
 
     charstrings.charStrings[new_glyph_name] = new_glyph_index
 
@@ -137,6 +137,16 @@ def register_cff_glyph(
         # Assign a height and top side bearing
         vmtx_table.metrics[new_glyph_name] = (height, 0)
 
-    glyph_order.append(new_glyph_name)
-
     return new_glyph_name
+
+
+# if __name__ == "__main__":
+#     with open("/home/park/devel/fonts/SunBatang-Light.otf", "rb") as f:
+#         font_data = f.read()
+#     ttx = PyodideTTXProcessor(font_data)
+#     ttx.add_glyphs({
+#         'testglyph': [
+#             [("M", 100, 100), ("L", 200, 100), ("L", 200, 200), ("L", 100, 200), ("Z",)],
+#         ],
+#     })
+#     ttx.font.save("/home/park/devel/fonts/SunBatang-Light-new.otf")
