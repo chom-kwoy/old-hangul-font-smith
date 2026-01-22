@@ -30,6 +30,10 @@ export default class PathData {
     return new PathData(data._paths_serialized);
   }
 
+  getPaths(): TSimplePathData[] {
+    return this.#paths;
+  }
+
   toJSON(): SerializedPathData {
     return this.serialize();
   }
@@ -141,15 +145,16 @@ export default class PathData {
   intersectBoundsList(boundsList: Bounds[], threshold: number = 0.5) {
     const result: TSimplePathData[] = [];
     for (const compoundPath of this.#paths) {
-      result.push(
-        paperToFabricPathData(
-          intersectCompoundPath(
-            fabricPathDataToPaper(compoundPath),
-            boundsList,
-            threshold,
-          ),
+      const newPath = paperToFabricPathData(
+        intersectCompoundPath(
+          fabricPathDataToPaper(compoundPath),
+          boundsList,
+          threshold,
         ),
       );
+      if (newPath.length > 0) {
+        result.push(newPath);
+      }
     }
     return new PathData(result);
   }
@@ -297,7 +302,9 @@ export function splitPaths(path: TSimplePathData): TSimplePathData[] {
     for (const childIndex of rootChildren) {
       const compoundPath: TSimplePathData = [];
       traverse(childIndex, compoundPath);
-      result.push(compoundPath);
+      if (compoundPath.length > 0) {
+        result.push(compoundPath);
+      }
     }
   }
   return result;

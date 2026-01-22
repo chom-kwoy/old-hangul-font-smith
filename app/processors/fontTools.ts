@@ -1,9 +1,9 @@
+import { TSimplePathData } from "fabric";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { loadPyodide } from "pyodide";
 
 import PYTHON_SRC from "@/app/processors/fontWorker.py";
 import { Gsub, Ttx } from "@/app/processors/ttxTypes";
-import PathData from "@/app/utils/PathData";
 
 type Pyodide = Awaited<ReturnType<typeof loadPyodide>>;
 
@@ -51,7 +51,7 @@ export class FontObject {
       locals: pyodide.toPy({ font_data: fontData }),
     });
     this.cmap = pyodide
-      .runPython(`ttxProcessor.getCmap()`, {
+      .runPython(`ttxProcessor.get_cmap()`, {
         locals: pyodide.toPy({ ttxProcessor: this.ttxProcessor }),
       })
       .toJs();
@@ -64,9 +64,10 @@ export class FontObject {
   }
 
   getGsubTable(): Gsub {
-    const xml: string = this.pyodide.runPython(`ttxProcessor.getGsubTable()`, {
-      locals: this.pyodide.toPy({ ttxProcessor: this.ttxProcessor }),
-    });
+    const xml: string = this.pyodide.runPython(
+      `ttxProcessor.get_gsub_table()`,
+      { locals: this.pyodide.toPy({ ttxProcessor: this.ttxProcessor }) },
+    );
 
     const parser = new XMLParser({
       alwaysCreateTextNode: true,
@@ -129,7 +130,7 @@ export class FontObject {
     });
 
     const output = this.pyodide.runPython(
-      `ttxProcessor.addGsubTable(gsub_xml)`,
+      `ttxProcessor.add_gsub_table(gsub_xml)`,
       {
         locals: this.pyodide.toPy({
           ttxProcessor: this.ttxProcessor,
@@ -146,9 +147,16 @@ export class FontObject {
     return this.cmap[codepoint];
   }
 
-  addGlyph(pathData: PathData): string {
-    // TODO: implement adding glyphs via Python FontTools
-    // return new glyph name
-    return "";
+  addGlyphs(pathsDict: Map<string, TSimplePathData[]>): Record<string, string> {
+    const output = this.pyodide.runPython(
+      `ttxProcessor.add_glyphs(paths_dict)`,
+      {
+        locals: this.pyodide.toPy({
+          ttxProcessor: this.ttxProcessor,
+          paths_dict: Object.fromEntries(pathsDict),
+        }),
+      },
+    );
+    return output.toJs();
   }
 }
