@@ -1,3 +1,5 @@
+import { Feature } from "next/dist/build/webpack/plugins/telemetry-plugin/telemetry-plugin";
+
 import { FontObject } from "@/app/processors/fontTools";
 import {
   MessageToFontWorker,
@@ -5,9 +7,19 @@ import {
 } from "@/app/processors/fontWorkerTypes";
 import { FeatureRecord, Gsub, Lookup } from "@/app/processors/ttxTypes";
 import PathData, { SerializedPathData } from "@/app/utils/PathData";
-import { HANGUL_DATA, precomposedLigatures } from "@/app/utils/hangulData";
-import { LEADING_VARSET_NAMES, getJamoVarsetEnv } from "@/app/utils/jamos";
-import { JamoVarsets } from "@/app/utils/types";
+import {
+  HANGUL_DATA,
+  getJamoForm,
+  getJamoInfo,
+  precomposedLigatures,
+} from "@/app/utils/hangulData";
+import {
+  LEADING_VARSET_NAMES,
+  TRAILING_VARSET_NAMES,
+  VOWELJAMO_VARSET_NAMES,
+  getJamoVarsetEnv,
+} from "@/app/utils/jamos";
+import { JamoVarsets, VarsetType, VowelInfo } from "@/app/utils/types";
 
 function addThreeJamoSubst(
   gsub: Gsub,
@@ -209,6 +221,8 @@ function addPositionalVariants(
   jamoVarsets: JamoVarsets,
   gsub: Gsub,
   ljmoFeature: FeatureRecord,
+  vjmoFeature: FeatureRecord,
+  tjmoFeature: FeatureRecord,
 ) {
   const unitsPerEm = ttx.getUnitsPerEm();
   const typoDescender = ttx.getTypoDescender();
@@ -229,84 +243,155 @@ function addPositionalVariants(
               `${jamoName}.${varsetName}`,
               {
                 path: pathData,
-                width: 1000,
-                height: 1000,
+                width: varsetName.startsWith("l") ? 1000 : 0,
+                height: varsetName.startsWith("l") ? 1000 : 0,
               },
             ];
           }),
       ),
     ),
   );
-  console.log(addedGlyphNames);
+  console.log("Added new glyphs", addedGlyphNames);
+
+  type JamoPosition = "leading" | "vowel" | "trailing";
+  type JamoPositionProp = [
+    VarsetType[],
+    JamoPosition,
+    JamoPosition[],
+    JamoPosition[],
+    FeatureRecord,
+  ];
+  const JAMO_POSITIONS = [
+    [LEADING_VARSET_NAMES, "leading", [], ["vowel", "trailing"], ljmoFeature],
+    [VOWELJAMO_VARSET_NAMES, "vowel", ["leading"], ["trailing"], vjmoFeature],
+    [TRAILING_VARSET_NAMES, "trailing", ["leading", "vowel"], [], tjmoFeature],
+  ] as JamoPositionProp[];
+
+  const combinations: [
+    JamoPosition,
+    JamoPosition[],
+    JamoPosition[],
+    FeatureRecord,
+    VarsetType,
+    { prevJamoNames: string[][]; nextJamoNames: string[][] },
+    boolean,
+  ][] = [];
+  for (const [
+    varsetNameSet,
+    curPosition,
+    backtrackPositions,
+    lookAheadPositions,
+    featureRecord,
+  ] of JAMO_POSITIONS) {
+    for (const varsetName of varsetNameSet) {
+      const env = getJamoVarsetEnv(varsetName);
+      const noTrailing = (() => {
+        if (env.nextJamoNames.length === 0) return false;
+        const lastJamoList = env.nextJamoNames[env.nextJamoNames.length - 1];
+        return lastJamoList.length === 1 && lastJamoList[0] === "";
+      })();
+      if (noTrailing) {
+        env.nextJamoNames.pop();
+      }
+      combinations.push([
+        curPosition,
+        backtrackPositions,
+        lookAheadPositions,
+        featureRecord,
+        varsetName,
+        env,
+        noTrailing,
+      ]);
+    }
+  }
+  // Add variants with trailing jamo first
+  combinations.sort((a, b) => (a[6] < b[6] ? -1 : 1));
 
   const substitutions: Map<string, Array<string>> = new Map();
-
-  for (const varsetName of LEADING_VARSET_NAMES) {
-    const jamoInfos = HANGUL_DATA.consonantInfo
-      .values()
-      .filter((info) => info.leading !== null)
+  for (const [
+    curPosition,
+    backtrackPositions,
+    lookAheadPositions,
+    featureRecord,
+    varsetName,
+    env,
+  ] of combinations) {
+    const jamoNames = (
+      curPosition === "vowel"
+        ? HANGUL_DATA.vowelInfo
+            .values()
+            .filter((info) => info[curPosition] !== null)
+        : HANGUL_DATA.consonantInfo
+            .values()
+            .filter((info) => info[curPosition] !== null)
+    )
+      .map((info) => info.name)
       .toArray();
 
     const inputCoverage: {
       "@_value": string;
-    }[] = jamoInfos
-      .map((info) => {
-        const glyphName = ttx.findGlyphName(info.leading!);
+    }[] = jamoNames
+      .map((jamoName) => {
+        const jamo = getJamoForm(jamoName, curPosition);
+        const glyphName = ttx.findGlyphName(jamo);
         if (glyphName === undefined) {
-          console.log(`Glyph for jamo '${info.name}' not found`);
+          console.log(`Glyph for jamo '${jamoName}' not found`);
         }
         return glyphName;
       })
       .filter((glyph) => glyph !== undefined)
+      .toSorted()
       .map((glyph) => ({ "@_value": glyph }));
-
-    const env = getJamoVarsetEnv(varsetName);
-
-    console.log("Env", env);
 
     const backtrackCoverage: {
       "@_index": string;
       Glyph: { "@_value": string }[];
-    }[] = env.prevJamoNames.reverse().map((jamoList, index) => ({
-      "@_index": index.toFixed(),
-      Glyph: jamoList
-        .map((jamo) => {
-          const glyphName = ttx.findGlyphName(jamo);
-          if (glyphName === undefined) {
-            console.log(`Glyph for jamo '${jamo}' not found`);
-          }
-          return glyphName;
-        })
-        .filter((glyph) => glyph !== undefined)
-        .map((glyph) => ({ "@_value": glyph })),
-    }));
+    }[] = env.prevJamoNames
+      .map((jamoList, index) => [jamoList, index] as [string[], number])
+      .reverse()
+      .map(([jamoList, index]) => ({
+        "@_index": index.toFixed(),
+        Glyph: jamoList
+          .map((jamo) => {
+            const char = getJamoForm(jamo, backtrackPositions[index]);
+            const glyphName = ttx.findGlyphName(char);
+            if (glyphName === undefined) {
+              console.log(`Glyph for jamo '${jamo}' not found`);
+            }
+            return glyphName;
+          })
+          .filter((glyph) => glyph !== undefined)
+          .toSorted() // Sort by glyph ids
+          .map((glyph) => ({ "@_value": glyph })),
+      }));
     const lookAheadCoverage: {
       "@_index": string;
       Glyph: { "@_value": string }[];
-    }[] = env.nextJamoNames.map((jamoList, index) => ({
-      "@_index": index.toFixed(),
-      Glyph: jamoList
-        .map((jamo) => {
-          const glyphName = ttx.findGlyphName(jamo);
-          if (glyphName === undefined) {
-            console.log(`Glyph for jamo '${jamo}' not found`);
-          }
-          return glyphName;
-        })
-        .filter((glyph) => glyph !== undefined)
-        .map((glyph) => ({ "@_value": glyph })),
-    }));
-
-    console.log("backtrackCoverage", backtrackCoverage);
-    console.log("lookAheadCoverage", lookAheadCoverage);
-
+    }[] = env.nextJamoNames.map((jamoList, index) => {
+      return {
+        "@_index": index.toFixed(),
+        Glyph: jamoList
+          .map((jamo) => {
+            const char = getJamoForm(jamo, lookAheadPositions[index]);
+            const glyphName = ttx.findGlyphName(char);
+            if (glyphName === undefined) {
+              console.log(`Glyph for jamo '${jamo}' not found`);
+            }
+            return glyphName;
+          })
+          .filter((glyph) => glyph !== undefined)
+          .toSorted() // Sort by glyph ids
+          .map((glyph) => ({ "@_value": glyph })),
+      };
+    });
     const substArray: {
       "@_in": string;
       "@_out": string;
-    }[] = jamoInfos
-      .map((info) => {
-        const glyphName = ttx.findGlyphName(info.leading!);
-        const variantGlyphName = addedGlyphNames[`${info.name}.${varsetName}`];
+    }[] = jamoNames
+      .map((jamoName) => {
+        const jamo = getJamoForm(jamoName, curPosition);
+        const glyphName = ttx.findGlyphName(jamo);
+        const variantGlyphName = addedGlyphNames[`${jamoName}.${varsetName}`];
         if (glyphName === undefined || variantGlyphName === undefined) {
           return undefined;
         }
@@ -315,7 +400,8 @@ function addPositionalVariants(
           "@_out": variantGlyphName,
         };
       })
-      .filter((subst) => subst !== undefined);
+      .filter((subst) => subst !== undefined)
+      .toSorted((a, b) => (a["@_in"] < b["@_in"] ? -1 : 1));
 
     // Add lookups
     const singleSubstLookup: Lookup = {
@@ -349,8 +435,8 @@ function addPositionalVariants(
     };
     gsub.LookupList[0].Lookup.push(chainSubstLookup);
 
-    ljmoFeature.Feature[0].LookupListIndex.push({
-      "@_index": ljmoFeature.Feature[0].LookupListIndex.length.toFixed(),
+    featureRecord.Feature[0].LookupListIndex.push({
+      "@_index": featureRecord.Feature[0].LookupListIndex.length.toFixed(),
       "@_value": chainSubstLookup["@_index"],
     });
   }
@@ -424,11 +510,19 @@ async function makeFont(
   // addTwoJamoSubst(gsub, ttx, ccmpFeature);
   // console.log("Added 2-jamo ligature substitutions.");
 
-  addPositionalVariants(ttx, jamoVarsets, gsub, ljmoFeature);
+  addPositionalVariants(
+    ttx,
+    jamoVarsets,
+    gsub,
+    ljmoFeature,
+    vjmoFeature,
+    tjmoFeature,
+  );
   console.log("Added positional variants.");
 
   // Add the modified GSUB table back to the font
   const result = ttx.addGsubTable(gsub);
+  // const result = new Uint8Array();
   console.log("Modified GSUB table added back to font.");
 
   ttx.close(); // Clean up resources

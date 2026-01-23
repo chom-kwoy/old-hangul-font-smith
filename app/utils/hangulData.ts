@@ -546,3 +546,14 @@ export function precomposedLigatures(
 
   return PUA_LIGATURES;
 }
+
+export function getJamoForm(jamoName: string, pos: string): string {
+  const jamoInfo = getJamoInfo(jamoName)!;
+  // @ts-expect-error this is a hack
+  const char = jamoInfo[pos];
+  if (char === null || char === undefined) {
+    // this should never happen
+    throw new Error(`Jamo '${jamoName}' has no '${pos}'`);
+  }
+  return char;
+}
