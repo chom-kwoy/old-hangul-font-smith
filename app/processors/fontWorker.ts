@@ -1,5 +1,3 @@
-import { TSimplePathData } from "fabric";
-
 import { FontObject } from "@/app/processors/fontTools";
 import {
   MessageToFontWorker,
@@ -9,7 +7,7 @@ import { FeatureRecord, Gsub, Lookup } from "@/app/processors/ttxTypes";
 import PathData, { SerializedPathData } from "@/app/utils/PathData";
 import { HANGUL_DATA, precomposedLigatures } from "@/app/utils/hangulData";
 import { LEADING_VARSET_NAMES, getJamoVarsetEnv } from "@/app/utils/jamos";
-import { ConsonantSets, JamoVarsets } from "@/app/utils/types";
+import { JamoVarsets } from "@/app/utils/types";
 
 function addThreeJamoSubst(
   gsub: Gsub,
@@ -206,6 +204,158 @@ function addTwoJamoSubst(
   });
 }
 
+function addPositionalVariants(
+  ttx: FontObject,
+  jamoVarsets: JamoVarsets,
+  gsub: Gsub,
+  ljmoFeature: FeatureRecord,
+) {
+  const unitsPerEm = ttx.getUnitsPerEm();
+  const typoDescender = ttx.getTypoDescender();
+
+  const addedGlyphNames = ttx.addGlyphs(
+    new Map(
+      Object.entries(jamoVarsets).flatMap(([jamoName, varsets]) =>
+        Object.entries(varsets)
+          .filter(
+            ([varsetName, path]) =>
+              !["type", "canon"].includes(varsetName) && path !== null,
+          )
+          .map(([varsetName, path]) => {
+            const pathData = PathData.deserialize(
+              path as SerializedPathData,
+            ).toOpenType(unitsPerEm, typoDescender);
+            return [
+              `${jamoName}.${varsetName}`,
+              {
+                path: pathData,
+                width: 1000,
+                height: 1000,
+              },
+            ];
+          }),
+      ),
+    ),
+  );
+  console.log(addedGlyphNames);
+
+  const substitutions: Map<string, Array<string>> = new Map();
+
+  for (const varsetName of LEADING_VARSET_NAMES) {
+    const jamoInfos = HANGUL_DATA.consonantInfo
+      .values()
+      .filter((info) => info.leading !== null)
+      .toArray();
+
+    const inputCoverage: {
+      "@_value": string;
+    }[] = jamoInfos
+      .map((info) => {
+        const glyphName = ttx.findGlyphName(info.leading!);
+        if (glyphName === undefined) {
+          console.log(`Glyph for jamo '${info.name}' not found`);
+        }
+        return glyphName;
+      })
+      .filter((glyph) => glyph !== undefined)
+      .map((glyph) => ({ "@_value": glyph }));
+
+    const env = getJamoVarsetEnv(varsetName);
+
+    console.log("Env", env);
+
+    const backtrackCoverage: {
+      "@_index": string;
+      Glyph: { "@_value": string }[];
+    }[] = env.prevJamoNames.reverse().map((jamoList, index) => ({
+      "@_index": index.toFixed(),
+      Glyph: jamoList
+        .map((jamo) => {
+          const glyphName = ttx.findGlyphName(jamo);
+          if (glyphName === undefined) {
+            console.log(`Glyph for jamo '${jamo}' not found`);
+          }
+          return glyphName;
+        })
+        .filter((glyph) => glyph !== undefined)
+        .map((glyph) => ({ "@_value": glyph })),
+    }));
+    const lookAheadCoverage: {
+      "@_index": string;
+      Glyph: { "@_value": string }[];
+    }[] = env.nextJamoNames.map((jamoList, index) => ({
+      "@_index": index.toFixed(),
+      Glyph: jamoList
+        .map((jamo) => {
+          const glyphName = ttx.findGlyphName(jamo);
+          if (glyphName === undefined) {
+            console.log(`Glyph for jamo '${jamo}' not found`);
+          }
+          return glyphName;
+        })
+        .filter((glyph) => glyph !== undefined)
+        .map((glyph) => ({ "@_value": glyph })),
+    }));
+
+    console.log("backtrackCoverage", backtrackCoverage);
+    console.log("lookAheadCoverage", lookAheadCoverage);
+
+    const substArray: {
+      "@_in": string;
+      "@_out": string;
+    }[] = jamoInfos
+      .map((info) => {
+        const glyphName = ttx.findGlyphName(info.leading!);
+        const variantGlyphName = addedGlyphNames[`${info.name}.${varsetName}`];
+        if (glyphName === undefined || variantGlyphName === undefined) {
+          return undefined;
+        }
+        return {
+          "@_in": glyphName,
+          "@_out": variantGlyphName,
+        };
+      })
+      .filter((subst) => subst !== undefined);
+
+    // Add lookups
+    const singleSubstLookup: Lookup = {
+      "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
+      LookupType: [{ "@_value": "1" }],
+      LookupFlag: [{ "@_value": "0" }],
+      SingleSubst: [{ Substitution: substArray }],
+    };
+    gsub.LookupList[0].Lookup.push(singleSubstLookup);
+
+    const chainSubstLookup = {
+      "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
+      LookupType: [{ "@_value": "6" }],
+      LookupFlag: [{ "@_value": "0" }],
+      ChainContextSubst: [
+        {
+          "@_index": "0",
+          "@_Format": "3", // use coverage tables
+          InputCoverage: [{ "@_index": "0", Glyph: inputCoverage }],
+          BacktrackCoverage: backtrackCoverage,
+          LookAheadCoverage: lookAheadCoverage,
+          SubstLookupRecord: [
+            {
+              "@_index": "0",
+              SequenceIndex: [{ "@_value": "0" }],
+              LookupListIndex: [{ "@_value": singleSubstLookup["@_index"] }],
+            },
+          ],
+        },
+      ],
+    };
+    gsub.LookupList[0].Lookup.push(chainSubstLookup);
+
+    ljmoFeature.Feature[0].LookupListIndex.push({
+      "@_index": ljmoFeature.Feature[0].LookupListIndex.length.toFixed(),
+      "@_value": chainSubstLookup["@_index"],
+    });
+  }
+}
+
 async function makeFont(
   fontData: ArrayBuffer,
   jamoVarsets: JamoVarsets,
@@ -268,142 +418,14 @@ async function makeFont(
     "@_value": tjmoFeature["@_index"],
   });
 
-  addThreeJamoSubst(gsub, ttx, ccmpFeature);
-  console.log("Added 3-jamo ligature substitutions.");
+  // addThreeJamoSubst(gsub, ttx, ccmpFeature);
+  // console.log("Added 3-jamo ligature substitutions.");
+  //
+  // addTwoJamoSubst(gsub, ttx, ccmpFeature);
+  // console.log("Added 2-jamo ligature substitutions.");
 
-  addTwoJamoSubst(gsub, ttx, ccmpFeature);
-  console.log("Added 2-jamo ligature substitutions.");
-
-  const addedGlyphNames = ttx.addGlyphs(
-    new Map(
-      Object.entries(jamoVarsets).flatMap(([jamoName, varsets]) =>
-        Object.entries(varsets)
-          .filter(
-            ([varsetName, path]) =>
-              varsetName !== "type" && varsetName !== "canon" && path !== null,
-          )
-          .map(([varsetName, path]) => [
-            `${jamoName}.${varsetName}`,
-            PathData.deserialize(path as SerializedPathData).getPaths(),
-          ]),
-      ),
-    ),
-  );
-  console.log(addedGlyphNames);
-
-  const substitutions: Map<string, Array<string>> = new Map();
-
-  // for (const varsetName of LEADING_VARSET_NAMES) {
-  //   const jamoInfos = HANGUL_DATA.consonantInfo
-  //     .values()
-  //     .filter((info) => info.leading !== null)
-  //     .toArray();
-  //
-  //   const inputCoverage: {
-  //     "@_value": string;
-  //   }[] = jamoInfos
-  //     .map((info) => {
-  //       const glyphName = ttx.findGlyphName(info.leading!);
-  //       if (glyphName === undefined) {
-  //         console.log(`Glyph for jamo '${info.name}' not found`);
-  //       }
-  //       return glyphName;
-  //     })
-  //     .filter((glyph) => glyph !== undefined)
-  //     .map((glyph) => ({ "@_value": glyph }));
-  //
-  //   const env = getJamoVarsetEnv(varsetName);
-  //
-  //   const backtrackCoverage: {
-  //     "@_index": string;
-  //     Glyph: { "@_value": string }[];
-  //   }[] = env.prevJamoNames.reverse().map((jamoList, index) => ({
-  //     "@_index": index.toFixed(),
-  //     Glyph: jamoList
-  //       .map((jamo) => {
-  //         const glyphName = ttx.findGlyphName(jamo);
-  //         if (glyphName === undefined) {
-  //           console.log(`Glyph for jamo '${jamo}' not found`);
-  //         }
-  //         return glyphName;
-  //       })
-  //       .filter((glyph) => glyph !== undefined)
-  //       .map((glyph) => ({ "@_value": glyph })),
-  //   }));
-  //   const lookAheadCoverage: {
-  //     "@_index": string;
-  //     Glyph: { "@_value": string }[];
-  //   }[] = env.nextJamoNames.map((jamoList, index) => ({
-  //     "@_index": index.toFixed(),
-  //     Glyph: jamoList
-  //       .map((jamo) => {
-  //         const glyphName = ttx.findGlyphName(jamo);
-  //         if (glyphName === undefined) {
-  //           console.log(`Glyph for jamo '${jamo}' not found`);
-  //         }
-  //         return glyphName;
-  //       })
-  //       .filter((glyph) => glyph !== undefined)
-  //       .map((glyph) => ({ "@_value": glyph })),
-  //   }));
-  //
-  //   console.log("backtrackCoverage", backtrackCoverage);
-  //   console.log("lookAheadCoverage", lookAheadCoverage);
-  //
-  //   const substArray: {
-  //     "@_in": string;
-  //     "@_out": string;
-  //   }[] = jamoInfos
-  //     .map((info) => {
-  //       const glyphName = ttx.findGlyphName(info.leading!);
-  //       const variantGlyphName = addedGlyphNames[`${info.name}.${varsetName}`];
-  //       if (glyphName === undefined || variantGlyphName === undefined) {
-  //         return undefined;
-  //       }
-  //       return {
-  //         "@_in": glyphName,
-  //         "@_out": variantGlyphName,
-  //       };
-  //     })
-  //     .filter((subst) => subst !== undefined);
-  //
-  //   // Add lookups
-  //   const singleSubstLookup: Lookup = {
-  //     "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
-  //     LookupType: [{ "@_value": "1" }],
-  //     LookupFlag: [{ "@_value": "0" }],
-  //     SingleSubst: [{ Substitution: substArray }],
-  //   };
-  //   gsub.LookupList[0].Lookup.push(singleSubstLookup);
-  //
-  //   const chainSubstLookup = {
-  //     "@_index": gsub.LookupList[0].Lookup.length.toFixed(),
-  //     LookupType: [{ "@_value": "6" }],
-  //     LookupFlag: [{ "@_value": "0" }],
-  //     ChainContextSubst: [
-  //       {
-  //         "@_index": "0",
-  //         "@_Format": "3", // use coverage tables
-  //         InputCoverage: [{ "@_index": "0", Glyph: inputCoverage }],
-  //         BacktrackCoverage: backtrackCoverage,
-  //         LookAheadCoverage: lookAheadCoverage,
-  //         SubstLookupRecord: [
-  //           {
-  //             "@_index": "0",
-  //             SequenceIndex: [{ "@_value": "0" }],
-  //             LookupListIndex: [{ "@_value": singleSubstLookup["@_index"] }],
-  //           },
-  //         ],
-  //       },
-  //     ],
-  //   };
-  //   gsub.LookupList[0].Lookup.push(chainSubstLookup);
-  //
-  //   ljmoFeature.Feature[0].LookupListIndex.push({
-  //     "@_index": ljmoFeature.Feature[0].LookupListIndex.length.toFixed(),
-  //     "@_value": chainSubstLookup["@_index"],
-  //   });
-  // }
+  addPositionalVariants(ttx, jamoVarsets, gsub, ljmoFeature);
+  console.log("Added positional variants.");
 
   // Add the modified GSUB table back to the font
   const result = ttx.addGsubTable(gsub);

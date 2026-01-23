@@ -147,7 +147,28 @@ export class FontObject {
     return this.cmap[codepoint];
   }
 
-  addGlyphs(pathsDict: Map<string, TSimplePathData[]>): Record<string, string> {
+  getUnitsPerEm(): number {
+    return this.pyodide.runPython(`ttxProcessor.get_units_per_em()`, {
+      locals: this.pyodide.toPy({ ttxProcessor: this.ttxProcessor }),
+    });
+  }
+
+  getTypoDescender(): number {
+    return this.pyodide.runPython(`ttxProcessor.get_s_typo_descender()`, {
+      locals: this.pyodide.toPy({ ttxProcessor: this.ttxProcessor }),
+    });
+  }
+
+  addGlyphs(
+    pathsDict: Map<
+      string,
+      {
+        width: number;
+        height: number;
+        path: TSimplePathData;
+      }
+    >,
+  ): Record<string, string> {
     const output = this.pyodide.runPython(
       `ttxProcessor.add_glyphs(paths_dict)`,
       {

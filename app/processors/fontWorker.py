@@ -1,9 +1,17 @@
 import io
+import logging
 
 from fontTools.ttLib import TTFont
 from fontTools.cffLib import CharStrings, TopDict
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.misc.psCharStrings import T2CharString
+
+logging.basicConfig(
+    format="%(asctime)s - %(message)s",
+    level=logging.INFO
+)
+
+logging.getLogger("fontTools").setLevel(logging.INFO)
 
 
 class PyodideTTXProcessor:
@@ -42,32 +50,36 @@ class PyodideTTXProcessor:
 
         return output.getvalue()
 
-    def add_glyphs(self, glyphs: dict[str, list]):
-        glyph_order = self.font.getGlyphOrder()
+    def get_units_per_em(self) -> int:
+        return self.font['head'].unitsPerEm
+
+    def get_s_typo_descender(self) -> int:
+        return self.font['OS/2'].sTypoDescender
+
+    def add_glyphs(self, glyphs: dict[str, dict]):
         cff = self.font["CFF "].cff
         top_dict = cff.topDictIndex[0]
         charstrings: CharStrings = top_dict.CharStrings
 
         results = {}
-        for key, path in glyphs.items():
-            width, height = 1000, 1000
+        for key, glyph in glyphs.items():
+            width, height, path = glyph['width'], glyph['height'], glyph['path']
             pen = T2CharStringPen(width, None)
-            for subpath in path:
-                for command in subpath:
-                    cmd = command[0]
-                    args = command[1:]
-                    if cmd == "M":
-                        pen.moveTo((args[0], args[1]))
-                    elif cmd == "L":
-                        pen.lineTo((args[0], args[1]))
-                    elif cmd == "C":
-                        pen.curveTo((args[0], args[1]), (args[2], args[3]), (args[4], args[5]))
-                    elif cmd == "Q":
-                        pen.qCurveTo((args[0], args[1]), (args[2], args[3]))
-                    elif cmd == "Z":
-                        pen.closePath()
-                    else:
-                        raise ValueError(f"Unknown command: {cmd}")
+            for command in path:
+                cmd = command[0]
+                args = command[1:]
+                if cmd == "M":
+                    pen.moveTo((args[0], args[1]))
+                elif cmd == "L":
+                    pen.lineTo((args[0], args[1]))
+                elif cmd == "C":
+                    pen.curveTo((args[0], args[1]), (args[2], args[3]), (args[4], args[5]))
+                elif cmd == "Q":
+                    pen.qCurveTo((args[0], args[1]), (args[2], args[3]))
+                elif cmd == "Z":
+                    pen.closePath()
+                else:
+                    raise ValueError(f"Unknown command: {cmd}")
             new_charstring = pen.getCharString(
                 top_dict.FDArray[0].Private,
                 cff.GlobalSubrs,
@@ -76,14 +88,11 @@ class PyodideTTXProcessor:
                 new_charstring,
                 width, height,
                 f"jamo_{key}",
-                self.font,
-                glyph_order,
-                top_dict,
-                charstrings,
+                font=self.font,
+                top_dict=top_dict,
+                charstrings=charstrings,
             )
             results[key] = new_glyph_name
-
-        self.font.setGlyphOrder(glyph_order)
 
         return results
 
@@ -97,7 +106,6 @@ def register_cff_glyph(
         height: int,
         new_glyph_name: str,
         font: TTFont,
-        glyph_order,
         top_dict: TopDict,
         charstrings: CharStrings,
 ):

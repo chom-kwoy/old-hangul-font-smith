@@ -1,6 +1,7 @@
 "use client";
 
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import DownloadIcon from "@mui/icons-material/Download";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { IconButton, Menu, MenuItem, Snackbar } from "@mui/material";
@@ -183,6 +184,8 @@ export default function Home() {
       setSnackbarOpen(true);
     }
   }
+
+  const [isDownloadLoading, setIsDownloadLoading] = useState<boolean>(false);
 
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col">
@@ -379,13 +382,44 @@ export default function Home() {
           appState === AppState.GENERATING ||
           appState === AppState.COMPLETED) &&
           previewImage && (
-            <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
-              <Editor
-                fontProcessor={fontProcessor}
-                previewImage={previewImage}
-                onSaveFont={(newJamoVarsets) => saveFont(newJamoVarsets)}
-              />
-            </section>
+            <>
+              <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
+                <Editor
+                  fontProcessor={fontProcessor}
+                  previewImage={previewImage}
+                  onSaveFont={(newJamoVarsets) => saveFont(newJamoVarsets)}
+                />
+              </section>
+
+              <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
+                <div className="flex items-center gap-3 mb-6">
+                  <h2 className="text-xl font-bold text-stone-900">
+                    Generate Modified Font File
+                  </h2>
+                </div>
+                <p className="text-stone-600 mb-2">
+                  Once you are satisfied with the adjustments, click the button
+                  below to download your customized Old Hangul font file.
+                </p>
+                <div className="text-center">
+                  <Button
+                    variant="contained"
+                    startIcon={<DownloadIcon />}
+                    onClick={() => {
+                      setIsDownloadLoading(true);
+                      const jamoVarsets =
+                        store.getState().font.present.jamoVarsets;
+                      fontProcessor.downloadFont(jamoVarsets!).finally(() => {
+                        setIsDownloadLoading(false);
+                      });
+                    }}
+                    loading={isDownloadLoading}
+                  >
+                    Download Font
+                  </Button>
+                </div>
+              </section>
+            </>
           )}
       </main>
       <Snackbar

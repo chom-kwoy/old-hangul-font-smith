@@ -30,10 +30,6 @@ export default class PathData {
     return new PathData(data._paths_serialized);
   }
 
-  getPaths(): TSimplePathData[] {
-    return this.#paths;
-  }
-
   toJSON(): SerializedPathData {
     return this.serialize();
   }
@@ -83,6 +79,53 @@ export default class PathData {
       }
     }
     return new PathData(splitPaths(data));
+  }
+
+  toOpenType(unitsPerEm: number, sTypoDescender: number): TSimplePathData {
+    const scale = unitsPerEm / 1000;
+    function trX(x: number) {
+      return x * scale;
+    }
+    function trY(y: number) {
+      return (1000 - y) * scale + sTypoDescender;
+    }
+    const result: TSimplePathData = [];
+    for (const subpath of this.#paths) {
+      for (const cmd of subpath) {
+        switch (cmd[0]) {
+          case "M": // move to
+            result.push(["M", trX(cmd[1]), trY(cmd[2])]);
+            break;
+          case "L": // line to
+            result.push(["L", trX(cmd[1]), trY(cmd[2])]);
+            break;
+          case "Q": // quadratic bezier curve
+            result.push([
+              "Q",
+              trX(cmd[1]),
+              trY(cmd[2]),
+              trX(cmd[3]),
+              trY(cmd[4]),
+            ]);
+            break;
+          case "C": // cubic bezier curve
+            result.push([
+              "C",
+              trX(cmd[1]),
+              trY(cmd[2]),
+              trX(cmd[3]),
+              trY(cmd[4]),
+              trX(cmd[5]),
+              trY(cmd[6]),
+            ]);
+            break;
+          case "Z": // close path
+            result.push(["Z"]);
+            break;
+        }
+      }
+    }
+    return result;
   }
 
   static fromSvg(svg: string): PathData {

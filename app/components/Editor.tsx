@@ -1,4 +1,3 @@
-import DownloadIcon from "@mui/icons-material/Download";
 import {
   Autocomplete,
   FormControl,
@@ -7,7 +6,6 @@ import {
   MenuItem,
   TextField,
 } from "@mui/material";
-import Button from "@mui/material/Button";
 import { Box } from "@mui/system";
 import { AdaptiveSelect, AdaptiveSelectItem } from "adaptive-material-ui";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -167,8 +165,6 @@ export function Editor({
     [dispatch, selectedJamoName, selectedVarsetName],
   );
 
-  const [isDownloadLoading, setIsDownloadLoading] = useState<boolean>(false);
-
   return (
     <>
       <div className="flex items-center gap-3 mb-6">
@@ -315,23 +311,6 @@ export function Editor({
               />
             </div>
           </div>
-        </div>
-
-        <div className="text-center">
-          <Button
-            variant="contained"
-            startIcon={<DownloadIcon />}
-            onClick={() => {
-              setIsDownloadLoading(true);
-              const jamoVarsets = store.getState().font.present.jamoVarsets;
-              fontProcessor.downloadFont(jamoVarsets!).finally(() => {
-                setIsDownloadLoading(false);
-              });
-            }}
-            loading={isDownloadLoading}
-          >
-            Download Font
-          </Button>
         </div>
       </div>
     </>
