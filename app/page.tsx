@@ -213,88 +213,6 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-8">
-        {/* Step 0: Select saved fonts to resume */}
-        {appState == AppState.IDLE && savedFonts.length > 0 && (
-          <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
-            <div className="flex items-center gap-3 mb-6">
-              <h2 className="text-xl font-bold text-stone-900">
-                Continue Editing
-              </h2>
-            </div>
-            <div className="text-sm text-stone-600 pb-1">
-              Select a font to continue editing. After selecting,{" "}
-              <strong>re-upload the source font file</strong> to resume your
-              session.
-            </div>
-            <div className="bg-stone-50 border border-stone-200 p-10">
-              <div className="flex flex-wrap justify-evenly items-center gap-10">
-                {savedFonts.map((font, i) => (
-                  <div
-                    key={i}
-                    className="w-80 flex-none shadow-sm rounded-xl bg-white hover:bg-amber-200 transition-colors duration-300 ease-in-out border border-stone-200 p-2 cursor-pointer"
-                    onClick={() => loadSavedFont(i, savedFonts[i])}
-                  >
-                    <div className="flex">
-                      <div className="text-stone-700 self-center">
-                        <div>{font.metadata.name}</div>
-                      </div>
-                      <div className="text-stone-700 ml-auto">
-                        <span onClick={(event) => event.stopPropagation()}>
-                          <IconButton
-                            aria-label="options"
-                            onClick={handleClick}
-                            value={i}
-                          >
-                            <MoreHorizIcon />
-                          </IconButton>
-                          <Menu
-                            anchorEl={anchorEl}
-                            open={menuOpen}
-                            onClose={() => setAnchorEl(null)}
-                            slotProps={{
-                              list: {
-                                "aria-labelledby": "basic-button",
-                              },
-                            }}
-                          >
-                            <MenuItem
-                              onClick={() => {
-                                if (anchorEl) {
-                                  const i = parseInt(anchorEl.value);
-                                  setSavedFonts(
-                                    produce(savedFonts, (prevSavedFonts) => {
-                                      prevSavedFonts.splice(i, 1);
-                                    }),
-                                  );
-                                  setAnchorEl(null);
-                                }
-                              }}
-                            >
-                              Delete
-                            </MenuItem>
-                          </Menu>
-                        </span>
-                      </div>
-                    </div>
-                    <img
-                      src={font.previewImage}
-                      alt="Font Preview"
-                      className="h-16 object-cover object-left opacity-80 border border-stone-200"
-                    />
-                    <span className="text-stone-500 text-sm">
-                      {(font.progress * 100).toFixed(1)}%
-                    </span>
-                    <span className="text-stone-500"> • </span>
-                    <span className="text-stone-500 text-sm">
-                      last edited {moment(font.date).fromNow()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
-
         {/* Step 1: Upload */}
         <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200 text-center">
           {/* Error message */}
@@ -377,6 +295,88 @@ export default function Home() {
             )}
         </section>
 
+        {/* Step 0: Select saved fonts to resume */}
+        {appState == AppState.IDLE && savedFonts.length > 0 && (
+          <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
+            <div className="flex items-center gap-3 mb-6">
+              <h2 className="text-xl font-bold text-stone-900">
+                Continue Editing
+              </h2>
+            </div>
+            <div className="text-sm text-stone-600 pb-1">
+              Select a font to continue editing. After selecting,{" "}
+              <strong>re-upload the source font file</strong> to resume your
+              session.
+            </div>
+            <div className="bg-stone-50 border border-stone-200 p-10">
+              <div className="flex flex-wrap justify-evenly items-center gap-10">
+                {savedFonts.map((font, i) => (
+                  <div
+                    key={i}
+                    className="w-80 flex-none shadow-sm rounded-xl bg-white hover:bg-amber-200 transition-colors duration-300 ease-in-out border border-stone-200 p-2 cursor-pointer"
+                    onClick={() => loadSavedFont(i, savedFonts[i])}
+                  >
+                    <div className="flex">
+                      <div className="text-stone-700 self-center">
+                        <div>{font.metadata.name}</div>
+                      </div>
+                      <div className="text-stone-700 ml-auto">
+                        <span onClick={(event) => event.stopPropagation()}>
+                          <IconButton
+                            aria-label="options"
+                            onClick={handleClick}
+                            value={i}
+                          >
+                            <MoreHorizIcon />
+                          </IconButton>
+                          <Menu
+                            anchorEl={anchorEl}
+                            open={menuOpen}
+                            onClose={() => setAnchorEl(null)}
+                            slotProps={{
+                              list: {
+                                "aria-labelledby": "basic-button",
+                              },
+                            }}
+                          >
+                            <MenuItem
+                              onClick={() => {
+                                if (anchorEl) {
+                                  const i = parseInt(anchorEl.value);
+                                  setSavedFonts(
+                                    produce(savedFonts, (prevSavedFonts) => {
+                                      prevSavedFonts.splice(i, 1);
+                                    }),
+                                  );
+                                  setAnchorEl(null);
+                                }
+                              }}
+                            >
+                              Delete
+                            </MenuItem>
+                          </Menu>
+                        </span>
+                      </div>
+                    </div>
+                    <img
+                      src={font.previewImage}
+                      alt="Font Preview"
+                      className="h-16 object-cover object-left opacity-80 border border-stone-200"
+                    />
+                    <span className="text-stone-500 text-sm">
+                      {(font.progress * 100).toFixed(1)}%
+                    </span>
+                    <span className="text-stone-500"> • </span>
+                    <span className="text-stone-500 text-sm">
+                      last edited {moment(font.date).fromNow()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Step 2: Analysis & Generate */}
         {(appState === AppState.READY_TO_GENERATE ||
           appState === AppState.GENERATING ||
@@ -394,10 +394,10 @@ export default function Home() {
               <section className="bg-white rounded-2xl p-8 shadow-sm border border-stone-200">
                 <div className="flex items-center gap-3 mb-6">
                   <h2 className="text-xl font-bold text-stone-900">
-                    Generate Modified Font File
+                    Download Font File
                   </h2>
                 </div>
-                <p className="text-stone-600 mb-2">
+                <p className="text-stone-600 text-sm mb-2">
                   Once you are satisfied with the adjustments, click the button
                   below to download your customized Old Hangul font file.
                 </p>
@@ -415,7 +415,7 @@ export default function Home() {
                     }}
                     loading={isDownloadLoading}
                   >
-                    Download Font
+                    Generate Font
                   </Button>
                 </div>
               </section>
