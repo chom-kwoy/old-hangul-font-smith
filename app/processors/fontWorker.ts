@@ -236,15 +236,17 @@ function addPositionalVariants(
               !["type", "canon"].includes(varsetName) && path !== null,
           )
           .map(([varsetName, path]) => {
+            const isLeading = varsetName.startsWith("l");
+            const offset = isLeading ? 0 : -1000;
             const pathData = PathData.deserialize(
               path as SerializedPathData,
-            ).toOpenType(unitsPerEm, typoDescender);
+            ).toOpenType(unitsPerEm, typoDescender, offset, 0);
             return [
               `${jamoName}.${varsetName}`,
               {
                 path: pathData,
-                width: varsetName.startsWith("l") ? 1000 : 0,
-                height: varsetName.startsWith("l") ? 1000 : 0,
+                width: isLeading ? 1000 : 0,
+                height: isLeading ? 1000 : 0,
               },
             ];
           }),
@@ -331,13 +333,14 @@ function addPositionalVariants(
     const inputCoverage: {
       "@_value": string;
     }[] = jamoNames
-      .map((jamoName) => {
+      .flatMap((jamoName) => {
         const jamo = getJamoForm(jamoName, curPosition);
         const glyphName = ttx.findGlyphName(jamo);
         if (glyphName === undefined) {
-          console.log(`Glyph for jamo '${jamoName}' not found`);
+          console.log(`Glyph for jamo '${jamo}' not found`);
+          return [undefined];
         }
-        return glyphName;
+        return [glyphName, ...(substitutions.get(glyphName) ?? [])];
       })
       .filter((glyph) => glyph !== undefined)
       .toSorted()
@@ -352,13 +355,14 @@ function addPositionalVariants(
       .map(([jamoList, index]) => ({
         "@_index": index.toFixed(),
         Glyph: jamoList
-          .map((jamo) => {
+          .flatMap((jamo) => {
             const char = getJamoForm(jamo, backtrackPositions[index]);
             const glyphName = ttx.findGlyphName(char);
             if (glyphName === undefined) {
               console.log(`Glyph for jamo '${jamo}' not found`);
+              return [undefined];
             }
-            return glyphName;
+            return [glyphName, ...(substitutions.get(glyphName) ?? [])];
           })
           .filter((glyph) => glyph !== undefined)
           .toSorted() // Sort by glyph ids
@@ -395,6 +399,10 @@ function addPositionalVariants(
         if (glyphName === undefined || variantGlyphName === undefined) {
           return undefined;
         }
+        if (!substitutions.has(glyphName)) {
+          substitutions.set(glyphName, []);
+        }
+        substitutions.get(glyphName)!.push(variantGlyphName);
         return {
           "@_in": glyphName,
           "@_out": variantGlyphName,

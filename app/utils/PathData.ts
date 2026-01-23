@@ -81,13 +81,18 @@ export default class PathData {
     return new PathData(splitPaths(data));
   }
 
-  toOpenType(unitsPerEm: number, sTypoDescender: number): TSimplePathData {
+  toOpenType(
+    unitsPerEm: number,
+    sTypoDescender: number,
+    offsetX: number = 0,
+    offsetY: number = 0,
+  ): TSimplePathData {
     const scale = unitsPerEm / 1000;
     function trX(x: number) {
-      return x * scale;
+      return x * scale + offsetX;
     }
     function trY(y: number) {
-      return (1000 - y) * scale + sTypoDescender;
+      return (1000 - y) * scale + sTypoDescender + offsetY;
     }
     const result: TSimplePathData = [];
     for (const subpath of this.#paths) {

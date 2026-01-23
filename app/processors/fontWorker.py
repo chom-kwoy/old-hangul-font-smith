@@ -1,6 +1,7 @@
 import io
 import logging
 
+from fontTools.misc.roundTools import otRound
 from fontTools.ttLib import TTFont
 from fontTools.cffLib import CharStrings, TopDict
 from fontTools.pens.t2CharStringPen import T2CharStringPen
@@ -60,6 +61,8 @@ class PyodideTTXProcessor:
         cff = self.font["CFF "].cff
         top_dict = cff.topDictIndex[0]
         charstrings: CharStrings = top_dict.CharStrings
+        private = top_dict.FDArray[0].Private
+        nominalWidth = private.nominalWidthX
 
         results = {}
         for key, glyph in glyphs.items():
@@ -84,6 +87,7 @@ class PyodideTTXProcessor:
                 top_dict.FDArray[0].Private,
                 cff.GlobalSubrs,
             )
+            new_charstring.program[0] = otRound(width - nominalWidth)
             new_glyph_name = register_cff_glyph(
                 new_charstring,
                 width, height,
