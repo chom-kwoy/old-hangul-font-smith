@@ -1,8 +1,8 @@
 import { PayloadAction, createSlice } from "@reduxjs/toolkit";
 import undoable from "redux-undo";
 
-import { SerializedPathData } from "@/app/utils/PathData";
-import { CONSONANT_VARSET_NAMES, VOWEL_VARSET_NAMES } from "@/app/utils/jamos";
+import { CONSONANT_VARSET_NAMES, VOWEL_VARSET_NAMES } from "@/app/hangul/jamos";
+import { SerializedPathData } from "@/app/pathUtils/PathData";
 import {
   ConsonantVarsetType,
   JamoVarsets,

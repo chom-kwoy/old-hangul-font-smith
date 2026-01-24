@@ -8,7 +8,8 @@ import {
   fabricPathDataToSVG,
   intersectCompoundPath,
   paperToFabricPathData,
-} from "@/app/utils/bezier";
+} from "@/app/pathUtils/convert";
+import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
 import { Bounds } from "@/app/utils/types";
 
 export type SerializedPathData = {
@@ -36,6 +37,12 @@ export default class PathData {
 
   clone(): PathData {
     return PathData.deserialize(structuredClone(this.serialize()));
+  }
+
+  getMedialAxis() {
+    return this.#paths.map((subpath) =>
+      extractMedialAxis(fabricPathDataToPaper(subpath)),
+    );
   }
 
   static fromOpentype(
@@ -169,8 +176,8 @@ export default class PathData {
       result.push(
         new fabric.Path(comp, {
           ...options,
-          left: offsetX + (bbox.left + bbox.width / 2) * (width / 1000),
-          top: offsetY + (bbox.top + bbox.height / 2) * (height / 1000),
+          left: offsetX + bbox.center.x * (width / 1000),
+          top: offsetY + bbox.center.y * (height / 1000),
           scaleX: width / 1000,
           scaleY: height / 1000,
         }),

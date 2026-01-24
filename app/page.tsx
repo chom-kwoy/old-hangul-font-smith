@@ -23,10 +23,10 @@ import { useLocalStorage } from "react-use";
 
 import { Editor } from "@/app/components/Editor";
 import { VisuallyHiddenInput } from "@/app/components/VisuallyHiddenInput";
+import { getProgress } from "@/app/hangul/jamos";
 import { FontProcessor } from "@/app/processors/fontProcessor";
 import { fontLoaded } from "@/app/redux/features/font/font-slice";
 import { useAppDispatch, useAppStore } from "@/app/redux/hooks";
-import { getProgress } from "@/app/utils/jamos";
 import schedulerYield from "@/app/utils/schedulerYield";
 import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
 
@@ -410,7 +410,7 @@ export default function Home() {
                 <p className="text-sm font-medium text-stone-700 uppercase tracking-wide">
                   Generation Options
                 </p>
-                <div className="mb-4">
+                <div className="mb-4 text-stone-700">
                   <FormGroup>
                     <div className="flex">
                       <FormControlLabel
@@ -422,7 +422,11 @@ export default function Home() {
                             }}
                           />
                         }
-                        label="Include precomposed Old Hangul syllables"
+                        label={
+                          <span className="text-sm">
+                            Include precomposed Old Hangul syllables
+                          </span>
+                        }
                       />
                       <FormControlLabel
                         control={
@@ -433,7 +437,9 @@ export default function Home() {
                             }}
                           />
                         }
-                        label="Vertical writing"
+                        label={
+                          <span className="text-sm">Vertical writing</span>
+                        }
                       />
                     </div>
                   </FormGroup>

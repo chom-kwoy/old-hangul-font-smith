@@ -11,13 +11,13 @@ import React, {
   useState,
 } from "react";
 
-import PathData from "@/app/utils/PathData";
-import { HANGUL_DATA } from "@/app/utils/hangulData";
+import { HANGUL_DATA } from "@/app/hangul/hangulData";
 import {
   CONSONANT_VARSET_NAMES,
   VOWEL_VARSET_NAMES,
   getVarset,
-} from "@/app/utils/jamos";
+} from "@/app/hangul/jamos";
+import PathData from "@/app/pathUtils/PathData";
 import {
   ConsonantInfo,
   JamoVarsets,

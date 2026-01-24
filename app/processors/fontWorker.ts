@@ -1,24 +1,24 @@
 import { Feature } from "next/dist/build/webpack/plugins/telemetry-plugin/telemetry-plugin";
 
+import {
+  HANGUL_DATA,
+  getJamoForm,
+  getJamoInfo,
+  precomposedLigatures,
+} from "@/app/hangul/hangulData";
+import {
+  LEADING_VARSET_NAMES,
+  TRAILING_VARSET_NAMES,
+  VOWELJAMO_VARSET_NAMES,
+  getJamoVarsetEnv,
+} from "@/app/hangul/jamos";
+import PathData, { SerializedPathData } from "@/app/pathUtils/PathData";
 import { FontObject } from "@/app/processors/fontTools";
 import {
   MessageToFontWorker,
   MessageToMainThread,
 } from "@/app/processors/fontWorkerTypes";
 import { FeatureRecord, Gsub, Lookup } from "@/app/processors/ttxTypes";
-import PathData, { SerializedPathData } from "@/app/utils/PathData";
-import {
-  HANGUL_DATA,
-  getJamoForm,
-  getJamoInfo,
-  precomposedLigatures,
-} from "@/app/utils/hangulData";
-import {
-  LEADING_VARSET_NAMES,
-  TRAILING_VARSET_NAMES,
-  VOWELJAMO_VARSET_NAMES,
-  getJamoVarsetEnv,
-} from "@/app/utils/jamos";
 import {
   GenerateOptions,
   JamoVarsets,

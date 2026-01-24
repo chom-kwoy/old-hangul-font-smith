@@ -1,20 +1,20 @@
 import opentype from "opentype.js";
 
-import {
-  GenerateFontMessage,
-  MessageToMainThread,
-} from "@/app/processors/fontWorkerTypes";
-import PathData from "@/app/utils/PathData";
-import { HANGUL_DATA } from "@/app/utils/hangulData";
+import { HANGUL_DATA } from "@/app/hangul/hangulData";
 import {
   CONSONANT_JAMO_BOUNDS,
   VOWEL_JAMO_BOUNDS,
-} from "@/app/utils/jamoBounds";
+} from "@/app/hangul/jamoBounds";
 import {
   CONSONANT_VARSET_NAMES,
   VOWEL_VARSET_NAMES,
   getSyllablesFor,
-} from "@/app/utils/jamos";
+} from "@/app/hangul/jamos";
+import PathData from "@/app/pathUtils/PathData";
+import {
+  GenerateFontMessage,
+  MessageToMainThread,
+} from "@/app/processors/fontWorkerTypes";
 import schedulerYield from "@/app/utils/schedulerYield";
 import {
   ConsonantSets,

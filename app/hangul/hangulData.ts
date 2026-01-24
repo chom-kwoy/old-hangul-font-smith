@@ -1,5 +1,5 @@
-import { uniToPua } from "@/app/utils/puaUniConv";
-import { PUA_CONV_TAB } from "@/app/utils/puaUniTable";
+import { uniToPua } from "@/app/hangul/puaUniConv";
+import { PUA_CONV_TAB } from "@/app/hangul/puaUniTable";
 import { ConsonantInfo, VowelInfo } from "@/app/utils/types";
 
 function getHangulData(): {

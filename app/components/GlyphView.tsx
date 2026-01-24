@@ -19,7 +19,8 @@ import { TransitionProps } from "@mui/material/transitions";
 import * as fabric from "fabric";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import PathData from "@/app/utils/PathData";
+import PathData from "@/app/pathUtils/PathData";
+import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
 import { downloadStringAsFile } from "@/app/utils/download";
 import {
   createPathControls,
@@ -58,6 +59,7 @@ export function GlyphView({
     path: PathData | null;
     pathObjects: fabric.Path[];
     bgPathObjects: fabric.Path[];
+    otherObjects: fabric.FabricObject[];
   };
   const mainCanvasStateRef = useRef<CanvasState | null>(null);
   const fullScreenCanvasStateRef = useRef<CanvasState | null>(null);
@@ -284,13 +286,20 @@ export function GlyphView({
     ) => {
       if (JSON.stringify(state.path) === JSON.stringify(path)) return;
 
-      state.path = path?.clone() ?? null;
+      state.path = path ? path.clone() : null;
+
+      const medialAxis = state.path?.getMedialAxis() ?? [];
 
       // update canvas with new path
       for (const obj of state.pathObjects) {
         state.canvas.remove(obj);
       }
       state.pathObjects.length = 0;
+
+      for (const obj of state.otherObjects) {
+        state.canvas.remove(obj);
+      }
+      state.otherObjects.length = 0;
 
       const pathSelectable = interactive;
       const fabricPaths =
@@ -364,6 +373,31 @@ export function GlyphView({
 
       state.canvas.add(...fabricPaths);
 
+      const medialAxisLines = medialAxis.flatMap((segments) =>
+        segments.map((seg) => {
+          const line = [
+            { x: seg[0].x, y: seg[0].y },
+            { x: seg[1].x, y: seg[1].y },
+          ];
+          const center = {
+            x: (seg[0].x + seg[1].x) / 2,
+            y: (seg[0].y + seg[1].y) / 2,
+          };
+          return new fabric.Polyline(line, {
+            left: center.x * (width / 1000),
+            top: center.y * (height / 1000),
+            scaleX: width / 1000,
+            scaleY: height / 1000,
+            stroke: "#AAFFAA",
+            strokeWidth: 2,
+            selectable: false,
+            evented: false,
+          });
+        }),
+      );
+      state.otherObjects.push(...medialAxisLines);
+      state.canvas.add(...medialAxisLines);
+
       adjustStrokes(state.canvas);
     },
     [interactive, commitPath, adjustStrokes],
@@ -402,6 +436,7 @@ export function GlyphView({
         path: null,
         pathObjects: [],
         bgPathObjects: [],
+        otherObjects: [],
       };
       fullScreenCanvasStateRef.current = state;
       updateBgPaths(bgPathsRef.current, state, size, size);
@@ -426,6 +461,7 @@ export function GlyphView({
         path: null,
         pathObjects: [],
         bgPathObjects: [],
+        otherObjects: [],
       };
       return () => {
         canvas.dispose();

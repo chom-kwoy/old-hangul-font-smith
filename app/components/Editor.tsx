@@ -13,18 +13,18 @@ import { ActionCreators } from "redux-undo";
 
 import { GlyphView } from "@/app/components/GlyphView";
 import { VarsetMapView } from "@/app/components/VarsetMapView";
-import useComponentSize from "@/app/hooks/useComponentSize";
-import { FontProcessor } from "@/app/processors/fontProcessor";
-import { pathUpdated } from "@/app/redux/features/font/font-slice";
-import { useAppDispatch, useAppSelector, useAppStore } from "@/app/redux/hooks";
-import PathData from "@/app/utils/PathData";
-import { HANGUL_DATA, unicodeNameToHangul } from "@/app/utils/hangulData";
+import { HANGUL_DATA, unicodeNameToHangul } from "@/app/hangul/hangulData";
 import {
   getExampleEnvPaths,
   getSyllablesFor,
   getVarset,
-} from "@/app/utils/jamos";
-import { uniToPua } from "@/app/utils/puaUniConv";
+} from "@/app/hangul/jamos";
+import { uniToPua } from "@/app/hangul/puaUniConv";
+import useComponentSize from "@/app/hooks/useComponentSize";
+import PathData from "@/app/pathUtils/PathData";
+import { FontProcessor } from "@/app/processors/fontProcessor";
+import { pathUpdated } from "@/app/redux/features/font/font-slice";
+import { useAppDispatch, useAppSelector, useAppStore } from "@/app/redux/hooks";
 import {
   ConsonantInfo,
   JamoVarsets,

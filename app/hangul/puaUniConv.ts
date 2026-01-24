@@ -1,4 +1,4 @@
-import { PUA_CONV_TAB } from "@/app/utils/puaUniTable";
+import { PUA_CONV_TAB } from "@/app/hangul/puaUniTable";
 
 let UNI_TO_PUA: Map<string, string> | null = null;
 let UNI_TO_PUA_3: Map<string, string> | null = null;

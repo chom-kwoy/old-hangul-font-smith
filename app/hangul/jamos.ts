@@ -1,6 +1,5 @@
 import seedrandom from "seedrandom";
 
-import PathData from "@/app/utils/PathData";
 import {
   HANGUL_DATA,
   composeHangul,
@@ -9,7 +8,8 @@ import {
   getName,
   getTrailing,
   getVowel,
-} from "@/app/utils/hangulData";
+} from "@/app/hangul/hangulData";
+import PathData from "@/app/pathUtils/PathData";
 import {
   ConsonantSets,
   ConsonantVarsetType,

@@ -1,4 +1,4 @@
-import { SerializedPathData } from "@/app/utils/PathData";
+import { SerializedPathData } from "@/app/pathUtils/PathData";
 
 export type FontMetadata = {
   name: string;
