@@ -80,3 +80,8 @@ export type JamoPref = {
   vowelPref?: string[];
   trailingPref?: string[];
 };
+
+export type GenerateOptions = {
+  includePrecomposed: boolean;
+  isVerticalFont: boolean;
+};

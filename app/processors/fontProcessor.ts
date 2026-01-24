@@ -1,6 +1,9 @@
 import opentype from "opentype.js";
 
-import { MessageToMainThread } from "@/app/processors/fontWorkerTypes";
+import {
+  GenerateFontMessage,
+  MessageToMainThread,
+} from "@/app/processors/fontWorkerTypes";
 import PathData from "@/app/utils/PathData";
 import { HANGUL_DATA } from "@/app/utils/hangulData";
 import {
@@ -16,6 +19,7 @@ import schedulerYield from "@/app/utils/schedulerYield";
 import {
   ConsonantSets,
   FontMetadata,
+  GenerateOptions,
   JamoVarsets,
   VowelSets,
 } from "@/app/utils/types";
@@ -188,7 +192,10 @@ export class FontProcessor {
     return result;
   }
 
-  async downloadFont(jamoVarsets: JamoVarsets): Promise<void> {
+  async downloadFont(
+    jamoVarsets: JamoVarsets,
+    options: GenerateOptions,
+  ): Promise<void> {
     if (!this.buffer || !this.worker || !this.fontName) {
       throw new Error("Call loadFont() first.");
     }
@@ -197,7 +204,8 @@ export class FontProcessor {
       type: "generateFont",
       buffer: this.buffer,
       jamoVarsets: jamoVarsets,
-    });
+      options: options,
+    } as GenerateFontMessage);
 
     const blob = await new Promise<Blob>((resolve) => {
       if (!this.worker) {

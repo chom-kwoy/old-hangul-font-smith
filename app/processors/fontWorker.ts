@@ -19,7 +19,12 @@ import {
   VOWELJAMO_VARSET_NAMES,
   getJamoVarsetEnv,
 } from "@/app/utils/jamos";
-import { JamoVarsets, VarsetType, VowelInfo } from "@/app/utils/types";
+import {
+  GenerateOptions,
+  JamoVarsets,
+  VarsetType,
+  VowelInfo,
+} from "@/app/utils/types";
 
 function addThreeJamoSubst(
   gsub: Gsub,
@@ -223,6 +228,7 @@ function addPositionalVariants(
   ljmoFeature: FeatureRecord,
   vjmoFeature: FeatureRecord,
   tjmoFeature: FeatureRecord,
+  isVerticalFont: boolean,
 ) {
   const unitsPerEm = ttx.getUnitsPerEm();
   const typoDescender = ttx.getTypoDescender();
@@ -238,9 +244,11 @@ function addPositionalVariants(
           .map(([varsetName, path]) => {
             const isLeading = varsetName.startsWith("l");
             const offset = isLeading ? 0 : -1000;
+            const offsetX = isVerticalFont ? 0 : offset;
+            const offsetY = isVerticalFont ? -offset : 0;
             const pathData = PathData.deserialize(
               path as SerializedPathData,
-            ).toOpenType(unitsPerEm, typoDescender, offset, 0);
+            ).toOpenType(unitsPerEm, typoDescender, offsetX, offsetY);
             return [
               `${jamoName}.${varsetName}`,
               {
@@ -453,6 +461,7 @@ function addPositionalVariants(
 async function makeFont(
   fontData: ArrayBuffer,
   jamoVarsets: JamoVarsets,
+  options: GenerateOptions,
 ): Promise<Blob> {
   const ttx = await FontObject.create(new Uint8Array(fontData));
 
@@ -512,11 +521,13 @@ async function makeFont(
     "@_value": tjmoFeature["@_index"],
   });
 
-  // addThreeJamoSubst(gsub, ttx, ccmpFeature);
-  // console.log("Added 3-jamo ligature substitutions.");
-  //
-  // addTwoJamoSubst(gsub, ttx, ccmpFeature);
-  // console.log("Added 2-jamo ligature substitutions.");
+  if (options.includePrecomposed) {
+    addThreeJamoSubst(gsub, ttx, ccmpFeature);
+    console.log("Added 3-jamo ligature substitutions.");
+
+    addTwoJamoSubst(gsub, ttx, ccmpFeature);
+    console.log("Added 2-jamo ligature substitutions.");
+  }
 
   addPositionalVariants(
     ttx,
@@ -525,6 +536,7 @@ async function makeFont(
     ljmoFeature,
     vjmoFeature,
     tjmoFeature,
+    options.isVerticalFont,
   );
   console.log("Added positional variants.");
 
@@ -545,7 +557,11 @@ addEventListener(
     console.log("Font worker received message:", event.data);
     if (event.data.type === "generateFont") {
       console.log("Generating font from buffer...");
-      const result = await makeFont(event.data.buffer, event.data.jamoVarsets);
+      const result = await makeFont(
+        event.data.buffer,
+        event.data.jamoVarsets,
+        event.data.options,
+      );
       console.log("Font generation completed, sending back result...");
       postMessage({
         type: "fontBlob",

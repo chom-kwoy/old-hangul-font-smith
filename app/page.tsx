@@ -4,7 +4,15 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DownloadIcon from "@mui/icons-material/Download";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import { IconButton, Menu, MenuItem, Snackbar } from "@mui/material";
+import {
+  Checkbox,
+  FormControlLabel,
+  FormGroup,
+  IconButton,
+  Menu,
+  MenuItem,
+  Snackbar,
+} from "@mui/material";
 import Button from "@mui/material/Button";
 import * as fabric from "fabric";
 import { produce } from "immer";
@@ -185,6 +193,8 @@ export default function Home() {
     }
   }
 
+  const [includePrecomposed, setIncludePrecomposed] = useState(true);
+  const [isVerticalFont, setVertical] = useState(false);
   const [isDownloadLoading, setIsDownloadLoading] = useState<boolean>(false);
 
   return (
@@ -397,10 +407,37 @@ export default function Home() {
                     Download Font File
                   </h2>
                 </div>
-                <p className="text-stone-600 text-sm mb-2">
-                  Once you are satisfied with the adjustments, click the button
-                  below to download your customized Old Hangul font file.
+                <p className="text-sm font-medium text-stone-700 uppercase tracking-wide">
+                  Generation Options
                 </p>
+                <div className="mb-4">
+                  <FormGroup>
+                    <div className="flex">
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={includePrecomposed}
+                            onChange={(event) => {
+                              setIncludePrecomposed(event.target.checked);
+                            }}
+                          />
+                        }
+                        label="Include precomposed Old Hangul syllables"
+                      />
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={isVerticalFont}
+                            onChange={(event) => {
+                              setVertical(event.target.checked);
+                            }}
+                          />
+                        }
+                        label="Vertical writing"
+                      />
+                    </div>
+                  </FormGroup>
+                </div>
                 <div className="text-center">
                   <Button
                     variant="contained"
@@ -409,9 +446,14 @@ export default function Home() {
                       setIsDownloadLoading(true);
                       const jamoVarsets =
                         store.getState().font.present.jamoVarsets;
-                      fontProcessor.downloadFont(jamoVarsets!).finally(() => {
-                        setIsDownloadLoading(false);
-                      });
+                      fontProcessor
+                        .downloadFont(jamoVarsets!, {
+                          includePrecomposed,
+                          isVerticalFont,
+                        })
+                        .finally(() => {
+                          setIsDownloadLoading(false);
+                        });
                     }}
                     loading={isDownloadLoading}
                   >
