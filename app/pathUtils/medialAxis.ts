@@ -74,10 +74,17 @@ export function extractMedialAxis(
       // 4. Filtering Strategy
 
       // Filter A: Containment
-      // The medial axis must be STRICTLY inside the shape.
-      // We check the midpoint of the segment.
+      // Check start, end, AND midpoint to ensure the segment is fully inside.
       const midPoint = vStart.add(vEnd).divide(2);
-      if (!path.contains(midPoint)) {
+
+      // We assume if start, middle, and end are inside, the whole segment is inside.
+      // Note: path.contains() might fail for points exactly on the boundary due to precision,
+      // but Voronoi vertices for the medial axis should ideally be strictly interior.
+      if (
+        !path.contains(midPoint) ||
+        !path.contains(vStart) ||
+        !path.contains(vEnd)
+      ) {
         continue;
       }
 
