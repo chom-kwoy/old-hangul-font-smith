@@ -23,7 +23,7 @@ export function computeMedialSkeletalDiagram(
   // We flatten the MA to a traversable graph or point set for projection.
   let V: paper.Point[] = getInitialSeeds(medialAxis);
 
-  console.log(
+  console.info(
     "Initial seeds:",
     V.map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`).join(","),
   );
@@ -40,8 +40,9 @@ export function computeMedialSkeletalDiagram(
     for (let l = 0; l < LLOYD_STEPS; l++) {
       V = optimizePositions(V, path, medialAxis);
     }
+    const inscribedRadii = V.map((v) => getDistanceToBoundary(v, path));
 
-    console.log(
+    console.info(
       "Iteration",
       iter,
       "V:",
@@ -54,10 +55,11 @@ export function computeMedialSkeletalDiagram(
       V,
       path,
       boundarySamples,
+      inscribedRadii,
       tolerance,
     );
 
-    console.log(
+    console.info(
       "num uncovered:",
       uncoveredPoints.length,
       "points:",
@@ -138,44 +140,85 @@ function optimizePositions(
 }
 
 /**
- * Evaluates E_coverage.
- * Returns points on the boundary of S that are NOT covered by the primitives defined by V.
+ * Evaluates E_coverage for Generalized Enveloping Primitives.
+ * Uses robust ray-casting (getIntersections) to ensure visibility.
  */
 function getUncoveredBoundaryPoints(
   V: paper.Point[],
   path: paper.CompoundPath,
-  boundarySamples: paper.Point[],
-  tolerance: number,
+  samples: paper.Point[],
+  inscribedRadii: number[],
+  stretchTolerance: number = 3.0,
 ): paper.Point[] {
   const uncovered: paper.Point[] = [];
 
-  // For 2D MSD, the primitive is defined by the Maximal Inscribed Circle (radius r).
-  // The shape is reconstructed as the Union of these primitives.
-  // Note: A full reconstruction would envelope the connections (Cones),
-  // but checking distance to the nearest Sphere is a standard approximation for coverage.
-
-  for (const sample of boundarySamples) {
+  for (const sample of samples) {
     let isCovered = false;
-    for (const v of V) {
-      // Radius at v is the distance to the nearest boundary point
-      const radius = getDistanceToBoundary(v, path);
 
-      // Check if sample is inside the primitive (Circle at v)
-      if (sample.getDistance(v) < radius + tolerance) {
-        isCovered = true;
-        break;
+    // Find the best candidate primitive (closest skeleton vertex)
+    let bestV: paper.Point | null = null;
+    let inscribedRadius = Infinity;
+    let minDist = Infinity;
+
+    for (let i = 0; i < V.length; i++) {
+      const v = V[i];
+      const radius = inscribedRadii[i];
+      const dist = sample.getDistance(v);
+      if (dist < minDist) {
+        minDist = dist;
+        bestV = v;
+        inscribedRadius = radius;
       }
     }
 
-    // Note: The paper also envelopes edges between V.
-    // Ideally, we check distance to the Skeleton Graph V_edges, not just vertices.
-    // For simplicity of this snippet, we check vertex coverage.
+    if (bestV) {
+      // 1. Geometric Check (Stretch Ratio)
+      // Check if the primitive can physically stretch this far
+      const stretchRatio = minDist / (inscribedRadius + 0.001);
+
+      if (stretchRatio <= stretchTolerance) {
+        // 2. Topology Check (Visibility)
+        // Use robust ray casting instead of midpoint check
+        if (isVisible(bestV, sample, path)) {
+          isCovered = true;
+        }
+      }
+    }
 
     if (!isCovered) {
       uncovered.push(sample);
     }
   }
   return uncovered;
+}
+
+/**
+ * Checks if a line segment between two points is strictly contained within the shape.
+ * Uses Paper.js `getIntersections` to detect boundary crossings.
+ */
+function isVisible(
+  start: paper.Point,
+  end: paper.Point,
+  path: paper.CompoundPath,
+): boolean {
+  // Create a temporary ray
+  const ray = new paper.Path.Line(start, end);
+
+  // Compute intersections with the shape boundary
+  const intersections = ray.getIntersections(path);
+
+  // Analysis:
+  // We expect an intersection at 'end' (the boundary sample).
+  // Any intersection significantly BEFORE 'end' means the view is blocked.
+  for (const loc of intersections) {
+    // If we hit an obstacle more than 1 pixel away from the target sample,
+    // it's a blockage.
+    if (loc.point.getDistance(end) > 1.0) {
+      return false; // Blocked
+    }
+  }
+
+  return true; // Clear line of sight
 }
 
 // --- Helper Functions ---
