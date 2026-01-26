@@ -17,6 +17,7 @@
     "@mui/material-nextjs": "^7.3.6",
     "@reduxjs/toolkit": "^2.11.2",
     "@simbathesailor/use-what-changed": "^2.0.0",
+    "@xmldom/xmldom": "^0.8.11",
     "adaptive-material-ui": "^1.0.0-beta.7",
     "canvas": "^3.2.0",
     "d3-delaunay": "^6.0.4",

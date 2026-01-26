@@ -1,3 +1,4 @@
+import { DOMParser } from "@xmldom/xmldom";
 import { TSimplePathData } from "fabric";
 import * as fabric from "fabric";
 import opentype from "opentype.js";
@@ -10,6 +11,7 @@ import {
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
 import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
+import { computeMedialSkeletalDiagram } from "@/app/pathUtils/medialDiagram";
 import { Bounds } from "@/app/utils/types";
 
 export type SerializedPathData = {
@@ -37,12 +39,6 @@ export default class PathData {
 
   clone(): PathData {
     return PathData.deserialize(structuredClone(this.serialize()));
-  }
-
-  getMedialAxis() {
-    return this.#paths.map((subpath) =>
-      extractMedialAxis(fabricPathDataToPaper(subpath)),
-    );
   }
 
   static fromOpentype(
@@ -147,7 +143,8 @@ export default class PathData {
     const pathElements = xmlDoc.getElementsByTagName("path");
 
     const result: TSimplePathData[] = [];
-    for (const pathElement of pathElements) {
+    for (let i = 0; i < pathElements.length; i++) {
+      const pathElement = pathElements.item(i)!;
       const d = pathElement.getAttribute("d");
       if (d) {
         const compoundPath = new paper.CompoundPath(d);
@@ -249,6 +246,24 @@ export default class PathData {
       }
       this.#paths[index] = newPath;
     }
+  }
+
+  getMedialAxis() {
+    return this.#paths.map((subpath) =>
+      extractMedialAxis(fabricPathDataToPaper(subpath)),
+    );
+  }
+
+  getMedialSkeleton() {
+    return this.#paths.map((subpath) => {
+      const paperPath = fabricPathDataToPaper(subpath);
+      const medialAxis = extractMedialAxis(paperPath);
+      const medialSkeleton = computeMedialSkeletalDiagram(
+        paperPath,
+        medialAxis,
+      );
+      return medialSkeleton;
+    });
   }
 }
 

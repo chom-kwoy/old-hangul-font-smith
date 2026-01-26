@@ -287,6 +287,7 @@ export function GlyphView({
       if (JSON.stringify(state.path) === JSON.stringify(path)) return;
 
       state.path = path ? path.clone() : null;
+      console.log(state.path?.exportSvg());
 
       const medialAxis = state.path?.getMedialAxis() ?? [];
 

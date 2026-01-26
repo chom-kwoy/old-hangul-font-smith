@@ -12,30 +12,13 @@ type Segment = [paper.Point, paper.Point];
  */
 export function extractMedialAxis(
   path: paper.CompoundPath,
-  sampleSpacing: number = 5,
+  sampleSpacing: number = 10,
 ): Segment[] {
   // 1. Sampling: Discretize the path boundaries into a cloud of points
-  const boundaryPoints: paper.Point[] = [];
+  const boundaryPoints: paper.Point[] = sampleBoundary(path, sampleSpacing);
 
-  // We need to keep track of the logical index to filter "adjacent" noise later
-  // Each point will carry its index in the flattened array
-  const pointsArray: [number, number][] = [];
+  const pointsArray = boundaryPoints.map((p) => [p.x, p.y] as [number, number]);
 
-  // Helper to sample a single path item
-  const sampleItem = (item: paper.Path) => {
-    const length = item.length;
-    const count = Math.ceil(length / sampleSpacing);
-    for (let i = 0; i < count; i++) {
-      const offset = (i / count) * length;
-      const pt = item.getPointAt(offset);
-      boundaryPoints.push(pt);
-      pointsArray.push([pt.x, pt.y]);
-    }
-  };
-
-  path.children.forEach((c) => sampleItem(c as paper.Path));
-
-  // 2. Compute Voronoi Diagram
   // The Medial Axis is a subset of the Voronoi Diagram of the boundary points.
   const delaunay = Delaunay.from(pointsArray);
   const voronoi = delaunay.voronoi([
@@ -115,6 +98,29 @@ export function extractMedialAxis(
   }
 
   return medialSegments;
+}
+
+export function sampleBoundary(
+  path: paper.CompoundPath,
+  step: number,
+): paper.Point[] {
+  // 1. Sampling: Discretize the path boundaries into a cloud of points
+  const boundaryPoints: paper.Point[] = [];
+
+  // Helper to sample a single path item
+  const sampleItem = (item: paper.Path) => {
+    const length = item.length;
+    const count = Math.ceil(length / step);
+    for (let i = 0; i < count; i++) {
+      const offset = (i / count) * length;
+      const pt = item.getPointAt(offset);
+      boundaryPoints.push(pt);
+    }
+  };
+
+  path.children.forEach((c) => sampleItem(c as paper.Path));
+
+  return boundaryPoints;
 }
 
 function getNextHalfedge(e: number): number {
