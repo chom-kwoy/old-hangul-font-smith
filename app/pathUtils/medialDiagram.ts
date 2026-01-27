@@ -1,9 +1,7 @@
 import { Delaunay } from "d3-delaunay";
 import paper from "paper";
 
-import { sampleBoundary } from "@/app/pathUtils/medialAxis";
-
-type Segment = [paper.Point, paper.Point];
+import { MedialAxisGraph, sampleBoundary } from "@/app/pathUtils/medialAxis";
 
 /**
  * Computes the Medial Skeletal Diagram (Optimized Skeleton) for a 2D shape.
@@ -16,8 +14,8 @@ type Segment = [paper.Point, paper.Point];
  */
 export function computeMedialSkeletalDiagram(
   path: paper.CompoundPath,
-  medialAxis: Segment[],
-  tolerance: number = 2.0,
+  medialAxis: MedialAxisGraph,
+  tolerance: number = 100.0,
 ): paper.Point[] {
   // 1. Initialization: Start with a minimal seed set (e.g., endpoints of the MA)
   // We flatten the MA to a traversable graph or point set for projection.
@@ -40,7 +38,6 @@ export function computeMedialSkeletalDiagram(
     for (let l = 0; l < LLOYD_STEPS; l++) {
       V = optimizePositions(V, path, medialAxis);
     }
-    const inscribedRadii = V.map((v) => getDistanceToBoundary(v, path));
 
     console.info(
       "Iteration",
@@ -55,7 +52,6 @@ export function computeMedialSkeletalDiagram(
       V,
       path,
       boundarySamples,
-      inscribedRadii,
       tolerance,
     );
 
@@ -95,7 +91,7 @@ export function computeMedialSkeletalDiagram(
 function optimizePositions(
   currentV: paper.Point[],
   path: paper.CompoundPath,
-  medialAxis: Segment[],
+  medialAxis: MedialAxisGraph,
 ): paper.Point[] {
   // 1. Compute Voronoi Diagram of V
   const pointsArray = currentV.map((p) => [p.x, p.y] as [number, number]);
@@ -111,8 +107,10 @@ function optimizePositions(
 
   for (let i = 0; i < currentV.length; i++) {
     // 2. Compute Restricted Voronoi Cell (RVC)
-    // RVC = Voronoi Cell (i) INTERSECT Shape S [cite: 1493]
-    const cellPolygon = new paper.Path(voronoi.cellPolygon(i));
+    // RVC = Voronoi Cell (i) INTERSECT Shape S
+    const cell = voronoi.cellPolygon(i);
+    const segments = cell.map((point) => new paper.Segment(point));
+    const cellPolygon = new paper.Path(segments);
 
     // In Paper.js, we intersect the cell with the shape to get the RVC
     const rvc = path.intersect(cellPolygon);
@@ -123,17 +121,13 @@ function optimizePositions(
       const centroid = getCentroid(rvc);
 
       // 4. Constraint Projection
-      // The vertex must stay on the Medial Axis[cite: 1755].
+      // The vertex must stay on the Medial Axis.
       const constrainedPt = projectToMedialAxis(centroid, medialAxis);
       newV.push(constrainedPt);
     } else {
       // If cell is empty (numerical error or outside), keep original
       newV.push(currentV[i]);
     }
-
-    // Cleanup Paper.js temporary items
-    cellPolygon.remove();
-    rvc.remove();
   }
 
   return newV;
@@ -147,9 +141,10 @@ function getUncoveredBoundaryPoints(
   V: paper.Point[],
   path: paper.CompoundPath,
   samples: paper.Point[],
-  inscribedRadii: number[],
   stretchTolerance: number = 3.0,
 ): paper.Point[] {
+  const inscribedRadii = V.map((v) => getDistanceToBoundary(v, path));
+
   const uncovered: paper.Point[] = [];
 
   for (const sample of samples) {
@@ -223,16 +218,21 @@ function isVisible(
 
 // --- Helper Functions ---
 
-function getInitialSeeds(medialAxis: Segment[]): paper.Point[] {
-  if (medialAxis.length === 0) return [];
-  if (medialAxis.length === 1) return [medialAxis[0][0]];
+function getInitialSeeds(medialAxis: MedialAxisGraph): paper.Point[] {
+  if (medialAxis.segments.length === 0) return [];
+  if (medialAxis.segments.length === 1) {
+    return [
+      medialAxis.points[medialAxis.segments[0][0]],
+      medialAxis.points[medialAxis.segments[0][1]],
+    ];
+  }
 
   const getRandomPoint = () => {
-    const segIndex = Math.floor(Math.random() * medialAxis.length);
-    const segment = medialAxis[segIndex];
+    const segIndex = Math.floor(Math.random() * medialAxis.segments.length);
+    const segment = medialAxis.segments[segIndex];
     // Pick either start (0) or end (1) of the segment
     const ptIndex = Math.random() > 0.5 ? 1 : 0;
-    return segment[ptIndex];
+    return medialAxis.points[segment[ptIndex]];
   };
 
   const p1 = getRandomPoint();
@@ -250,12 +250,14 @@ function getInitialSeeds(medialAxis: Segment[]): paper.Point[] {
 
 function projectToMedialAxis(
   pt: paper.Point,
-  segments: Segment[],
+  medialAxis: MedialAxisGraph,
 ): paper.Point {
-  let closestPt = segments[0][0];
+  let closestPt = medialAxis.points[medialAxis.segments[0][0]];
   let minDst = Infinity;
 
-  for (const [p1, p2] of segments) {
+  for (const [i1, i2] of medialAxis.segments) {
+    const p1 = medialAxis.points[i1];
+    const p2 = medialAxis.points[i2];
     // Project pt onto line segment p1-p2
     const line = new paper.Path.Line(p1, p2);
     const proj = line.getNearestPoint(pt);
@@ -265,7 +267,6 @@ function projectToMedialAxis(
       minDst = dst;
       closestPt = proj;
     }
-    line.remove(); // Cleanup
   }
   return closestPt;
 }

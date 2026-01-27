@@ -285,7 +285,7 @@ export function GlyphView({
       state.path = path ? path.clone() : null;
       console.log(state.path?.exportSvg());
 
-      const medialAxis = state.path?.getMedialAxis() ?? [];
+      const medialAxisList = state.path?.getMedialAxis() ?? [];
 
       // update canvas with new path
       for (const obj of state.pathObjects) {
@@ -370,15 +370,17 @@ export function GlyphView({
 
       state.canvas.add(...fabricPaths);
 
-      const medialAxisLines = medialAxis.flatMap((segments) =>
-        segments.map((seg) => {
+      const medialAxisLines = medialAxisList.flatMap((medialAxis) =>
+        medialAxis.segments.map((seg) => {
+          const p0 = medialAxis.points[seg[0]];
+          const p1 = medialAxis.points[seg[1]];
           const line = [
-            { x: seg[0].x, y: seg[0].y },
-            { x: seg[1].x, y: seg[1].y },
+            { x: p0.x, y: p0.y },
+            { x: p1.x, y: p1.y },
           ];
           const center = {
-            x: (seg[0].x + seg[1].x) / 2,
-            y: (seg[0].y + seg[1].y) / 2,
+            x: (p0.x + p1.x) / 2,
+            y: (p0.y + p1.y) / 2,
           };
           return new fabric.Polyline(line, {
             left: center.x * (width / 1000),
