@@ -1,9 +1,3 @@
-import CloseIcon from "@mui/icons-material/Close";
-import DownloadIcon from "@mui/icons-material/Download";
-import FullscreenIcon from "@mui/icons-material/Fullscreen";
-import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
-import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
   AppBar,
   Button,
@@ -18,6 +12,8 @@ import { amber, blue, teal } from "@mui/material/colors";
 import { TransitionProps } from "@mui/material/transitions";
 import * as fabric from "fabric";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { MaterialSymbol } from "react-material-symbols-react19";
+import "react-material-symbols-react19/outlined";
 
 import PathData from "@/app/pathUtils/PathData";
 import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
@@ -596,7 +592,7 @@ export function GlyphView({
               onClick={() => setDialogOpen(false)}
               aria-label="close"
             >
-              <CloseIcon />
+              <MaterialSymbol icon={"close"} size={24} fill />
             </IconButton>
             <Typography sx={{ ml: 2, flex: 1 }} variant="h6" component="div">
               Glyph editor
@@ -658,14 +654,14 @@ function GlyphViewMenu({
       {!isFullScreen && (
         <IconButton onClick={openFullScreen}>
           <Tooltip title="Fullscreen" placement={tooltipPlacement}>
-            <FullscreenIcon />
+            <MaterialSymbol icon={"fullscreen"} size={24} fill />
           </Tooltip>
         </IconButton>
       )}
       {isFullScreen && (
         <IconButton onClick={closeFullScreen}>
           <Tooltip title="Exit Fullscreen" placement={tooltipPlacement}>
-            <FullscreenExitIcon />
+            <MaterialSymbol icon={"fullscreen_exit"} size={24} fill />
           </Tooltip>
         </IconButton>
       )}
@@ -677,17 +673,17 @@ function GlyphViewMenu({
         }}
       >
         <Tooltip title="Reset to Full Syllable" placement={tooltipPlacement}>
-          <RestartAltIcon />
+          <MaterialSymbol icon={"restart_alt"} size={24} fill />
         </Tooltip>
       </IconButton>
       <IconButton onClick={importFromSVG} className="ml-auto">
         <Tooltip title="Import SVG" placement={tooltipPlacement}>
-          <UploadFileIcon />
+          <MaterialSymbol icon={"upload_file"} size={24} fill />
         </Tooltip>
       </IconButton>
       <IconButton onClick={downloadSVG}>
         <Tooltip title="Download as SVG" placement={tooltipPlacement}>
-          <DownloadIcon />
+          <MaterialSymbol icon={"download"} size={24} fill />
         </Tooltip>
       </IconButton>
     </>

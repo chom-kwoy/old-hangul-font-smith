@@ -1,9 +1,5 @@
 "use client";
 
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import DownloadIcon from "@mui/icons-material/Download";
-import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
-import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
   Checkbox,
   FormControlLabel,
@@ -19,6 +15,8 @@ import { produce } from "immer";
 import moment from "moment";
 import paper from "paper";
 import React, { useEffect, useState } from "react";
+import { MaterialSymbol } from "react-material-symbols-react19";
+import "react-material-symbols-react19/outlined";
 import { useLocalStorage } from "react-use";
 
 import { Editor } from "@/app/components/Editor";
@@ -203,20 +201,17 @@ export default function Home() {
       <header className="bg-white border-b border-stone-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-md">
-              옛
+            <div className="w-10 h-10 bg-amber-400 rounded-lg flex items-center justify-center text-white font-bold text-xl">
+              <MaterialSymbol icon={"brush"} size={24} fill />
             </div>
             <div>
               <h1 className="text-xl font-bold text-stone-900 leading-tight">
                 Old Hangul Font Smith
               </h1>
               <p className="text-xs text-stone-500 font-medium">
-                Create Old Hangul Fonts
+                Create Old Hangul Fonts from Existing Fonts
               </p>
             </div>
-          </div>
-          <div className="text-xs font-mono bg-stone-100 px-3 py-1 rounded text-stone-500">
-            v1.0.0
           </div>
         </div>
       </header>
@@ -239,7 +234,7 @@ export default function Home() {
             appState === AppState.PROCESSING_FONT) && (
             <div className="max-w-md mx-auto space-y-4">
               <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <UploadFileIcon />
+                <MaterialSymbol icon={"upload_file"} size={32} fill />
               </div>
               <h2 className="text-2xl font-bold text-stone-900">
                 Upload Modern Hangul Font
@@ -254,7 +249,9 @@ export default function Home() {
                   component="label"
                   role={undefined}
                   variant="contained"
-                  startIcon={<UploadFileIcon />}
+                  startIcon={
+                    <MaterialSymbol icon={"upload_file"} size={24} fill />
+                  }
                   loading={appState === AppState.PROCESSING_FONT}
                 >
                   Upload font file
@@ -275,7 +272,7 @@ export default function Home() {
               <div className="flex items-center justify-between text-left">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-green-50 text-green-600 rounded-full flex items-center justify-center">
-                    <CheckCircleIcon />
+                    <MaterialSymbol icon={"check_circle"} size={24} fill />
                   </div>
                   <div>
                     <h3 className="font-bold text-lg text-stone-900">
@@ -337,7 +334,11 @@ export default function Home() {
                             onClick={handleClick}
                             value={i}
                           >
-                            <MoreHorizIcon />
+                            <MaterialSymbol
+                              icon={"more_horiz"}
+                              size={24}
+                              fill
+                            />
                           </IconButton>
                           <Menu
                             anchorEl={anchorEl}
@@ -447,7 +448,9 @@ export default function Home() {
                 <div className="text-center">
                   <Button
                     variant="contained"
-                    startIcon={<DownloadIcon />}
+                    startIcon={
+                      <MaterialSymbol icon={"download"} size={24} fill />
+                    }
                     onClick={() => {
                       setIsDownloadLoading(true);
                       const jamoVarsets =
