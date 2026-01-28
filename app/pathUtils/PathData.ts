@@ -11,7 +11,8 @@ import {
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
 import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
-import { computeMedialSkeletalDiagram } from "@/app/pathUtils/medialDiagram";
+import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
+import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
 import { Bounds } from "@/app/utils/types";
 
 export type SerializedPathData = {
@@ -258,9 +259,14 @@ export default class PathData {
     return this.#paths.map((subpath) => {
       const paperPath = fabricPathDataToPaper(subpath);
       const medialAxis = extractMedialAxis(paperPath);
-      const medialSkeleton = computeMedialSkeletalDiagram(
+      const medialSkeletonPoints = computeMedialSkeletonPoints(
         paperPath,
         medialAxis,
+      );
+      const medialSkeleton = constructMedialSkeleton(
+        medialSkeletonPoints,
+        medialAxis,
+        paperPath,
       );
       return medialSkeleton;
     });

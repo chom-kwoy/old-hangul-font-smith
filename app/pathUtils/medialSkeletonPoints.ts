@@ -10,21 +10,25 @@ import { MedialAxisGraph, sampleBoundary } from "@/app/pathUtils/medialAxis";
  * @param path - The target 2D shape (closed CompoundPath).
  * @param medialAxis - The raw medial axis segments (computed previously).
  * @param tolerance - The coverage tolerance (delta in the paper).
+ * @param verbose - Whether to print intermediate results to the console.
  * @returns An optimal subset of points V* defining the sparse skeleton.
  */
-export function computeMedialSkeletalDiagram(
+export function computeMedialSkeletonPoints(
   path: paper.CompoundPath,
   medialAxis: MedialAxisGraph,
   tolerance: number = 100.0,
+  verbose: boolean = false,
 ): paper.Point[] {
   // 1. Initialization: Start with a minimal seed set (e.g., endpoints of the MA)
   // We flatten the MA to a traversable graph or point set for projection.
   let V: paper.Point[] = getInitialSeeds(medialAxis);
 
-  console.info(
-    "Initial seeds:",
-    V.map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`).join(","),
-  );
+  if (verbose) {
+    console.info(
+      "Initial seeds:",
+      V.map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`).join(","),
+    );
+  }
 
   const boundarySamples = sampleBoundary(path, 10);
 
@@ -39,12 +43,14 @@ export function computeMedialSkeletalDiagram(
       V = optimizePositions(V, path, medialAxis);
     }
 
-    console.info(
-      "Iteration",
-      iter,
-      "V:",
-      V.map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`).join(","),
-    );
+    if (verbose) {
+      console.info(
+        "Iteration",
+        iter,
+        "V:",
+        V.map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`).join(","),
+      );
+    }
 
     // --- Step B: Coverage Check & Incremental Addition ---
     // Identify uncovered regions and add new seeds.
@@ -55,14 +61,16 @@ export function computeMedialSkeletalDiagram(
       tolerance,
     );
 
-    console.info(
-      "num uncovered:",
-      uncoveredPoints.length,
-      "points:",
-      uncoveredPoints
-        .map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`)
-        .join(","),
-    );
+    if (verbose) {
+      console.info(
+        "num uncovered:",
+        uncoveredPoints.length,
+        "points:",
+        uncoveredPoints
+          .map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`)
+          .join(","),
+      );
+    }
 
     if (uncoveredPoints.length === 0) {
       break; // Fully covered

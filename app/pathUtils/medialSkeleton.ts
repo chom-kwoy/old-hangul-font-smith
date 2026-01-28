@@ -1,3 +1,4 @@
+import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import paper from "paper";
 
 import { MedialAxisGraph } from "@/app/pathUtils/medialAxis";
@@ -6,9 +7,7 @@ import { MedialAxisGraph } from "@/app/pathUtils/medialAxis";
  * Constructs the Medial Skeleton (M_S) from selected vertices (V) and the Raw Medial Axis (M).
  * Implements Section 5.1: Medial Skeleton Construction.
  *
- * @param selectedPoints - The sparse set of optimized vertices (V).
- * @param rawMedialAxis - The dense, noisy raw medial axis (M).
- * @param originalPath - The boundary shape (S) for geometry validation.
+ * Optimization: Uses MinPriorityQueue for O(E log V) Dijkstra performance.
  */
 export function constructMedialSkeleton(
   selectedPoints: paper.Point[],
@@ -20,6 +19,12 @@ export function constructMedialSkeleton(
   // ---------------------------------------------------------
   const rawAdj = buildAdjacencyList(rawMedialAxis);
   const rawPoints = rawMedialAxis.points;
+  const numNodes = rawPoints.length;
+
+  const isRawGraphConnected = isGraphConnected(rawAdj);
+  if (!isRawGraphConnected) {
+    throw new Error("Raw Medial Axis is not connected!");
+  }
 
   // ---------------------------------------------------------
   // Step 1: Computing the Restricted Voronoi Diagram (RVD)
@@ -35,38 +40,46 @@ export function constructMedialSkeleton(
 
   // 1.2 Compute Ownership (Voronoi Partitioning on Graph)
   // nodeOwner[i] = index of the seed that owns raw node i
-  const nodeOwner = new Int32Array(rawPoints.length).fill(-1);
-  const distToSeed = new Float32Array(rawPoints.length).fill(Infinity);
+  const nodeOwner = new Int32Array(numNodes).fill(-1);
+  // Using Float64Array to match JavaScript number precision and avoid float casting bugs
+  const distToSeed = new Float64Array(numNodes).fill(Infinity);
 
-  // Priority Queue for Dijkstra: [distance, rawNodeIndex, ownerSeedIndex]
-  // Using a simple array sort for simplicity (can use MinHeap for speed optimization)
-  const queue: { dist: number; u: number; owner: number }[] = [];
+  // Priority Queue for Dijkstra
+  // Stores objects { dist, u, owner }
+  // We prioritize by smallest 'dist'
+  const pq = new MinPriorityQueue<{ dist: number; u: number; owner: number }>(
+    (x) => x.dist,
+  );
 
   // Initialize queue with seeds
   seedIndices.forEach((rawNodeIdx, seedIdx) => {
     nodeOwner[rawNodeIdx] = seedIdx;
     distToSeed[rawNodeIdx] = 0;
-    queue.push({ dist: 0, u: rawNodeIdx, owner: seedIdx });
+    pq.push({ dist: 0, u: rawNodeIdx, owner: seedIdx });
   });
 
   // Run Dijkstra / Flood Fill
-  while (queue.length > 0) {
-    // Sort to simulate Priority Queue (pop smallest distance)
-    queue.sort((a, b) => b.dist - a.dist);
-    const { dist, u, owner } = queue.pop()!;
+  while (!pq.isEmpty()) {
+    const { dist, u, owner } = pq.pop()!;
 
-    if (dist > distToSeed[u]) continue;
+    // Optimization: Skip stale entries
+    // Uses a small epsilon (1e-5) to handle floating point inequality safely
+    if (dist > distToSeed[u] + 1e-5) continue;
 
     // Explore neighbors
     const neighbors = rawAdj[u];
     for (const v of neighbors) {
       const weight = rawPoints[u].getDistance(rawPoints[v]);
+
+      // Safety: Prevent NaN propagation if geometry is invalid
+      if (!Number.isFinite(weight)) continue;
+
       const newDist = dist + weight;
 
       if (newDist < distToSeed[v]) {
         distToSeed[v] = newDist;
         nodeOwner[v] = owner;
-        queue.push({ dist: newDist, u: v, owner: owner });
+        pq.push({ dist: newDist, u: v, owner: owner });
       }
     }
   }
@@ -92,14 +105,14 @@ export function constructMedialSkeleton(
     const ownerU = nodeOwner[u];
     const ownerV = nodeOwner[v];
 
-    // If both nodes are claimed (should be true if graph is connected) AND owners differ
+    // Detect "Interface": raw edge connecting two different regions
     if (ownerU !== -1 && ownerV !== -1 && ownerU !== ownerV) {
       // We found an "Interface" on the raw graph between region U and region V.
       // Candidate edge: Connect Seed(U) <-> Seed(V)
       const idxA = seedToOutputIndex[ownerU];
       const idxB = seedToOutputIndex[ownerV];
 
-      // Sort to create a unique key for the Set
+      // Unique key for undirected edge
       const key = idxA < idxB ? `${idxA}-${idxB}` : `${idxB}-${idxA}`;
 
       if (!adjacencySet.has(key)) {
@@ -113,13 +126,12 @@ export function constructMedialSkeleton(
         const pB = finalPoints[idxB];
 
         if (isSegmentValid(pA, pB, originalPath)) {
-          // Case A: Valid direct connection
+          // Valid direct connection
           newSegments.push([idxA, idxB]);
           adjacencySet.add(key);
         } else {
-          // Case B: Invalid connection (crosses hole/concavity).
-          // Fix: Introduce the "Interface Point" as a new Steiner point.
-          // The interface is the midpoint of the raw edge [u, v] where domains switch.
+          // Invalid: Introduce "Interface Point" (Steiner point)
+          // The interface is the midpoint of the raw edge where domains switch
           const interfacePt = rawPoints[u].add(rawPoints[v]).divide(2);
 
           const newPtIdx = finalPoints.length;
@@ -145,6 +157,26 @@ export function constructMedialSkeleton(
 // ---------------------------------------------------------
 // Helper Functions
 // ---------------------------------------------------------
+
+function isGraphConnected(adj: number[][]): boolean {
+  const numNodes = adj.length;
+  if (numNodes <= 1) return true;
+
+  const visited = new Set<number>();
+  const queue: number[] = [0];
+  visited.add(0);
+
+  while (queue.length > 0) {
+    const currentNode = queue.shift()!;
+    for (const neighbor of adj[currentNode]) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+  return visited.size === numNodes;
+}
 
 function buildAdjacencyList(graph: MedialAxisGraph): number[][] {
   const adj: number[][] = Array.from({ length: graph.points.length }, () => []);
@@ -183,8 +215,7 @@ function isSegmentValid(
 
   // 2. Ray Intersections (Robust check)
   // Ensure the line segment doesn't intersect boundaries (except maybe at ends)
-  // We set insertItems=false to avoid DOM overhead
-  const line = new paper.Path.Line({ from: p1, to: p2, insert: false });
+  const line = new paper.Path.Line({ from: p1, to: p2 });
   const intersections = line.getIntersections(path);
 
   // If we intersect "walls" (excluding the start/end proximity), it's invalid.
