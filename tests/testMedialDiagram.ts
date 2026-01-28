@@ -78,7 +78,10 @@ Z" />
 
 const path = PathData.fromSvg(svg_nieun_hieuh);
 
+const startTime = Date.now();
 const medialSkeletons = path.getMedialSkeleton();
+const elapsedTime = Date.now() - startTime;
+console.log(`Medial skeletons: ${medialSkeletons.length} in ${elapsedTime}ms`);
 for (const skeleton of medialSkeletons) {
   console.log(
     skeleton.segments
