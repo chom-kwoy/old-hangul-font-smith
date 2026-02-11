@@ -2,19 +2,26 @@ import paper from "paper";
 
 import { MedialAxisGraph } from "@/app/pathUtils/medialAxis";
 
-// Extend interface locally
+// --- Interfaces ---
+
 interface FittedMedialAxisGraph extends MedialAxisGraph {
   primitives: Primitive[];
 }
 
 export interface Primitive {
-  center: paper.Point;
+  type: "point" | "edge";
+  elementIdx: number; // Index into `points` (if type="point") or `segments` (if type="edge")
+
+  // Geometric definition of the fitted primitive
+  // For "point": origin is the center.
+  // For "edge": origins trace the medial segment (the "bone").
+  origins: paper.Point[];
   directions: paper.Point[];
   radii: number[];
 }
 
 type PrimitiveFittingOptions = {
-  // The "resolution" of your generalized primitive.
+  // The "resolution" of your generalized primitive. Must be even.
   num_directions: number;
   // How aggressively the balloon tries to expand towards the target size
   w_expansion: number;
@@ -32,20 +39,31 @@ export function localPrimitiveFitting(
   path: paper.CompoundPath,
   medialSkeleton: MedialAxisGraph,
   options: Partial<PrimitiveFittingOptions> = {},
-) {
-  options.num_directions = options.num_directions ?? 128;
-  options.w_expansion = options.w_expansion ?? 10;
-  options.w_penalty = options.w_penalty ?? 10000;
-  options.max_progressions = options.max_progressions ?? 25;
-  options.expansion_rate = options.expansion_rate ?? 1.1;
-  options.max_alternating_iters = options.max_alternating_iters ?? 15;
-
-  const skeleton: FittedMedialAxisGraph = {
-    ...medialSkeleton,
-    primitives: [],
+): FittedMedialAxisGraph {
+  const opts = {
+    num_directions: options.num_directions ?? 128,
+    w_expansion: options.w_expansion ?? 0.1,
+    w_penalty: options.w_penalty ?? 10000,
+    max_progressions: options.max_progressions ?? 25,
+    expansion_rate: options.expansion_rate ?? 1.1,
+    max_alternating_iters: options.max_alternating_iters ?? 15,
   };
 
-  const SCRATCH_N = options.num_directions;
+  const skeleton = {
+    ...medialSkeleton,
+    primitives: [] as Primitive[],
+  } as FittedMedialAxisGraph;
+
+  // 1. Analyze Topology to identify isolated vertices
+  const degree = new Int32Array(skeleton.points.length).fill(0);
+  for (const [idxA, idxB] of skeleton.segments) {
+    degree[idxA]++;
+    degree[idxB]++;
+  }
+
+  // 2. Prepare Optimization Buffers (Shared for all primitives)
+  // We use the same resolution N for both vertices and edges to reuse these buffers.
+  const SCRATCH_N = opts.num_directions;
   const scratch = {
     // Buffers for solveTridiagonal
     cp: new Float64Array(SCRATCH_N),
@@ -55,84 +73,87 @@ export function localPrimitiveFitting(
     z: new Float64Array(SCRATCH_N),
     u_vec: new Float64Array(SCRATCH_N),
     T_diag_adj: new Float64Array(SCRATCH_N),
+    d: new Float64Array(SCRATCH_N),
+    rhs: new Float64Array(SCRATCH_N),
   };
 
-  // 1. Pre-compute constant directions (Optimization: Hoist out of loop)
-  const directions = generateUniformDirections(options.num_directions);
+  // --- Process 1: Free-standing Vertices (Generalized Disks) ---
+  // "We don't need to extract an envelope for a vertex that is part of an edge"
+  const circleDirections = generateUniformDirections(opts.num_directions);
 
   for (let i = 0; i < skeleton.points.length; i++) {
-    const center = skeleton.points[i];
+    if (degree[i] === 0) {
+      const center = skeleton.points[i];
+      // For a vertex, all rays originate from the center
+      const origins = Array(opts.num_directions).fill(center);
 
-    // 2. Compute Max Extents (r_max)
-    // Optimization: Use { insert: false } to avoid scene graph overhead
-    const r_max = computeMaxExtents(center, directions, path);
+      const fittedRadii = fitSinglePrimitive(
+        origins,
+        circleDirections,
+        path,
+        opts,
+        scratch,
+      );
 
-    // 3. Initialize Radii
-    const minMax = Math.min(...r_max);
-    // Ensure we have a valid non-zero starting radius
-    const initialRadius = minMax > 1e-4 ? minMax * 0.99 : 1e-3;
-
-    let r: Float64Array = new Float64Array(options.num_directions).fill(
-      initialRadius,
-    );
-    const r_tgt = new Float64Array(r);
-
-    // 4. Progressive Expansion
-    for (let prog = 0; prog < options.max_progressions; prog++) {
-      // Increase target radius
-      for (let k = 0; k < options.num_directions; k++)
-        r_tgt[k] *= options.expansion_rate;
-
-      // Alternating Optimization Loop
-      for (let iter = 0; iter < options.max_alternating_iters; iter++) {
-        // Build the diagonal and RHS for the solver directly here.
-        // System: (L + wI + penalty_diag) * r = (w * r_tgt + penalty_rhs)
-
-        // Diagonal 'd' starts with 2 (from L) + w (expansion)
-        const d = new Float64Array(options.num_directions).fill(
-          2 + options.w_expansion,
-        );
-        const rhs = new Float64Array(options.num_directions);
-
-        let constraintsActive = false;
-
-        for (let j = 0; j < options.num_directions; j++) {
-          rhs[j] = options.w_expansion * r_tgt[j];
-
-          if (r[j] > r_max[j]) {
-            constraintsActive = true;
-            d[j] += options.w_penalty;
-            rhs[j] += options.w_penalty * r_max[j];
-          }
-        }
-
-        // Solve cyclic tridiagonal system
-        // L contributes -1 to off-diagonals and corners
-        r = solveCyclicTridiagonal(d, -1, -1, rhs, scratch);
-
-        if (!constraintsActive) break;
-      }
+      skeleton.primitives.push({
+        type: "point",
+        elementIdx: i,
+        origins: origins, // Note: In a real app, you might optimize this storage
+        directions: circleDirections,
+        radii: fittedRadii,
+      });
     }
-
-    skeleton.primitives[i] = {
-      center: center,
-      directions: directions, // Reference the shared array
-      radii: Array.from(r),
-    };
   }
+
+  // --- Process 2: Medial Edges (Generalized Capsules/Slabs) ---
+  // "Extract a 2d enveloping 'mesh' that is equally spaced around the edge"
+
+  for (let i = 0; i < skeleton.segments.length; i++) {
+    const [idxA, idxB] = skeleton.segments[i];
+    const pA = skeleton.points[idxA];
+    const pB = skeleton.points[idxB];
+
+    // Generate capsule discretization (Origins + Directions) specific to this segment
+    const { origins, directions } = generateCapsuleDiscretization(
+      pA,
+      pB,
+      opts.num_directions,
+    );
+
+    const fittedRadii = fitSinglePrimitive(
+      origins,
+      directions,
+      path,
+      opts,
+      scratch,
+    );
+
+    skeleton.primitives.push({
+      type: "edge",
+      elementIdx: i,
+      origins: origins,
+      directions: directions,
+      radii: fittedRadii,
+    });
+  }
+
+  return skeleton;
 }
 
-// --- Specialized O(N) Solver ---
+// --- Core Optimization Routine (Reused for Point & Edge) ---
 
-/**
- * Solves Ax = b where A is a symmetric cyclic tridiagonal matrix.
- * Uses Sherman-Morrison formula: A = T' + uv^T
- */
-function solveCyclicTridiagonal(
-  d: Float64Array,
-  e: number, // Off-diagonal value (-1)
-  f: number, // Corner value (-1)
-  b: Float64Array,
+function fitSinglePrimitive(
+  origins: paper.Point[],
+  directions: paper.Point[],
+  path: paper.CompoundPath,
+  opts: {
+    num_directions: number;
+    w_expansion: number;
+    w_penalty: number;
+    max_progressions: number;
+    expansion_rate: number;
+    max_alternating_iters: number;
+  },
   scratch: {
     cp: Float64Array;
     dp: Float64Array;
@@ -140,94 +161,134 @@ function solveCyclicTridiagonal(
     u_vec: Float64Array;
     y: Float64Array;
     z: Float64Array;
+    d: Float64Array;
+    rhs: Float64Array;
   },
-): Float64Array {
-  const n = d.length;
+): number[] {
+  // 1. Compute Max Extents (r_max)
+  const r_max = computeMaxExtents(origins, directions, path);
 
-  // 1. Construct the adjusted diagonal for T'
-  // T' must subtract 'f' from the corners to account for rank-1 addition
-  scratch.T_diag_adj.set(d);
-  scratch.T_diag_adj[0] -= f;
-  scratch.T_diag_adj[n - 1] -= f;
+  // 2. Initialize Radii
+  const minMax = Math.min(...r_max);
+  const initialRadius = minMax > 1e-4 ? minMax * 0.99 : 1e-3;
 
-  // 2. Define the perturbation vector u
-  // u = [1, 0, ..., 0, 1]
-  scratch.u_vec.fill(0);
-  scratch.u_vec[0] = 1.0;
-  scratch.u_vec[n - 1] = 1.0;
+  const r = new Float64Array(opts.num_directions).fill(initialRadius);
+  const r_tgt = new Float64Array(r);
 
-  // 3. Solve the two tridiagonal systems (Result stored in scratch buffers)
-  // Solve T' * y = b
-  solveTridiagonal(scratch.T_diag_adj, e, b, scratch.y, scratch);
+  // 3. Progressive Expansion
+  for (let prog = 0; prog < opts.max_progressions; prog++) {
+    // Increase target
+    for (let k = 0; k < opts.num_directions; k++)
+      r_tgt[k] *= opts.expansion_rate;
 
-  // Solve T' * z = u
-  solveTridiagonal(scratch.T_diag_adj, e, scratch.u_vec, scratch.z, scratch);
+    // Solver Loop
+    for (let iter = 0; iter < opts.max_alternating_iters; iter++) {
+      scratch.d.fill(2 + opts.w_expansion);
+      let constraintsActive = false;
 
-  // 4. Compute the scaling factor
-  // factor = (v . y) / (1 + v . z)
-  // Since v = [f, 0...0, f], the dot product is f * (vec[0] + vec[n-1])
-  const v_dot_y = f * (scratch.y[0] + scratch.y[n - 1]);
-  const v_dot_z = f * (scratch.z[0] + scratch.z[n - 1]);
+      for (let j = 0; j < opts.num_directions; j++) {
+        scratch.rhs[j] = opts.w_expansion * r_tgt[j];
+        if (r[j] > r_max[j]) {
+          constraintsActive = true;
+          scratch.d[j] += opts.w_penalty;
+          scratch.rhs[j] += opts.w_penalty * r_max[j];
+        }
+      }
 
-  const factor = v_dot_y / (1.0 + v_dot_z);
+      // Solve (L + wI + P)r = RHS
+      // L is always cyclic tridiagonal for a closed boundary (disk or capsule)
+      solveCyclicTridiagonal(scratch.d, -1, -1, scratch.rhs, r, scratch);
 
-  // 5. Compute final result x
-  // x = y - factor * z
-  const x = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    x[i] = scratch.y[i] - factor * scratch.z[i];
-  }
-
-  return x;
-}
-
-/**
- * Optimized Thomas Algorithm.
- * Writes result into 'out' buffer.
- */
-function solveTridiagonal(
-  diag: Float64Array,
-  e: number,
-  rhs: Float64Array,
-  out: Float64Array,
-  scratch: {
-    cp: Float64Array;
-    dp: Float64Array;
-  },
-): void {
-  const n = diag.length;
-
-  // Forward sweep
-  // cp[0] = c[0] / b[0]
-  scratch.cp[0] = e / diag[0];
-  scratch.dp[0] = rhs[0] / diag[0];
-
-  for (let i = 1; i < n; i++) {
-    const c_val = i < n - 1 ? e : 0; // upper diag
-    const a_val = e; // lower diag
-
-    const denom = diag[i] - a_val * scratch.cp[i - 1];
-
-    // Check for division by zero or instability if needed (rare in Laplacian systems)
-    if (Math.abs(denom) < 1e-12) {
-      // Fallback or error handling could go here
+      if (!constraintsActive) break;
     }
-
-    if (i < n - 1) {
-      scratch.cp[i] = c_val / denom;
-    }
-
-    scratch.dp[i] = (rhs[i] - a_val * scratch.dp[i - 1]) / denom;
   }
 
-  // Back substitution
-  out[n - 1] = scratch.dp[n - 1];
-  for (let i = n - 2; i >= 0; i--) {
-    out[i] = scratch.dp[i] - scratch.cp[i] * out[i + 1];
-  }
+  return Array.from(r);
 }
 
 // --- Geometry Helpers ---
+/**
+ * Generates origins and directions for a "Capsule" primitive around a segment.
+ * FIXED: Uses relative angles to ensure caps always bulge outward.
+ */
+function generateCapsuleDiscretization(
+  pA: paper.Point,
+  pB: paper.Point,
+  N: number,
+) {
+  const origins: paper.Point[] = [];
+  const directions: paper.Point[] = [];
+
+  // 1. Setup Bone Geometry
+  const v = pB.subtract(pA);
+  const baseAngle = v.angle; // Degrees
+
+  // Normal vector (90 degrees relative to bone)
+  // We calculate this explicitly from angle to ensure consistency with the caps
+  const normalAngle = baseAngle + 90;
+  const normalRad = normalAngle * (Math.PI / 180);
+  const normal = new paper.Point(Math.cos(normalRad), Math.sin(normalRad));
+
+  // 2. Sample Distribution
+  // We divide N samples into 4 parts: Side1, CapB, Side2, CapA
+  const quarter = Math.floor(N / 4);
+  const remainder = N - quarter * 4;
+  const nSide = quarter + Math.floor(remainder / 2);
+  const nCap = quarter;
+
+  // --- SECTION 1: Side A->B (+Normal side) ---
+  for (let i = 0; i < nSide; i++) {
+    const t = i / (nSide - 1 || 1);
+    origins.push(pA.add(v.multiply(t)));
+    directions.push(normal);
+  }
+
+  // --- SECTION 2: Cap B (The Tip) ---
+  // Must sweep from +90 to -90 (Clockwise visual / Decreasing degrees)
+  // Start: baseAngle + 90
+  // End:   baseAngle - 90
+  const startAngleB = baseAngle + 90;
+  const endAngleB = baseAngle - 90;
+
+  for (let i = 0; i < nCap; i++) {
+    // Interpolate t from 0..1 (exclusive of corners to avoid duplicate normals)
+    const t = (i + 1) / (nCap + 1);
+
+    // Linear interpolation of angle
+    const ang = startAngleB + t * (endAngleB - startAngleB);
+    const rad = ang * (Math.PI / 180);
+
+    origins.push(pB); // Fan originates from endpoint B
+    directions.push(new paper.Point(Math.cos(rad), Math.sin(rad)));
+  }
+
+  // --- SECTION 3: Side B->A (-Normal side) ---
+  for (let i = 0; i < nSide; i++) {
+    const t = i / (nSide - 1 || 1);
+    // Move backwards from B to A
+    origins.push(pB.subtract(v.multiply(t)));
+    directions.push(normal.multiply(-1));
+  }
+
+  // --- SECTION 4: Cap A (The Tail) ---
+  // Must sweep from -90 to -270 (Clockwise visual / Decreasing degrees)
+  // Start: baseAngle - 90
+  // End:   baseAngle - 270
+  const startAngleA = baseAngle - 90;
+  const endAngleA = baseAngle - 270;
+
+  for (let i = 0; i < nCap; i++) {
+    const t = (i + 1) / (nCap + 1);
+
+    const ang = startAngleA + t * (endAngleA - startAngleA);
+    const rad = ang * (Math.PI / 180);
+
+    origins.push(pA); // Fan originates from endpoint A
+    directions.push(new paper.Point(Math.cos(rad), Math.sin(rad)));
+  }
+
+  return { origins, directions };
+}
 
 function generateUniformDirections(n: number): paper.Point[] {
   const directions: paper.Point[] = [];
@@ -239,37 +300,97 @@ function generateUniformDirections(n: number): paper.Point[] {
   return directions;
 }
 
+/**
+ * Computes max extent for each ray defined by (origin[i], direction[i]).
+ */
 function computeMaxExtents(
-  center: paper.Point,
+  origins: paper.Point[],
   directions: paper.Point[],
   boundary: paper.CompoundPath,
 ): number[] {
-  // Optimization: Create path with insert: false
-  // We reuse this object reference (updating segments) to avoid GC churn
-  const ray = new paper.Path.Line({
-    from: [0, 0],
-    to: [0, 0],
-    insert: false,
-  });
-
-  // Safe large distance (ensure it covers bounds)
+  // Reuse a single path item to avoid GC
+  const ray = new paper.Path.Line({ from: [0, 0], to: [0, 0], insert: false });
   const largeDist =
     Math.max(boundary.bounds.width, boundary.bounds.height) * 2 + 1000;
 
-  return directions.map((dir) => {
-    // Update existing ray object
-    ray.segments[0].point = center;
-    ray.segments[1].point = center.add(dir.multiply(largeDist));
+  return directions.map((dir, i) => {
+    const origin = origins[i];
+
+    // Update ray segments manually
+    const p0 = ray.segments[0].point;
+    p0.x = origin.x;
+    p0.y = origin.y;
+
+    const p1 = ray.segments[1].point;
+    p1.x = origin.x + dir.x * largeDist;
+    p1.y = origin.y + dir.y * largeDist;
 
     const intersections = boundary.getIntersections(ray);
-
     if (intersections.length === 0) return 1e-4;
 
     let minDist = Infinity;
     for (const intersection of intersections) {
-      const dist = center.getDistance(intersection.point);
+      // Distance from the specific ray origin
+      const dist = origin.getDistance(intersection.point);
       if (dist < minDist) minDist = dist;
     }
     return minDist;
   });
+}
+
+// --- Solver Functions (Unchanged logic, just re-included for completeness) ---
+
+function solveCyclicTridiagonal(
+  d: Float64Array,
+  e: number,
+  f: number,
+  b: Float64Array,
+  out: Float64Array,
+  scratch: {
+    cp: Float64Array;
+    dp: Float64Array;
+    T_diag_adj: Float64Array;
+    u_vec: Float64Array;
+    y: Float64Array;
+    z: Float64Array;
+  },
+): void {
+  const n = d.length;
+  scratch.T_diag_adj.set(d);
+  scratch.T_diag_adj[0] -= f;
+  scratch.T_diag_adj[n - 1] -= f;
+  scratch.u_vec.fill(0);
+  scratch.u_vec[0] = 1.0;
+  scratch.u_vec[n - 1] = 1.0;
+
+  solveTridiagonal(scratch.T_diag_adj, e, b, scratch.y, scratch);
+  solveTridiagonal(scratch.T_diag_adj, e, scratch.u_vec, scratch.z, scratch);
+
+  const v_dot_y = f * (scratch.y[0] + scratch.y[n - 1]);
+  const v_dot_z = f * (scratch.z[0] + scratch.z[n - 1]);
+  const factor = v_dot_y / (1.0 + v_dot_z);
+
+  for (let i = 0; i < n; i++) out[i] = scratch.y[i] - factor * scratch.z[i];
+}
+
+function solveTridiagonal(
+  diag: Float64Array,
+  e: number,
+  rhs: Float64Array,
+  out: Float64Array,
+  scratch: { cp: Float64Array; dp: Float64Array },
+): void {
+  const n = diag.length;
+  scratch.cp[0] = e / diag[0];
+  scratch.dp[0] = rhs[0] / diag[0];
+
+  for (let i = 1; i < n; i++) {
+    const denom = diag[i] - e * scratch.cp[i - 1];
+    if (i < n - 1) scratch.cp[i] = e / denom;
+    scratch.dp[i] = (rhs[i] - e * scratch.dp[i - 1]) / denom;
+  }
+
+  out[n - 1] = scratch.dp[n - 1];
+  for (let i = n - 2; i >= 0; i--)
+    out[i] = scratch.dp[i] - scratch.cp[i] * out[i + 1];
 }

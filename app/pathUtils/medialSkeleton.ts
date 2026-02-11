@@ -6,8 +6,6 @@ import { MedialAxisGraph } from "@/app/pathUtils/medialAxis";
 /**
  * Constructs the Medial Skeleton (M_S) from selected vertices (V) and the Raw Medial Axis (M).
  * Implements Section 5.1: Medial Skeleton Construction.
- *
- * Optimization: Uses MinPriorityQueue for O(E log V) Dijkstra performance.
  */
 export function constructMedialSkeleton(
   selectedPoints: paper.Point[],

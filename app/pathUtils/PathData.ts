@@ -10,6 +10,7 @@ import {
   intersectCompoundPath,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
+import { localPrimitiveFitting } from "@/app/pathUtils/localPrimitiveFitting";
 import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
@@ -268,7 +269,8 @@ export default class PathData {
         medialAxis,
         paperPath,
       );
-      return medialSkeleton;
+      const skeleton = localPrimitiveFitting(paperPath, medialSkeleton);
+      return skeleton;
     });
   }
 }

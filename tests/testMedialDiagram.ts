@@ -91,4 +91,16 @@ for (const skeleton of medialSkeletons) {
       )
       .join(", "),
   );
+  for (const primitive of skeleton.primitives) {
+    console.log(
+      primitive.origins
+        .map((origin, i) => {
+          const p = origin.add(
+            primitive.directions[i].multiply(primitive.radii[i]),
+          );
+          return `(${p.x.toFixed(1)}, ${(1000 - p.y).toFixed(1)})`;
+        })
+        .join(", "),
+    );
+  }
 }
