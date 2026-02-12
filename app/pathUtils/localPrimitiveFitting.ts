@@ -4,7 +4,7 @@ import { MedialAxisGraph } from "@/app/pathUtils/medialAxis";
 
 // --- Interfaces ---
 
-interface FittedMedialAxisGraph extends MedialAxisGraph {
+export interface FittedMedialAxisGraph extends MedialAxisGraph {
   primitives: Primitive[];
 }
 

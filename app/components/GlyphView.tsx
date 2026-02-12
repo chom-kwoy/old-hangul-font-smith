@@ -11,12 +11,13 @@ import Toolbar from "@mui/material/Toolbar";
 import { amber, blue, teal } from "@mui/material/colors";
 import { TransitionProps } from "@mui/material/transitions";
 import * as fabric from "fabric";
+import { TSimplePathData } from "fabric";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { MaterialSymbol } from "react-material-symbols-react19";
 import "react-material-symbols-react19/outlined";
 
 import PathData from "@/app/pathUtils/PathData";
-import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
+import { fabricPathDataToPaper } from "@/app/pathUtils/convert";
 import { downloadStringAsFile } from "@/app/utils/download";
 import {
   createPathControls,
@@ -285,8 +286,6 @@ export function GlyphView({
       state.path = path ? path.clone() : null;
       console.log(state.path?.exportSvg());
 
-      const medialAxisList = state.path?.getMedialAxis() ?? [];
-
       // update canvas with new path
       for (const obj of state.pathObjects) {
         state.canvas.remove(obj);
@@ -370,30 +369,25 @@ export function GlyphView({
 
       state.canvas.add(...fabricPaths);
 
-      const medialAxisLines = medialAxisList.flatMap((medialAxis) =>
-        medialAxis.segments.map((seg) => {
-          const p0 = medialAxis.points[seg[0]];
-          const p1 = medialAxis.points[seg[1]];
-          const line = [
-            { x: p0.x, y: p0.y },
-            { x: p1.x, y: p1.y },
-          ];
-          const center = {
-            x: (p0.x + p1.x) / 2,
-            y: (p0.y + p1.y) / 2,
-          };
-          return new fabric.Polyline(line, {
-            left: center.x * (width / 1000),
-            top: center.y * (height / 1000),
-            scaleX: width / 1000,
-            scaleY: height / 1000,
-            stroke: "#AAFFAA",
-            strokeWidth: 2,
-            selectable: false,
-            evented: false,
-          });
-        }),
-      );
+      const medialSkeletons = state.path?.getMedialSkeleton() ?? [];
+      const medialAxisLines = medialSkeletons.map((skeleton) => {
+        const path = skeleton.segments.flatMap((seg): TSimplePathData => {
+          const p0 = skeleton.points[seg[0]];
+          const p1 = skeleton.points[seg[1]];
+          return [["M", p0.x, p0.y], ["L", p1.x, p1.y], ["Z"]];
+        });
+        const bbox = fabricPathDataToPaper(path).bounds;
+        return new fabric.Path(path, {
+          left: bbox.center.x * (width / 1000),
+          top: bbox.center.y * (height / 1000),
+          scaleX: width / 1000,
+          scaleY: height / 1000,
+          stroke: "#AAFFAA",
+          strokeWidth: 2,
+          selectable: false,
+          evented: false,
+        });
+      });
       state.otherObjects.push(...medialAxisLines);
       state.canvas.add(...medialAxisLines);
 

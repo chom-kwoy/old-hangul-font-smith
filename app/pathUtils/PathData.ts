@@ -250,12 +250,6 @@ export default class PathData {
     }
   }
 
-  getMedialAxis() {
-    return this.#paths.map((subpath) =>
-      extractMedialAxis(fabricPathDataToPaper(subpath)),
-    );
-  }
-
   getMedialSkeleton() {
     return this.#paths.map((subpath) => {
       const paperPath = fabricPathDataToPaper(subpath);
@@ -269,8 +263,7 @@ export default class PathData {
         medialAxis,
         paperPath,
       );
-      const skeleton = localPrimitiveFitting(paperPath, medialSkeleton);
-      return skeleton;
+      return localPrimitiveFitting(paperPath, medialSkeleton);
     });
   }
 }
