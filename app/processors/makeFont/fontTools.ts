@@ -2,8 +2,8 @@ import { TSimplePathData } from "fabric";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { loadPyodide } from "pyodide";
 
-import PYTHON_SRC from "@/app/processors/fontWorker.py";
-import { Gsub, Ttx } from "@/app/processors/ttxTypes";
+import PYTHON_SRC from "@/app/processors/makeFont/fontTools.py";
+import { Gsub, Ttx } from "@/app/processors/makeFont/ttxTypes";
 
 type Pyodide = Awaited<ReturnType<typeof loadPyodide>>;
 

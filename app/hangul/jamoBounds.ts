@@ -1,3 +1,4 @@
+import PathData from "@/app/pathUtils/PathData";
 import {
   Bounds,
   ConsonantVarsetType,
@@ -180,3 +181,46 @@ export const VOWEL_JAMO_BOUNDS: Record<VowelVarsetType, JamoPref> = {
     trailingPref: ["ㄱ"],
   },
 };
+
+export function extractVowel(
+  bezier: PathData,
+  position: "right" | "under" | "mixed",
+  hasTrailing: boolean,
+) {
+  let extracted;
+  if (position === "right") {
+    extracted = bezier.intersectBoundsList([
+      {
+        left: 500,
+        right: 1000,
+        top: 0,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+    ]);
+  } else if (position === "under") {
+    extracted = bezier.intersectBoundsList([
+      {
+        left: 0,
+        right: 1000,
+        top: hasTrailing ? 400 : 500,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+    ]);
+  } else if (position === "mixed") {
+    extracted = bezier.intersectBoundsList([
+      {
+        left: 500,
+        right: 1000,
+        top: 0,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+      {
+        left: 0,
+        right: 1000,
+        top: hasTrailing ? 450 : 600,
+        bottom: hasTrailing ? 600 : 1000,
+      },
+    ]);
+  }
+  return extracted!;
+}

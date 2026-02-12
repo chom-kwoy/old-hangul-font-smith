@@ -1,9 +1,6 @@
-import { Feature } from "next/dist/build/webpack/plugins/telemetry-plugin/telemetry-plugin";
-
 import {
   HANGUL_DATA,
   getJamoForm,
-  getJamoInfo,
   precomposedLigatures,
 } from "@/app/hangul/hangulData";
 import {
@@ -13,18 +10,13 @@ import {
   getJamoVarsetEnv,
 } from "@/app/hangul/jamos";
 import PathData, { SerializedPathData } from "@/app/pathUtils/PathData";
-import { FontObject } from "@/app/processors/fontTools";
+import { FontObject } from "@/app/processors/makeFont/fontTools";
 import {
-  MessageToFontWorker,
-  MessageToMainThread,
-} from "@/app/processors/fontWorkerTypes";
-import { FeatureRecord, Gsub, Lookup } from "@/app/processors/ttxTypes";
-import {
-  GenerateOptions,
-  JamoVarsets,
-  VarsetType,
-  VowelInfo,
-} from "@/app/utils/types";
+  FeatureRecord,
+  Gsub,
+  Lookup,
+} from "@/app/processors/makeFont/ttxTypes";
+import { GenerateOptions, JamoVarsets, VarsetType } from "@/app/utils/types";
 
 function addThreeJamoSubst(
   gsub: Gsub,
@@ -458,7 +450,7 @@ function addPositionalVariants(
   }
 }
 
-async function makeFont(
+export async function makeFont(
   fontData: ArrayBuffer,
   jamoVarsets: JamoVarsets,
   options: GenerateOptions,
@@ -550,24 +542,3 @@ async function makeFont(
   // Return the modified font data
   return new Blob([result], { type: "font/otf" });
 }
-
-addEventListener(
-  "message",
-  async (event: MessageEvent<MessageToFontWorker>) => {
-    console.log("Font worker received message:", event.data);
-    if (event.data.type === "generateFont") {
-      console.log("Generating font from buffer...");
-      const result = await makeFont(
-        event.data.buffer,
-        event.data.jamoVarsets,
-        event.data.options,
-      );
-      console.log("Font generation completed, sending back result...");
-      postMessage({
-        type: "fontBlob",
-        blob: result,
-      } as MessageToMainThread);
-      console.log("Font blob sent back to main thread.");
-    }
-  },
-);

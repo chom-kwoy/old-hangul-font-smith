@@ -10,7 +10,10 @@ import {
   intersectCompoundPath,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
-import { localPrimitiveFitting } from "@/app/pathUtils/localPrimitiveFitting";
+import {
+  FittedMedialAxisGraph,
+  localPrimitiveFitting,
+} from "@/app/pathUtils/localPrimitiveFitting";
 import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
@@ -22,6 +25,7 @@ export type SerializedPathData = {
 
 export default class PathData {
   #paths: TSimplePathData[] = [];
+  #skeletons: FittedMedialAxisGraph[] | null = null;
 
   constructor(paths: TSimplePathData[]) {
     this.#paths = paths;
@@ -250,21 +254,24 @@ export default class PathData {
     }
   }
 
-  getMedialSkeleton() {
-    return this.#paths.map((subpath) => {
-      const paperPath = fabricPathDataToPaper(subpath);
-      const medialAxis = extractMedialAxis(paperPath);
-      const medialSkeletonPoints = computeMedialSkeletonPoints(
-        paperPath,
-        medialAxis,
-      );
-      const medialSkeleton = constructMedialSkeleton(
-        medialSkeletonPoints,
-        medialAxis,
-        paperPath,
-      );
-      return localPrimitiveFitting(paperPath, medialSkeleton);
-    });
+  getMedialSkeleton(): FittedMedialAxisGraph[] {
+    if (this.#skeletons === null) {
+      this.#skeletons = this.#paths.map((subpath) => {
+        const paperPath = fabricPathDataToPaper(subpath);
+        const medialAxis = extractMedialAxis(paperPath);
+        const medialSkeletonPoints = computeMedialSkeletonPoints(
+          paperPath,
+          medialAxis,
+        );
+        const medialSkeleton = constructMedialSkeleton(
+          medialSkeletonPoints,
+          medialAxis,
+          paperPath,
+        );
+        return localPrimitiveFitting(paperPath, medialSkeleton);
+      });
+    }
+    return this.#skeletons;
   }
 }
 

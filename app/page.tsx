@@ -42,9 +42,9 @@ const FONT_MIME_TYPES = ".otf,.ttf,font/otf,font/ttf";
 export default function Home() {
   useEffect(() => {
     // Initialize paper.js context
-    // @ts-expect-error no argument is also allowed
-    paper.setup();
+    paper.setup([1, 1]);
     paper.settings.insertItems = false;
+    paper.view.autoUpdate = false; // disables drawing any shape automatically
 
     // Set global fabric.js defaults
     fabric.InteractiveFabricObject.ownDefaults = {
@@ -110,13 +110,13 @@ export default function Home() {
     const metadata = await fontProcessor.loadFont(files[0]);
     setFontMetadata(metadata);
 
-    const varsets = await fontProcessor.analyzeJamoVarsets();
-    dispatch(fontLoaded(varsets));
-
-    const sampleImage = fontProcessor.getSampleImage(
+    const sampleImage = await fontProcessor.getSampleImage(
       "유월 활짝 편 배꽃들 밑에 요 콩새야,",
     );
     setPreviewImage(sampleImage);
+
+    const varsets = await fontProcessor.analyzeJamoVarsets();
+    dispatch(fontLoaded(varsets));
 
     setAppState(AppState.READY_TO_GENERATE);
 
