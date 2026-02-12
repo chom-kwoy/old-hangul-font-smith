@@ -30,7 +30,6 @@ export class FontProcessor {
     const buffer = await file.arrayBuffer();
     this.font = opentype.parse(buffer);
     this.fontFile = file;
-    console.log("loadFont", file);
     return new Promise((resolve, reject) => {
       this.analyzeFontWorker.onmessage = (event: MessageEvent) => {
         if (event.data.type === "fontParsed") {
@@ -132,5 +131,12 @@ export class FontProcessor {
     const unitsPerEm = this.font.unitsPerEm;
     const sTypoDescender = this.font.tables.os2.sTypoDescender;
     return PathData.fromOpentype(path, unitsPerEm, sTypoDescender);
+  }
+
+  hasChar(c: string): boolean {
+    if (!this.font) {
+      throw new Error("Call loadFont() first.");
+    }
+    return this.font.hasChar(c);
   }
 }

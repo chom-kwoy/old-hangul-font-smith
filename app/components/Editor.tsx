@@ -146,7 +146,7 @@ export function Editor({
       getSyllablesFor(selectedJamoName, selectedVarsetName, false)
         .filter((syllable) => {
           const pua = uniToPua(syllable);
-          return pua.length === 1 && fontProcessor.font?.hasChar(pua);
+          return pua.length === 1 && fontProcessor.hasChar(pua);
         })
         .toArray(),
     [selectedJamoName, selectedVarsetName, fontProcessor],
