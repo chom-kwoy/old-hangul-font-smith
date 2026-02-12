@@ -76,7 +76,7 @@ Z" />
 
 </svg>`;
 
-const path = PathData.fromSvg(svg_nieun_hieuh);
+const path = PathData.fromSvg(svg_kiyeok);
 
 const startTime = Date.now();
 const medialSkeletons = path.getMedialSkeleton();
@@ -104,3 +104,5 @@ for (const skeleton of medialSkeletons) {
     );
   }
 }
+
+path.scalePath(0, 1.0, 0.5);

@@ -53,6 +53,7 @@ export function reconstructShapeFromMSD(
       (c as paper.Path).simplify(simplifyTolerance),
     );
   }
+  reconstructedShape.simplify();
 
   return reconstructedShape;
 }

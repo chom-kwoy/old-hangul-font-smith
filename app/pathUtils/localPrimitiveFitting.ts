@@ -42,7 +42,7 @@ export function localPrimitiveFitting(
 ): FittedMedialAxisGraph {
   const opts = {
     num_directions: options.num_directions ?? 128,
-    w_expansion: options.w_expansion ?? 0.1,
+    w_expansion: options.w_expansion ?? 0.02,
     w_penalty: options.w_penalty ?? 10000,
     max_progressions: options.max_progressions ?? 25,
     expansion_rate: options.expansion_rate ?? 1.1,

@@ -12,6 +12,7 @@ import {
 } from "@/app/pathUtils/convert";
 import {
   FittedMedialAxisGraph,
+  Primitive,
   localPrimitiveFitting,
 } from "@/app/pathUtils/localPrimitiveFitting";
 import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
@@ -219,6 +220,7 @@ export default class PathData {
 
   filterPaths(pred: (path: TSimplePathData, index: number) => boolean): void {
     this.#paths = this.#paths.filter((path, index) => pred(path, index));
+    this.#skeletons = null;
   }
 
   updatePath(index: number, newPath: TSimplePathData | fabric.Path): void {
@@ -251,7 +253,116 @@ export default class PathData {
         );
       }
       this.#paths[index] = newPath;
+      this.#skeletons = null; // invalidate cache
+    } else {
+      throw new Error(`Invalid subpath index: ${index}`);
     }
+  }
+
+  scalePath(index: number, scaleX: number, scaleY: number): void {
+    const skeletons = this.getMedialSkeleton();
+    if (index < 0 || index >= skeletons.length) {
+      throw new Error(`Invalid subpath index: ${index}`);
+    }
+    const skeleton = skeletons[index];
+
+    function getPrimitivePoints(
+      primitives: Primitive[],
+      radiusExpansion: number,
+    ) {
+      return primitives.map((primitive) =>
+        primitive.origins.map((origin, i) => {
+          const dir = primitive.directions[i];
+          const rad = primitive.radii[i] + radiusExpansion;
+          return origin.add(dir.multiply(rad));
+        }),
+      );
+    }
+
+    const b = 1.5; // boldness factor
+    const regPrimitives = getPrimitivePoints(skeleton.primitives, 0);
+    const boldPrimitives = getPrimitivePoints(skeleton.primitives, 10);
+    console.log(
+      "boldPrimitives: ",
+      boldPrimitives.map((prim) =>
+        prim
+          .map((p) => `(${p.x.toFixed(1)}, ${(1000 - p.y).toFixed(1)})`)
+          .join(","),
+      ),
+    );
+
+    const alpha = 0.0; // 0 means stroke weight is fixed, 1 means scaled
+    const clip = (x: number) => Math.max(0, Math.min(1, x));
+    const qx = clip((Math.pow(scaleX, alpha - 1) - b) / (1 - b));
+    const qy = clip((Math.pow(scaleY, alpha - 1) - b) / (1 - b));
+
+    console.log("scaleX, scaleY: ", scaleX, scaleY);
+    console.log("qx, qy: ", qx, qy);
+
+    function minDistanceToSkeleton(pt: { x: number; y: number }) {
+      let minDst = Infinity;
+      for (const segment of skeleton.segments) {
+        const a = skeleton.points[segment[0]];
+        const b = skeleton.points[segment[1]];
+        const line = new paper.Path.Line(a, b);
+        const proj = line.getNearestPoint(pt);
+        const dst = proj.getDistance(pt);
+        if (dst < minDst) {
+          minDst = dst;
+        }
+      }
+      return minDst;
+    }
+
+    const newPrimitives: paper.Path[] = [];
+    for (let i = 0; i < skeleton.primitives.length; ++i) {
+      const regPrimitive = regPrimitives[i];
+      const boldPrimitive = boldPrimitives[i];
+      const newSegments: { x: number; y: number }[] = [];
+      for (let j = 0; j < regPrimitive.length; ++j) {
+        const origin = skeleton.primitives[i].origins[j];
+        const pr = regPrimitive[j];
+        const pb = boldPrimitive[j];
+        const newPoint = new paper.Point({
+          x: qx * pr.x + (1 - qx) * pb.x,
+          y: qy * pr.y + (1 - qy) * pb.y,
+        });
+        const r = origin.getDistance(newPoint);
+        const minDst = minDistanceToSkeleton(newPoint);
+        const dir = newPoint.subtract(origin).normalize();
+        const shrinkFactor = smoothstep(0.0, 1.0, (r - minDst) / r) * 0.3;
+        const finalPoint = origin.add(dir.multiply(r - r * shrinkFactor));
+        newSegments.push(finalPoint);
+      }
+
+      console.log(
+        "newPrimitives: ",
+        newSegments
+          .map((p, i) => {
+            const p2 = newSegments[(i + 1) % newSegments.length];
+            return `polygon((${(2000 + p.x).toFixed(1)}, ${(1000 - p.y).toFixed(1)}),(${(2000 + p2.x).toFixed(1)}, ${(1000 - p2.y).toFixed(1)}))`;
+          })
+          .join(","),
+      );
+      const path = new paper.Path({
+        segments: newSegments,
+        closed: true,
+      });
+      path.smooth({ type: "catmull-rom", factor: 0.5 });
+      newPrimitives.push(path);
+    }
+
+    let reconstructedShape: paper.PathItem = newPrimitives[0];
+    for (let i = 1; i < newPrimitives.length; i++) {
+      const nextShape = newPrimitives[i];
+      reconstructedShape = reconstructedShape.unite(nextShape);
+    }
+    reconstructedShape.simplify();
+
+    const newPath = paperToFabricPathData(reconstructedShape);
+    // console.log("New path: ", newPath);
+
+    this.updatePath(index, newPath);
   }
 
   getMedialSkeleton(): FittedMedialAxisGraph[] {
@@ -273,6 +384,11 @@ export default class PathData {
     }
     return this.#skeletons;
   }
+}
+
+function smoothstep(edge0: number, edge1: number, x: number) {
+  const t = Math.max(0.0, Math.min(1.0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3.0 - 2.0 * t);
 }
 
 function transformFabricPathData(

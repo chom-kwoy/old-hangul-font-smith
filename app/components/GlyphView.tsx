@@ -360,7 +360,18 @@ export function GlyphView({
           });
           fabricPath.on("modified", (event) => {
             if (event.transform && state.path) {
-              state.path.updatePath(i, fabricPath);
+              console.log("modified", event.transform);
+              const scaleX = fabricPath.scaleX / (width / 1000);
+              const scaleY = fabricPath.scaleY / (height / 1000);
+              if (
+                event.transform.action === "scale" ||
+                event.transform.action === "scaleX" ||
+                event.transform.action === "scaleY"
+              ) {
+                state.path.scalePath(i, scaleX, scaleY);
+              } else {
+                state.path.updatePath(i, fabricPath);
+              }
               commitPath(state);
             }
           });
