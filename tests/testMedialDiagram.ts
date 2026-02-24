@@ -78,9 +78,9 @@ Z" />
 
 const path = PathData.fromSvg(svg_kiyeok);
 
-const startTime = Date.now();
+let startTime = Date.now();
 const medialSkeletons = path.getMedialSkeleton();
-const elapsedTime = Date.now() - startTime;
+let elapsedTime = Date.now() - startTime;
 console.log(`Medial skeletons: ${medialSkeletons.length} in ${elapsedTime}ms`);
 for (const skeleton of medialSkeletons) {
   console.log(
@@ -89,20 +89,25 @@ for (const skeleton of medialSkeletons) {
         ([a, b]) =>
           `polygon((${skeleton.points[a].x.toFixed(1)},${(1000 - skeleton.points[a].y).toFixed(1)}), (${skeleton.points[b].x.toFixed(1)},${(1000 - skeleton.points[b].y).toFixed(1)}))`,
       )
-      .join(", "),
+      .join(","),
   );
   for (const primitive of skeleton.primitives) {
+    console.log("primitive");
     console.log(
       primitive.origins
         .map((origin, i) => {
           const p = origin.add(
             primitive.directions[i].multiply(primitive.radii[i]),
           );
-          return `(${p.x.toFixed(1)}, ${(1000 - p.y).toFixed(1)})`;
+          return `(${p.x.toFixed(1)},${(-p.y).toFixed(1)})`;
         })
-        .join(", "),
+        .join(","),
     );
   }
 }
 
-path.scalePath(0, 1.0, 0.5);
+startTime = Date.now();
+path.scalePath(0, 1.0, 0.5, false);
+elapsedTime = Date.now() - startTime;
+
+console.log(`Scaled path in ${elapsedTime}ms`);

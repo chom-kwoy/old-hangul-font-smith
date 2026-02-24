@@ -1,3 +1,4 @@
+import Shape from "@doodle3d/clipper-js";
 import { DOMParser } from "@xmldom/xmldom";
 import { TSimplePathData } from "fabric";
 import * as fabric from "fabric";
@@ -259,45 +260,100 @@ export default class PathData {
     }
   }
 
-  scalePath(index: number, scaleX: number, scaleY: number): void {
+  scalePath(
+    index: number,
+    scaleX: number,
+    scaleY: number,
+    verbose = false,
+  ): void {
     const skeletons = this.getMedialSkeleton();
     if (index < 0 || index >= skeletons.length) {
       throw new Error(`Invalid subpath index: ${index}`);
     }
     const skeleton = skeletons[index];
 
-    function getPrimitivePoints(
-      primitives: Primitive[],
-      radiusExpansion: number,
-    ) {
-      return primitives.map((primitive) =>
-        primitive.origins.map((origin, i) => {
+    function getPrimitivePoints(primitives: Primitive[]) {
+      return primitives.map((primitive) => {
+        return primitive.origins.map((origin, i) => {
           const dir = primitive.directions[i];
-          const rad = primitive.radii[i] + radiusExpansion;
+          const rad = primitive.radii[i];
           return origin.add(dir.multiply(rad));
-        }),
-      );
+        });
+      });
     }
 
-    const b = 1.5; // boldness factor
-    const regPrimitives = getPrimitivePoints(skeleton.primitives, 0);
-    const boldPrimitives = getPrimitivePoints(skeleton.primitives, 10);
-    console.log(
-      "boldPrimitives: ",
-      boldPrimitives.map((prim) =>
-        prim
-          .map((p) => `(${p.x.toFixed(1)}, ${(1000 - p.y).toFixed(1)})`)
-          .join(","),
-      ),
-    );
+    function pr(pt: { x: number; y: number }, xoffset = 0, yoffset = 0) {
+      return `(${(xoffset + pt.x).toFixed(1)},${(yoffset + 1000 - pt.y).toFixed(1)})`;
+    }
 
-    const alpha = 0.0; // 0 means stroke weight is fixed, 1 means scaled
+    const b = 1.2; // boldness factor
+    const regPrimitives = getPrimitivePoints(skeleton.primitives);
+    const boldPrimitives = regPrimitives.map((primitive, i) => {
+      const regPoints = regPrimitives[i];
+      const mult = 100;
+      const shape = new Shape(
+        [primitive.map((p) => ({ X: p.x * mult, Y: p.y * mult }))],
+        true,
+      );
+      const boldShape = shape.offset(50 * mult, {});
+      let boldPoints = boldShape
+        .mapToLower()[0]
+        .map((p) => new paper.Point(p.x / mult, p.y / mult))
+        .toReversed();
+
+      // match first points
+      const firstOrigin = skeleton.primitives[i].origins[0];
+      const firstDir = skeleton.primitives[i].directions[0];
+      const line = new paper.Path.Line(firstOrigin, firstOrigin.add(firstDir));
+      let minDst = Infinity;
+      let minIdx = 0;
+      for (let j = 0; j < boldPoints.length; ++j) {
+        const dst = line
+          .getNearestPoint(boldPoints[j])
+          .getDistance(boldPoints[j]);
+        if (dst < minDst) {
+          minDst = dst;
+          minIdx = j;
+        }
+      }
+      // rotate so that minIdx becomes 0th index
+      boldPoints = boldPoints.slice(minIdx).concat(boldPoints.slice(0, minIdx));
+
+      const mapping = matchTwoShapes(regPoints, boldPoints);
+      if (verbose) {
+        console.log(
+          `mapping ${i}:\n` +
+            regPoints
+              .map((regPt, j) => {
+                const boldPt = boldPoints[mapping[j]];
+                return `polygon(${pr(regPt, 0, -1000)},${pr(boldPt)})`;
+              })
+              .join(",") +
+            "\n",
+        );
+      }
+
+      return mapping.map((j) => boldPoints[j]);
+    });
+
+    if (verbose) {
+      console.log("boldPrimitives: ");
+      boldPrimitives.map((prim) => {
+        console.log(
+          `${prim.length} vertices: ` + prim.map((p) => pr(p)).join(",") + "\n",
+        );
+      });
+    }
+
+    const alpha = 0.0; // 0 means stroke weight is fixed, 1 means fully scaled
     const clip = (x: number) => Math.max(0, Math.min(1, x));
     const qx = clip((Math.pow(scaleX, alpha - 1) - b) / (1 - b));
     const qy = clip((Math.pow(scaleY, alpha - 1) - b) / (1 - b));
 
-    console.log("scaleX, scaleY: ", scaleX, scaleY);
-    console.log("qx, qy: ", qx, qy);
+    if (verbose) {
+      console.log("scaleX, scaleY: ", scaleX, scaleY);
+      console.log("qx, qy: ", qx, qy);
+    }
 
     function minDistanceToSkeleton(pt: { x: number; y: number }) {
       let minDst = Infinity;
@@ -327,23 +383,24 @@ export default class PathData {
           x: qx * pr.x + (1 - qx) * pb.x,
           y: qy * pr.y + (1 - qy) * pb.y,
         });
+
+        // try to transition smoothly
         const r = origin.getDistance(newPoint);
         const minDst = minDistanceToSkeleton(newPoint);
         const dir = newPoint.subtract(origin).normalize();
         const shrinkFactor = smoothstep(0.0, 1.0, (r - minDst) / r) * 0.3;
         const finalPoint = origin.add(dir.multiply(r - r * shrinkFactor));
-        newSegments.push(finalPoint);
+
+        newSegments.push(newPoint);
       }
 
-      console.log(
-        "newPrimitives: ",
-        newSegments
-          .map((p, i) => {
-            const p2 = newSegments[(i + 1) % newSegments.length];
-            return `polygon((${(2000 + p.x).toFixed(1)}, ${(1000 - p.y).toFixed(1)}),(${(2000 + p2.x).toFixed(1)}, ${(1000 - p2.y).toFixed(1)}))`;
-          })
-          .join(","),
-      );
+      if (verbose) {
+        console.log(
+          `newPrimitives ${i}:\n` +
+            newSegments.map((p) => pr(p, 1000)).join(",") +
+            "\n",
+        );
+      }
       const path = new paper.Path({
         segments: newSegments,
         closed: true,
@@ -384,6 +441,79 @@ export default class PathData {
     }
     return this.#skeletons;
   }
+}
+
+function matchTwoShapes(
+  shapeA: paper.Point[],
+  shapeB: paper.Point[],
+): number[] {
+  const n = shapeA.length;
+  const m = shapeB.length;
+
+  if (n === 0 || m === 0) return [];
+
+  const dtw: number[][] = Array.from({ length: n }, () =>
+    Array(m).fill(Infinity),
+  );
+
+  // Initialize the starting point
+  dtw[0][0] = shapeA[0].getDistance(shapeB[0]);
+
+  // Fill the first column
+  for (let i = 1; i < n; i++) {
+    dtw[i][0] = dtw[i - 1][0] + shapeA[i].getDistance(shapeB[0]);
+  }
+
+  // Fill the first row
+  for (let j = 1; j < m; j++) {
+    dtw[0][j] = dtw[0][j - 1] + shapeA[0].getDistance(shapeB[j]);
+  }
+
+  // Populate the rest of the cost matrix
+  for (let i = 1; i < n; i++) {
+    for (let j = 1; j < m; j++) {
+      const cost = shapeA[i].getDistance(shapeB[j]);
+      dtw[i][j] =
+        cost +
+        Math.min(
+          dtw[i - 1][j], // insertion
+          dtw[i][j - 1], // deletion
+          dtw[i - 1][j - 1], // match
+        );
+    }
+  }
+
+  const mapping: number[] = new Array(n);
+  let i = n - 1;
+  let j = m - 1;
+
+  // Backtrack to find the optimal path
+  while (i > 0 || j > 0) {
+    mapping[i] = j;
+
+    if (i === 0) {
+      j--;
+    } else if (j === 0) {
+      i--;
+    } else {
+      const minCost = Math.min(dtw[i - 1][j - 1], dtw[i - 1][j], dtw[i][j - 1]);
+
+      // Determine the direction of the optimal step
+      if (minCost === dtw[i - 1][j - 1]) {
+        i--;
+        j--;
+      } else if (minCost === dtw[i - 1][j]) {
+        i--;
+      } else {
+        j--;
+      }
+    }
+  }
+
+  // Map the starting point
+  mapping[0] = 0;
+
+  return mapping;
 }
 
 function smoothstep(edge0: number, edge1: number, x: number) {
