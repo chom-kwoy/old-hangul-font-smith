@@ -301,16 +301,43 @@ export default class PathData {
         .map((p) => new paper.Point(p.x / mult, p.y / mult))
         .toReversed();
 
+      // interpolate points so that they are spaced roughly 1 unit apart
+      const interpolated: paper.Point[] = [];
+      const tgtDst = 1.0;
+      for (let j = 0; j < boldPoints.length; ++j) {
+        const p0 = boldPoints[j];
+        const p1 = boldPoints[(j + 1) % boldPoints.length];
+        const dst = p0.getDistance(p1);
+        const n = Math.ceil(dst / tgtDst);
+        for (let k = 0; k < n; ++k) {
+          const t = (k + 1) / (n + 1);
+          interpolated.push(p0.add(p1.subtract(p0).multiply(t)));
+        }
+      }
+      boldPoints = interpolated;
+
+      if (verbose) {
+        // console.log(`interpolated ${i}: `);
+        // console.log(
+        //   `${boldPoints.length} vertices: ` +
+        //     boldPoints.map((p) => pr(p)).join(",") +
+        //     "\n",
+        // );
+      }
+
       // match first points
       const firstOrigin = skeleton.primitives[i].origins[0];
       const firstDir = skeleton.primitives[i].directions[0];
-      const line = new paper.Path.Line(firstOrigin, firstOrigin.add(firstDir));
+      const firstRad = skeleton.primitives[i].radii[0];
+      const line = new paper.Path.Line(
+        firstOrigin,
+        firstOrigin.add(firstDir.multiply(firstRad)),
+      );
       let minDst = Infinity;
       let minIdx = 0;
       for (let j = 0; j < boldPoints.length; ++j) {
-        const dst = line
-          .getNearestPoint(boldPoints[j])
-          .getDistance(boldPoints[j]);
+        const nearest = line.getNearestPoint(boldPoints[j]);
+        const dst = nearest.getDistance(boldPoints[j]);
         if (dst < minDst) {
           minDst = dst;
           minIdx = j;
@@ -355,42 +382,18 @@ export default class PathData {
       console.log("qx, qy: ", qx, qy);
     }
 
-    function minDistanceToSkeleton(pt: { x: number; y: number }) {
-      let minDst = Infinity;
-      for (const segment of skeleton.segments) {
-        const a = skeleton.points[segment[0]];
-        const b = skeleton.points[segment[1]];
-        const line = new paper.Path.Line(a, b);
-        const proj = line.getNearestPoint(pt);
-        const dst = proj.getDistance(pt);
-        if (dst < minDst) {
-          minDst = dst;
-        }
-      }
-      return minDst;
-    }
-
     const newPrimitives: paper.Path[] = [];
     for (let i = 0; i < skeleton.primitives.length; ++i) {
       const regPrimitive = regPrimitives[i];
       const boldPrimitive = boldPrimitives[i];
       const newSegments: { x: number; y: number }[] = [];
       for (let j = 0; j < regPrimitive.length; ++j) {
-        const origin = skeleton.primitives[i].origins[j];
         const pr = regPrimitive[j];
         const pb = boldPrimitive[j];
         const newPoint = new paper.Point({
           x: qx * pr.x + (1 - qx) * pb.x,
           y: qy * pr.y + (1 - qy) * pb.y,
         });
-
-        // try to transition smoothly
-        const r = origin.getDistance(newPoint);
-        const minDst = minDistanceToSkeleton(newPoint);
-        const dir = newPoint.subtract(origin).normalize();
-        const shrinkFactor = smoothstep(0.0, 1.0, (r - minDst) / r) * 0.3;
-        const finalPoint = origin.add(dir.multiply(r - r * shrinkFactor));
-
         newSegments.push(newPoint);
       }
 
