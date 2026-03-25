@@ -90,7 +90,7 @@ export function localPrimitiveFitting(
       // For a vertex, all rays originate from the center
       const origins = Array(opts.num_directions).fill(center);
 
-      const fittedRadii = fitSinglePrimitive(
+      const fitted = fitSinglePrimitive(
         origins,
         circleDirections,
         path,
@@ -101,9 +101,9 @@ export function localPrimitiveFitting(
       skeleton.primitives.push({
         type: "point",
         elementIdx: i,
-        origins: origins, // Note: In a real app, you might optimize this storage
-        directions: circleDirections,
-        radii: fittedRadii,
+        origins: fitted.origins,
+        directions: fitted.directions,
+        radii: fitted.radii,
       });
     }
   }
@@ -123,20 +123,14 @@ export function localPrimitiveFitting(
       opts.num_directions,
     );
 
-    const fittedRadii = fitSinglePrimitive(
-      origins,
-      directions,
-      path,
-      opts,
-      scratch,
-    );
+    const fitted = fitSinglePrimitive(origins, directions, path, opts, scratch);
 
     skeleton.primitives.push({
       type: "edge",
       elementIdx: i,
-      origins: origins,
-      directions: directions,
-      radii: fittedRadii,
+      origins: fitted.origins,
+      directions: fitted.directions,
+      radii: fitted.radii,
     });
   }
 
@@ -144,6 +138,76 @@ export function localPrimitiveFitting(
 }
 
 // --- Core Optimization Routine (Reused for Point & Edge) ---
+
+function resamplePoints(
+  origins: paper.Point[],
+  directions: paper.Point[],
+  r: Float64Array,
+  r_tgt: Float64Array,
+): {
+  origins: paper.Point[];
+  directions: paper.Point[];
+  r: Float64Array;
+  r_tgt: Float64Array;
+} {
+  const N = origins.length;
+
+  const inflated = origins.map((o, i) => o.add(directions[i].multiply(r[i])));
+  const tgtInflated = origins.map((o, i) =>
+    o.add(directions[i].multiply(r_tgt[i])),
+  );
+
+  // Build cumulative arc-length from inflated positions (closed curve)
+  const cumLen = new Float64Array(N + 1);
+  for (let i = 0; i < N; i++) {
+    cumLen[i + 1] = cumLen[i] + inflated[i].getDistance(inflated[(i + 1) % N]);
+  }
+  const totalLen = cumLen[N];
+  const spacing = totalLen / N;
+
+  const newOrigins: paper.Point[] = [];
+  const newDirections: paper.Point[] = [];
+  const newR = new Float64Array(N);
+  const newRTgt = new Float64Array(N);
+
+  let segIdx = 0;
+  for (let k = 0; k < N; k++) {
+    const targetLen = k * spacing;
+    while (segIdx < N - 1 && cumLen[segIdx + 1] <= targetLen) segIdx++;
+
+    const next = (segIdx + 1) % N;
+    const segLen = cumLen[segIdx + 1] - cumLen[segIdx];
+    const t = segLen > 1e-10 ? (targetLen - cumLen[segIdx]) / segLen : 0;
+
+    const newOrigin = origins[segIdx]
+      .multiply(1 - t)
+      .add(origins[next].multiply(t));
+
+    const pt0 = inflated[segIdx];
+    const pt1 = inflated[next];
+    const newPt = pt0.multiply(1 - t).add(pt1.multiply(t));
+    const diff = newPt.subtract(newOrigin);
+    const newDir = diff.normalize();
+
+    const tgtPt0 = tgtInflated[segIdx];
+    const tgtPt1 = tgtInflated[next];
+    const newTgtPt = tgtPt0.multiply(1 - t).add(tgtPt1.multiply(t));
+    const newTgtDiff = newTgtPt.subtract(newOrigin);
+
+    newOrigins.push(newOrigin);
+    newDirections.push(newDir);
+
+    newR[k] = diff.length;
+    newRTgt[k] = newTgtDiff.length;
+  }
+
+  return {
+    origins: newOrigins,
+    directions: newDirections,
+    r: newR,
+    r_tgt: newRTgt,
+  };
+}
 
 function fitSinglePrimitive(
   origins: paper.Point[],
@@ -168,9 +232,11 @@ function fitSinglePrimitive(
     d: Float64Array;
     rhs: Float64Array;
   },
-): number[] {
+): { origins: paper.Point[]; directions: paper.Point[]; radii: number[] } {
   // 1. Compute Max Extents (r_max)
-  const r_max = computeMaxExtents(origins, directions, path);
+  let curOrigins = origins;
+  let curDirections = directions;
+  let r_max = computeMaxExtents(curOrigins, curDirections, path);
 
   // 2. Initialize Radii
   const minMax = Math.min(...r_max);
@@ -210,9 +276,22 @@ function fitSinglePrimitive(
 
       if (!constraintsActive) break;
     }
+
+    const resampled = resamplePoints(curOrigins, curDirections, r, r_tgt);
+    curOrigins = resampled.origins;
+    curDirections = resampled.directions;
+    r.set(resampled.r);
+    r_tgt.set(resampled.r_tgt);
+
+    // recompute max extents because the origins and directions have changed
+    r_max = computeMaxExtents(curOrigins, curDirections, path);
   }
 
-  return Array.from(r);
+  return {
+    origins: curOrigins,
+    directions: curDirections,
+    radii: Array.from(r),
+  };
 }
 
 // --- Geometry Helpers ---

@@ -87,7 +87,7 @@ for (const skeleton of medialSkeletons) {
     skeleton.segments
       .map(
         ([a, b]) =>
-          `polygon((${skeleton.points[a].x.toFixed(1)},${(1000 - skeleton.points[a].y).toFixed(1)}), (${skeleton.points[b].x.toFixed(1)},${(1000 - skeleton.points[b].y).toFixed(1)}))`,
+          `polygon((${skeleton.points[a].x.toFixed(1)},${(-skeleton.points[a].y).toFixed(1)}),(${skeleton.points[b].x.toFixed(1)},${(-skeleton.points[b].y).toFixed(1)}))`,
       )
       .join(","),
   );
@@ -99,7 +99,16 @@ for (const skeleton of medialSkeletons) {
           const p = origin.add(
             primitive.directions[i].multiply(primitive.radii[i]),
           );
-          return `(${p.x.toFixed(1)},${(-p.y).toFixed(1)})`;
+          return `(${p.x.toFixed(2)},${(-p.y).toFixed(2)})`;
+        })
+        .join(","),
+    );
+    console.log("origins");
+    console.log(
+      primitive.origins
+        .map((origin, i) => {
+          const p = origin;
+          return `(${p.x.toFixed(2)},${(-p.y).toFixed(2)})`;
         })
         .join(","),
     );

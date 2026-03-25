@@ -366,7 +366,15 @@ export function FabricGlyphCanvas({
         }
         path.push(["Z"]);
         const bbox = fabricPathDataToPaper(path).bounds;
-        const color = ["#AAAAFF", "#FFAAAA", "#AAFFAA"][primIdx % 3];
+        const color = [
+          "#AAAAFF",
+          "#FFAAAA",
+          "#AAFFAA",
+          "#ffd1fa",
+          "#96f8ff",
+          "#ffdac1",
+          "#72ffdb",
+        ][primIdx % 7];
         return new fabric.Path(path, {
           left: bbox.center.x * (width / 1000),
           top: bbox.center.y * (height / 1000),
