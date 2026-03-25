@@ -343,14 +343,44 @@ export function FabricGlyphCanvas({
         top: bbox.center.y * (height / 1000),
         scaleX: width / 1000,
         scaleY: height / 1000,
-        stroke: "#AAFFAA",
+        stroke: "#FFFFAA",
         strokeWidth: 2,
         selectable: false,
         evented: false,
       });
     });
-    otherObjectsRef.current.push(...medialAxisLines);
-    canvas.add(...medialAxisLines);
+    const localPrimitives = medialSkeletons.flatMap((skeleton) => {
+      return skeleton.primitives.map((prim, primIdx) => {
+        const path: TSimplePathData = [];
+        for (let i = 0; i < prim.origins.length; ++i) {
+          const origin = prim.origins[i];
+          const dir = prim.directions[i];
+          const r = prim.radii[i];
+          const pt = origin.add(dir.multiply(r));
+          if (path.length === 0) {
+            path.push(["M", pt.x, pt.y]);
+          } else {
+            path.push(["L", pt.x, pt.y]);
+          }
+        }
+        path.push(["Z"]);
+        const bbox = fabricPathDataToPaper(path).bounds;
+        const color = ["#AAAAFF", "#FFAAAA", "#AAFFAA"][primIdx % 3];
+        return new fabric.Path(path, {
+          left: bbox.center.x * (width / 1000),
+          top: bbox.center.y * (height / 1000),
+          scaleX: width / 1000,
+          scaleY: height / 1000,
+          stroke: color,
+          strokeWidth: 2,
+          fill: null,
+          selectable: false,
+          evented: false,
+        });
+      });
+    });
+    otherObjectsRef.current.push(...medialAxisLines, ...localPrimitives);
+    canvas.add(...medialAxisLines, ...localPrimitives);
 
     adjustStrokes(canvas);
   }, [path, width, height, interactive, adjustStrokes]);

@@ -1,5 +1,6 @@
 import { Delaunay } from "d3-delaunay";
 import paper from "paper";
+import seedrandom from "seedrandom";
 
 import { MedialAxisGraph, sampleBoundary } from "@/app/pathUtils/medialAxis";
 
@@ -19,9 +20,11 @@ export function computeMedialSkeletonPoints(
   tolerance: number = 100.0,
   verbose: boolean = false,
 ): paper.Point[] {
+  const random = seedrandom("42");
+
   // 1. Initialization: Start with a minimal seed set (e.g., endpoints of the MA)
   // We flatten the MA to a traversable graph or point set for projection.
-  let V: paper.Point[] = getInitialSeeds(medialAxis);
+  let V: paper.Point[] = getInitialSeeds(medialAxis, random);
 
   if (verbose) {
     console.info(
@@ -226,7 +229,10 @@ function isVisible(
 
 // --- Helper Functions ---
 
-function getInitialSeeds(medialAxis: MedialAxisGraph): paper.Point[] {
+function getInitialSeeds(
+  medialAxis: MedialAxisGraph,
+  random: seedrandom.PRNG,
+): paper.Point[] {
   if (medialAxis.segments.length === 0) return [];
   if (medialAxis.segments.length === 1) {
     return [
@@ -236,10 +242,10 @@ function getInitialSeeds(medialAxis: MedialAxisGraph): paper.Point[] {
   }
 
   const getRandomPoint = () => {
-    const segIndex = Math.floor(Math.random() * medialAxis.segments.length);
+    const segIndex = Math.floor(random() * medialAxis.segments.length);
     const segment = medialAxis.segments[segIndex];
     // Pick either start (0) or end (1) of the segment
-    const ptIndex = Math.random() > 0.5 ? 1 : 0;
+    const ptIndex = random() > 0.5 ? 1 : 0;
     return medialAxis.points[segment[ptIndex]];
   };
 

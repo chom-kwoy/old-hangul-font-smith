@@ -76,7 +76,7 @@ Z" />
 
 </svg>`;
 
-const path = PathData.fromSvg(svg_kiyeok);
+const path = PathData.fromSvg(svg_nieun_hieuh);
 
 let startTime = Date.now();
 const medialSkeletons = path.getMedialSkeleton();
@@ -106,8 +106,8 @@ for (const skeleton of medialSkeletons) {
   }
 }
 
-startTime = Date.now();
-path.scalePath(0, 1.0, 0.5, true);
-elapsedTime = Date.now() - startTime;
-
-console.log(`Scaled path in ${elapsedTime}ms`);
+// startTime = Date.now();
+// path.scalePath(0, 1.0, 0.5, true);
+// elapsedTime = Date.now() - startTime;
+//
+// console.log(`Scaled path in ${elapsedTime}ms`);

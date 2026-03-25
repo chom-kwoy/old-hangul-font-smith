@@ -33,6 +33,8 @@ type PrimitiveFittingOptions = {
   expansion_rate: number;
   // The "collision resolution" attempts per growth stage.
   max_alternating_iters: number;
+  // ensure the balloon always inflates sufficiently even if it starts microscopic
+  min_absolute_growth: number;
 };
 
 export function localPrimitiveFitting(
@@ -47,6 +49,7 @@ export function localPrimitiveFitting(
     max_progressions: options.max_progressions ?? 25,
     expansion_rate: options.expansion_rate ?? 1.1,
     max_alternating_iters: options.max_alternating_iters ?? 15,
+    min_absolute_growth: options.min_absolute_growth ?? 1.0,
   };
 
   const skeleton = {
@@ -153,6 +156,7 @@ function fitSinglePrimitive(
     max_progressions: number;
     expansion_rate: number;
     max_alternating_iters: number;
+    min_absolute_growth: number;
   },
   scratch: {
     cp: Float64Array;
@@ -178,8 +182,13 @@ function fitSinglePrimitive(
   // 3. Progressive Expansion
   for (let prog = 0; prog < opts.max_progressions; prog++) {
     // Increase target
-    for (let k = 0; k < opts.num_directions; k++)
-      r_tgt[k] *= opts.expansion_rate;
+    for (let k = 0; k < opts.num_directions; k++) {
+      const multiplicativeGrowth = r_tgt[k] * opts.expansion_rate;
+      const additiveGrowth = r_tgt[k] + opts.min_absolute_growth;
+
+      // Take whichever results in a larger target radius
+      r_tgt[k] = Math.max(multiplicativeGrowth, additiveGrowth);
+    }
 
     // Solver Loop
     for (let iter = 0; iter < opts.max_alternating_iters; iter++) {
@@ -309,7 +318,7 @@ function computeMaxExtents(
   boundary: paper.CompoundPath,
 ): number[] {
   // Reuse a single path item to avoid GC
-  const ray = new paper.Path.Line({ from: [0, 0], to: [0, 0], insert: false });
+  const ray = new paper.Path.Line({ from: [0, 0], to: [0, 0] });
   const largeDist =
     Math.max(boundary.bounds.width, boundary.bounds.height) * 2 + 1000;
 
