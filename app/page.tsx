@@ -10,10 +10,8 @@ import {
   Snackbar,
 } from "@mui/material";
 import Button from "@mui/material/Button";
-import * as fabric from "fabric";
 import { produce } from "immer";
 import moment from "moment";
-import paper from "paper";
 import React, { useEffect, useState } from "react";
 import { MaterialSymbol } from "react-material-symbols-react19";
 import "react-material-symbols-react19/outlined";
@@ -25,6 +23,7 @@ import { getProgress } from "@/app/hangul/jamos";
 import { FontProcessor } from "@/app/processors/fontProcessor";
 import { fontLoaded } from "@/app/redux/features/font/font-slice";
 import { useAppDispatch, useAppStore } from "@/app/redux/hooks";
+import { initDrawContexts } from "@/app/utils/init";
 import schedulerYield from "@/app/utils/schedulerYield";
 import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
 
@@ -41,23 +40,7 @@ const FONT_MIME_TYPES = ".otf,.ttf,font/otf,font/ttf";
 
 export default function Home() {
   useEffect(() => {
-    // Initialize paper.js context
-    paper.setup([1, 1]);
-    paper.settings.insertItems = false;
-    paper.view.autoUpdate = false; // disables drawing any shape automatically
-
-    // Set global fabric.js defaults
-    fabric.InteractiveFabricObject.ownDefaults = {
-      ...fabric.InteractiveFabricObject.ownDefaults,
-      cornerStrokeColor: "white",
-      cornerColor: "lightblue",
-      cornerStyle: "circle",
-      cornerSize: 12,
-      padding: 0,
-      transparentCorners: false,
-      borderColor: "grey",
-      borderScaleFactor: 1.2,
-    };
+    initDrawContexts();
   }, []);
 
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
