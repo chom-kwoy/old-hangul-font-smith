@@ -258,6 +258,7 @@ export function FabricGlyphCanvas({
             fill: "black",
             stroke: amber[600],
             strokeWidth: interactive ? 3 : 0,
+            perPixelTargetFind: true,
           })
         : [];
     pathObjectsRef.current.push(...fabricPaths);
