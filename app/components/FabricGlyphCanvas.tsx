@@ -1,5 +1,3 @@
-"use client";
-
 import { amber, blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
@@ -203,7 +201,7 @@ export function FabricGlyphCanvas({
     fabricCanvasRef.current = canvas;
 
     return () => {
-      canvas.dispose();
+      canvas?.dispose();
       fabricCanvasRef.current = null;
     };
   }, [interactive, width, height, adjustStrokes]);

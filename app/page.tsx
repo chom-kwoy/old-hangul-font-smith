@@ -39,9 +39,7 @@ export enum AppState {
 const FONT_MIME_TYPES = ".otf,.ttf,font/otf,font/ttf";
 
 export default function Home() {
-  useEffect(() => {
-    initDrawContexts();
-  }, []);
+  useState(() => initDrawContexts());
 
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [errorMsg, setErrorMsg] = useState<string>("Unknown error.");

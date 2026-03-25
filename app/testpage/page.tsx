@@ -59,7 +59,7 @@ Z" />
 </svg>`;
 
 export default function TestPage() {
-  initDrawContexts();
+  useState(() => initDrawContexts());
 
   const [path, setPath] = useState(() => PathData.fromSvg(svg_nieun_hieuh));
 
