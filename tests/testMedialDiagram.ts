@@ -91,32 +91,32 @@ for (const skeleton of medialSkeletons) {
       )
       .join(","),
   );
-  for (const primitive of skeleton.primitives) {
-    console.log("primitive");
+  skeleton.primitives.forEach((primitive, i) => {
+    console.log(`primitive #${i}:`);
     console.log(
       primitive.origins
         .map((origin, i) => {
           const p = origin.add(
             primitive.directions[i].multiply(primitive.radii[i]),
           );
-          return `(${p.x.toFixed(2)},${(-p.y).toFixed(2)})`;
+          return `(${p.x.toFixed(2)},${(1000 - p.y).toFixed(2)}+k)`;
         })
-        .join(","),
+        .join(",") + "\n",
     );
-    console.log("origins");
-    console.log(
-      primitive.origins
-        .map((origin, i) => {
-          const p = origin;
-          return `(${p.x.toFixed(2)},${(-p.y).toFixed(2)})`;
-        })
-        .join(","),
-    );
-  }
+    // console.log("origins");
+    // console.log(
+    //   primitive.origins
+    //     .map((origin, i) => {
+    //       const p = origin;
+    //       return `(${p.x.toFixed(2)},${(-p.y).toFixed(2)})`;
+    //     })
+    //     .join(","),
+    // );
+  });
 }
 
-// startTime = Date.now();
-// path.scalePath(0, 1.0, 0.5, true);
-// elapsedTime = Date.now() - startTime;
-//
-// console.log(`Scaled path in ${elapsedTime}ms`);
+startTime = Date.now();
+path.scalePath(0, 1.0, 0.5, { verbose: true });
+elapsedTime = Date.now() - startTime;
+
+console.log(`Scaled path in ${elapsedTime}ms`);

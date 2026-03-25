@@ -260,17 +260,8 @@ export default class PathData {
     }
   }
 
-  scalePath(
-    index: number,
-    scaleX: number,
-    scaleY: number,
-    verbose = false,
-  ): void {
+  getRegAndBold(strokeWidth: number, boldnessFactor: number) {
     const skeletons = this.getMedialSkeleton();
-    if (index < 0 || index >= skeletons.length) {
-      throw new Error(`Invalid subpath index: ${index}`);
-    }
-    const skeleton = skeletons[index];
 
     function getPrimitivePoints(primitives: Primitive[]) {
       return primitives.map((primitive) => {
@@ -282,103 +273,134 @@ export default class PathData {
       });
     }
 
+    const offsetAmount = strokeWidth * (boldnessFactor - 1.0);
+
+    const regular: paper.Point[][][] = [];
+    const bold: paper.Point[][][] = [];
+    for (const skeleton of skeletons) {
+      const regPrimitives = getPrimitivePoints(skeleton.primitives);
+      const boldPrimitives = regPrimitives.map((primitive, i) => {
+        const regPoints = regPrimitives[i];
+        const scale = 1000.0; // needs to be scaled for clipper js lib
+        const shape = new Shape(
+          [primitive.map((p) => ({ X: p.x * scale, Y: p.y * scale }))],
+          true,
+        );
+        const boldShape = shape.offset(offsetAmount * scale, {});
+        let boldPoints = boldShape
+          .mapToLower()[0]
+          .map((p) => new paper.Point(p.x / scale, p.y / scale))
+          .toReversed();
+
+        // interpolate points so that they are spaced roughly 1 unit apart
+        const interpolated: paper.Point[] = [];
+        const tgtDst = 1.0;
+        for (let j = 0; j < boldPoints.length; ++j) {
+          const p0 = boldPoints[j];
+          const p1 = boldPoints[(j + 1) % boldPoints.length];
+          const dst = p0.getDistance(p1);
+          const n = Math.ceil(dst / tgtDst);
+          for (let k = 0; k < n; ++k) {
+            const t = (k + 1) / (n + 1);
+            interpolated.push(p0.add(p1.subtract(p0).multiply(t)));
+          }
+        }
+        boldPoints = interpolated;
+
+        // match first points
+        const firstOrigin = skeleton.primitives[i].origins[0];
+        const firstDir = skeleton.primitives[i].directions[0];
+        const firstRad = skeleton.primitives[i].radii[0];
+        const line = new paper.Path.Line(
+          firstOrigin,
+          firstOrigin.add(firstDir.multiply(firstRad)),
+        );
+        let minDst = Infinity;
+        let minIdx = 0;
+        for (let j = 0; j < boldPoints.length; ++j) {
+          const nearest = line.getNearestPoint(boldPoints[j]);
+          const dst = nearest.getDistance(boldPoints[j]);
+          if (dst < minDst) {
+            minDst = dst;
+            minIdx = j;
+          }
+        }
+        // shuffle list so that minIdx becomes 0th index
+        boldPoints = boldPoints
+          .slice(minIdx)
+          .concat(boldPoints.slice(0, minIdx));
+
+        const mapping = matchTwoShapes(regPoints, boldPoints);
+
+        return mapping.map((j) => boldPoints[j]);
+      });
+
+      bold.push(boldPrimitives);
+      regular.push(regPrimitives);
+    }
+
+    return { regular, bold };
+  }
+
+  scalePath(
+    index: number,
+    scaleX: number,
+    scaleY: number,
+    {
+      scaleStroke,
+      strokeWidth,
+      boldnessFactor,
+      verbose,
+    }: {
+      // 0 means stroke is fixed, 1 means fully scaled
+      scaleStroke?: number;
+      // the original font's average stroke width
+      strokeWidth?: number;
+      boldnessFactor?: number;
+      verbose?: boolean;
+    } = {},
+  ): void {
+    scaleStroke = scaleStroke ?? 0.6;
+    strokeWidth = strokeWidth ?? 60.0;
+    boldnessFactor = boldnessFactor ?? 1.4;
+    verbose = verbose ?? false;
+
+    const skeletons = this.getMedialSkeleton();
+    const regAndBold = this.getRegAndBold(strokeWidth, boldnessFactor);
+    if (index < 0 || index >= skeletons.length) {
+      throw new Error(`Invalid subpath index: ${index}`);
+    }
+    const skeleton = skeletons[index];
+    const regPrimitives = regAndBold.regular[index];
+    const boldPrimitives = regAndBold.bold[index];
+
     function pr(pt: { x: number; y: number }, xoffset = 0, yoffset = 0) {
       return `(${(xoffset + pt.x).toFixed(1)},${(yoffset + 1000 - pt.y).toFixed(1)})`;
     }
 
-    const b = 1.2; // boldness factor
-    const regPrimitives = getPrimitivePoints(skeleton.primitives);
-    const boldPrimitives = regPrimitives.map((primitive, i) => {
-      const regPoints = regPrimitives[i];
-      const mult = 100;
-      const shape = new Shape(
-        [primitive.map((p) => ({ X: p.x * mult, Y: p.y * mult }))],
-        true,
-      );
-      const boldShape = shape.offset(50 * mult, {});
-      let boldPoints = boldShape
-        .mapToLower()[0]
-        .map((p) => new paper.Point(p.x / mult, p.y / mult))
-        .toReversed();
-
-      // interpolate points so that they are spaced roughly 1 unit apart
-      const interpolated: paper.Point[] = [];
-      const tgtDst = 1.0;
-      for (let j = 0; j < boldPoints.length; ++j) {
-        const p0 = boldPoints[j];
-        const p1 = boldPoints[(j + 1) % boldPoints.length];
-        const dst = p0.getDistance(p1);
-        const n = Math.ceil(dst / tgtDst);
-        for (let k = 0; k < n; ++k) {
-          const t = (k + 1) / (n + 1);
-          interpolated.push(p0.add(p1.subtract(p0).multiply(t)));
-        }
-      }
-      boldPoints = interpolated;
-
-      if (verbose) {
-        // console.log(`interpolated ${i}: `);
-        // console.log(
-        //   `${boldPoints.length} vertices: ` +
-        //     boldPoints.map((p) => pr(p)).join(",") +
-        //     "\n",
-        // );
-      }
-
-      // match first points
-      const firstOrigin = skeleton.primitives[i].origins[0];
-      const firstDir = skeleton.primitives[i].directions[0];
-      const firstRad = skeleton.primitives[i].radii[0];
-      const line = new paper.Path.Line(
-        firstOrigin,
-        firstOrigin.add(firstDir.multiply(firstRad)),
-      );
-      let minDst = Infinity;
-      let minIdx = 0;
-      for (let j = 0; j < boldPoints.length; ++j) {
-        const nearest = line.getNearestPoint(boldPoints[j]);
-        const dst = nearest.getDistance(boldPoints[j]);
-        if (dst < minDst) {
-          minDst = dst;
-          minIdx = j;
-        }
-      }
-      // rotate so that minIdx becomes 0th index
-      boldPoints = boldPoints.slice(minIdx).concat(boldPoints.slice(0, minIdx));
-
-      const mapping = matchTwoShapes(regPoints, boldPoints);
-      if (verbose) {
-        console.log(
-          `mapping ${i}:\n` +
-            regPoints
-              .map((regPt, j) => {
-                const boldPt = boldPoints[mapping[j]];
-                return `polygon(${pr(regPt, 0, -1000)},${pr(boldPt)})`;
-              })
-              .join(",") +
-            "\n",
-        );
-      }
-
-      return mapping.map((j) => boldPoints[j]);
-    });
-
     if (verbose) {
-      console.log("boldPrimitives: ");
-      boldPrimitives.map((prim) => {
+      console.log("generated bold primitives: ");
+      boldPrimitives.map((prim, i) => {
         console.log(
-          `${prim.length} vertices: ` + prim.map((p) => pr(p)).join(",") + "\n",
+          `bold primitive #${i}: ${prim.length} vertices\n` +
+            prim.map((p) => pr(p, 500)).join(",") +
+            "\n",
         );
       });
     }
 
-    const alpha = 0.0; // 0 means stroke weight is fixed, 1 means fully scaled
+    const alpha = scaleStroke;
+    const b = boldnessFactor;
+    const rawQx = (Math.pow(scaleX, alpha - 1) - b) / (1 - b);
+    const rawQy = (Math.pow(scaleY, alpha - 1) - b) / (1 - b);
+
     const clip = (x: number) => Math.max(0, Math.min(1, x));
-    const qx = clip((Math.pow(scaleX, alpha - 1) - b) / (1 - b));
-    const qy = clip((Math.pow(scaleY, alpha - 1) - b) / (1 - b));
+    const qx = clip(rawQx);
+    const qy = clip(rawQy);
 
     if (verbose) {
       console.log("scaleX, scaleY: ", scaleX, scaleY);
+      console.log("rawQx, rawQy: ", rawQx, rawQy);
       console.log("qx, qy: ", qx, qy);
     }
 
@@ -399,7 +421,7 @@ export default class PathData {
 
       if (verbose) {
         console.log(
-          `newPrimitives ${i}:\n` +
+          `generated new primitive ${i}:\n` +
             newSegments.map((p) => pr(p, 1000)).join(",") +
             "\n",
         );
