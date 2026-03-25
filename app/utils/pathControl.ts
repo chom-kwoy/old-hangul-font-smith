@@ -86,6 +86,7 @@ const movePathPoint = (
   y: number,
   commandIndex: number,
   pointIndex: number,
+  linkedPoints: Array<{ commandIndex: number; pointIndex: number }> = [],
 ) => {
   const { path, pathOffset } = pathObject;
 
@@ -106,8 +107,20 @@ const movePathPoint = (
     pathObject.calcOwnMatrix(),
   );
 
+  // Compute delta in path-data space before setDimensions() updates pathOffset
+  const deltaX =
+    mouseLocalPosition.x + pathOffset.x - (path[commandIndex][pointIndex] as number);
+  const deltaY =
+    mouseLocalPosition.y + pathOffset.y - (path[commandIndex][pointIndex + 1] as number);
+
   path[commandIndex][pointIndex] = mouseLocalPosition.x + pathOffset.x;
   path[commandIndex][pointIndex + 1] = mouseLocalPosition.y + pathOffset.y;
+
+  for (const lp of linkedPoints) {
+    (path[lp.commandIndex][lp.pointIndex] as number) += deltaX;
+    (path[lp.commandIndex][lp.pointIndex + 1] as number) += deltaY;
+  }
+
   pathObject.setDimensions();
 
   const newAnchorPointInParentPlane = anchorPoint
@@ -150,13 +163,14 @@ function pathActionHandler(
   y: number,
 ) {
   const { target } = transform;
-  const { commandIndex, pointIndex } = this;
+  const { commandIndex, pointIndex, linkedControlPoints } = this;
   const actionPerformed = movePathPoint(
     target as Path,
     x,
     y,
     commandIndex,
     pointIndex,
+    linkedControlPoints,
   );
   if (actionPerformed) {
     fireEvent(this.actionName as TModificationEvents, {
@@ -177,6 +191,7 @@ const lastControlPoints: Control[] = [];
 class PathPointControl extends Control {
   declare commandIndex: number;
   declare pointIndex: number;
+  declare linkedControlPoints: Array<{ commandIndex: number; pointIndex: number }>;
   declare controlFill: string;
   declare controlStroke: string;
   declare controlSize: number;
@@ -320,6 +335,7 @@ const createControl = (
     visible: !isControlPoint,
     commandIndex: commandIndexPos,
     pointIndex: pointIndexPos,
+    linkedControlPoints: [],
     actionName: ACTION_NAME,
     positionHandler: pathPositionHandler,
     actionHandler: pathActionHandler,
@@ -445,6 +461,22 @@ export function createPathControls(
     cps.forEach(({ key, control }) => {
       controls[key] = control;
     });
+  }
+
+  // Attach linked handle positions to each anchor control so that dragging an
+  // anchor also translates its associated bezier handles by the same delta.
+  for (const [cmdIdxStr, cps] of Object.entries(controlPoints)) {
+    const cmdIdx = parseInt(cmdIdxStr);
+    const commandType = path.path[cmdIdx][0] as TSimpleParseCommandType;
+    const anchorControl = controls[
+      `c_${cmdIdx}_${commandType}`
+    ] as PathPointControl | undefined;
+    if (anchorControl) {
+      anchorControl.linkedControlPoints = cps.map(({ control: cp }) => ({
+        commandIndex: (cp as PathControlPointControl).commandIndex,
+        pointIndex: (cp as PathControlPointControl).pointIndex,
+      }));
+    }
   }
 
   return controls;
