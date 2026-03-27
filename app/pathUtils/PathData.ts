@@ -1,7 +1,14 @@
-import Shape from "@doodle3d/clipper-js";
+// import Shape from "@doodle3d/clipper-js";
 import { DOMParser } from "@xmldom/xmldom";
-import { TSimplePathData } from "fabric";
 import * as fabric from "fabric";
+import { TSimplePathData } from "fabric";
+import * as clipperLib from "js-angusj-clipper/web";
+import {
+  ClipType,
+  EndType,
+  JoinType,
+  PolyFillType,
+} from "js-angusj-clipper/web";
 import opentype from "opentype.js";
 import paper from "paper";
 
@@ -20,6 +27,11 @@ import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
 import { Bounds } from "@/app/utils/types";
+
+const clipper = await clipperLib.loadNativeClipperLibInstanceAsync(
+  // let it autodetect which one to use, but also available WasmOnly and AsmJsOnly
+  clipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback,
+);
 
 export type SerializedPathData = {
   readonly _paths_serialized: TSimplePathData[];
@@ -260,106 +272,6 @@ export default class PathData {
     }
   }
 
-  genRegAndBold(strokeWidth: number, boldnessFactor: number) {
-    const skeletons = this.getMedialSkeleton();
-
-    function getPrimitivePoints(primitives: Primitive[]) {
-      return primitives.map((primitive) => {
-        return primitive.origins.map((origin, i) => {
-          const dir = primitive.directions[i];
-          const rad = primitive.radii[i];
-          return origin.add(dir.multiply(rad));
-        });
-      });
-    }
-
-    // needs to be scaled for clipper js lib
-    const clipperScale = 10000.0;
-
-    // specifies how important the tangent angles are for aligning the two paths
-    const tangentWeight = 50.0;
-    const offsetAmount = strokeWidth * (boldnessFactor - 1.0);
-
-    function offsetPoints(primitive: paper.Point[]) {
-      const shape = new Shape(
-        [
-          primitive.map((p) => ({
-            X: p.x * clipperScale,
-            Y: p.y * clipperScale,
-          })),
-        ],
-        true,
-      );
-      const boldShape = shape.offset(offsetAmount * clipperScale, {});
-      return boldShape
-        .mapToLower()[0]
-        .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
-        .toReversed();
-    }
-
-    const regular: paper.Point[][][] = [];
-    const bold: paper.Point[][][] = [];
-    for (const skeleton of skeletons) {
-      const regPrimitives = getPrimitivePoints(skeleton.primitives).map(
-        (regPoints) => {
-          return regPoints; // interpolatePoints(regPoints, 1.0);
-        },
-      );
-      const boldPrimitives = regPrimitives.map((primitive, i) => {
-        const regPoints = primitive;
-        let boldPoints = offsetPoints(primitive);
-
-        // interpolate points so that they are spaced roughly 1 unit apart
-        boldPoints = interpolatePoints(boldPoints, 2.0);
-
-        // Compute tangents for both polygons. Bold points are dense,
-        // so use a wider half-window to average out the stairstepping
-        // from linear interpolation between clipper vertices.
-        const regTangents = computePolygonTangents(regPoints, 1);
-        const allBoldTangents = computePolygonTangents(boldPoints, 5);
-
-        // Find the bold start index that minimizes a combined position +
-        // tangent-alignment cost. Pure position matching can pick the wrong end
-        // of a symmetric stroke; tangent weighting breaks the tie.
-        const regTan0 = regTangents[0];
-        let minCost = Infinity;
-        let minIdx = 0;
-        for (let j = 0; j < boldPoints.length; ++j) {
-          const posDist = regPoints[0].getDistance(boldPoints[j]);
-          const bt = allBoldTangents[j];
-          const dot = regTan0.x * bt.x + regTan0.y * bt.y;
-          const totalCost = posDist + tangentWeight * (1 - dot);
-          if (totalCost < minCost) {
-            minCost = totalCost;
-            minIdx = j;
-          }
-        }
-        // shuffle both arrays so minIdx becomes index 0
-        boldPoints = boldPoints
-          .slice(minIdx)
-          .concat(boldPoints.slice(0, minIdx));
-        const boldTangents = allBoldTangents
-          .slice(minIdx)
-          .concat(allBoldTangents.slice(0, minIdx));
-
-        const mapping = matchTwoShapes(
-          regPoints,
-          regTangents,
-          boldPoints,
-          boldTangents,
-          tangentWeight,
-        );
-
-        return mapping.map((j) => boldPoints[j]);
-      });
-
-      bold.push(boldPrimitives);
-      regular.push(regPrimitives);
-    }
-
-    return { regular, bold };
-  }
-
   scalePath(
     index: number,
     scaleX: number,
@@ -367,120 +279,56 @@ export default class PathData {
     {
       scaleStroke,
       strokeWidth,
-      boldnessFactor,
       verbose,
     }: {
       // 0 means stroke is fixed, 1 means fully scaled
       scaleStroke?: number;
       // the original font's average stroke width
       strokeWidth?: number;
-      boldnessFactor?: number;
       verbose?: boolean;
     } = {},
-  ): void {
+  ) {
     scaleStroke = scaleStroke ?? 0.6;
     strokeWidth = strokeWidth ?? 60.0;
-    boldnessFactor = boldnessFactor ?? 1.4;
     verbose = verbose ?? false;
 
-    const skeletons = this.getMedialSkeleton();
-    const regAndBold = this.genRegAndBold(strokeWidth, boldnessFactor);
-    if (index < 0 || index >= skeletons.length) {
+    if (index < 0 || index >= this.#paths.length) {
       throw new Error(`Invalid subpath index: ${index}`);
     }
-    const skeleton = skeletons[index];
-    const regPrimitives = regAndBold.regular[index];
-    const boldPrimitives = regAndBold.bold[index];
 
-    function pr(pt: { x: number; y: number }, xoffset = 0, yoffset = 0) {
-      return `(${(xoffset + pt.x).toFixed(1)},${(yoffset + 1000 - pt.y).toFixed(1)})`;
-    }
+    const skeleton = this.getMedialSkeleton()[index];
+    const bbox = fabricPathDataToPaper(this.#paths[index]).bounds;
 
-    if (verbose) {
-      console.log("generated bold primitives: ");
-      boldPrimitives.map((prim, i) => {
-        console.log(
-          `bold primitive #${i}: ${prim.length} vertices\n` +
-            prim.map((p) => pr(p, 500)).join(",") +
-            "\n",
+    const newPrimitives = getPrimitivePoints(skeleton.primitives).map(
+      (regPrimitive) => {
+        return scalePathImpl(
+          regPrimitive,
+          scaleX,
+          scaleY,
+          bbox.center.x,
+          bbox.center.y,
+          scaleStroke,
+          strokeWidth,
+          verbose,
         );
-      });
+      },
+    );
 
-      console.log("correspondences: ");
-      regPrimitives.map((regPrim, i) => {
-        const boldPrim = boldPrimitives[i];
+    const union = unionPaths(newPrimitives);
+    const newPath = new paper.CompoundPath(
+      union.map(
+        (path) =>
+          new paper.Path({
+            segments: path,
+            closed: true,
+          }),
+      ),
+    );
+    // newPath.smooth({ type: "catmull-rom", factor: 0.5 });
+    newPath.simplify(0.1);
 
-        console.log(
-          `correspondence #${i}:\n` +
-            regPrim
-              .map((regPt, j) => {
-                const boldPt = boldPrim[j];
-                // return `polygon(${pr(regPt, 500)},${pr(boldPt, 500)})`;
-                return `(t*${(regPt.x + 500).toFixed(1)}+(1-t)*${(boldPt.x + 500).toFixed(1)},u*${(1000 - regPt.y).toFixed(1)}+(1-u)*${(1000 - boldPt.y).toFixed(1)})`;
-              })
-              .join(",") +
-            "\n",
-        );
-      });
-    }
-
-    const alpha = scaleStroke;
-    const b = boldnessFactor;
-    const rawQx = (Math.pow(scaleX, alpha - 1) - b) / (1 - b);
-    const rawQy = (Math.pow(scaleY, alpha - 1) - b) / (1 - b);
-
-    const clip = (x: number) => Math.max(0, Math.min(1, x));
-    const qx = clip(rawQx);
-    const qy = clip(rawQy);
-
-    if (verbose) {
-      console.log("scaleX, scaleY: ", scaleX, scaleY);
-      console.log("rawQx, rawQy: ", rawQx, rawQy);
-      console.log("qx, qy: ", qx, qy);
-    }
-
-    const newPrimitives: paper.Path[] = [];
-    for (let i = 0; i < skeleton.primitives.length; ++i) {
-      const regPrimitive = regPrimitives[i];
-      const boldPrimitive = boldPrimitives[i];
-      const newSegments: { x: number; y: number }[] = [];
-      for (let j = 0; j < regPrimitive.length; ++j) {
-        const pr = regPrimitive[j];
-        const pb = boldPrimitive[j];
-        const dist = pr.getDistance(pb);
-        const newPoint = new paper.Point({
-          x: qx * pr.x + (1 - qx) * pb.x,
-          y: qy * pr.y + (1 - qy) * pb.y,
-        });
-        newSegments.push(newPoint);
-      }
-
-      if (verbose) {
-        console.log(
-          `generated new primitive ${i}:\n` +
-            newSegments.map((p) => pr(p, 1000)).join(",") +
-            "\n",
-        );
-      }
-      const path = new paper.Path({
-        segments: newSegments,
-        closed: true,
-      });
-      path.smooth({ type: "catmull-rom", factor: 0.5 });
-      newPrimitives.push(path);
-    }
-
-    let reconstructedShape: paper.PathItem = newPrimitives[0];
-    for (let i = 1; i < newPrimitives.length; i++) {
-      const nextShape = newPrimitives[i];
-      reconstructedShape = reconstructedShape.unite(nextShape);
-    }
-    reconstructedShape.simplify();
-
-    const newPath = paperToFabricPathData(reconstructedShape);
-    // console.log("New path: ", newPath);
-
-    this.updatePath(index, newPath);
+    // this.updatePath(index, newPath);
+    return newPath;
   }
 
   getMedialSkeleton(): FittedMedialAxisGraph[] {
@@ -504,6 +352,131 @@ export default class PathData {
   }
 }
 
+function scalePathImpl(
+  points: paper.Point[],
+  scaleX: number,
+  scaleY: number,
+  centerX: number,
+  centerY: number,
+  scaleStroke: number,
+  strokeWidth: number,
+  verbose: boolean = false,
+): paper.Point[] {
+  function pr(pt: { x: number; y: number }, xoffset = 0, yoffset = 0) {
+    return `(${(xoffset + pt.x).toFixed(1)},${(yoffset + 1000 - pt.y).toFixed(1)})`;
+  }
+
+  const revScaleX = Math.pow(1 / scaleX, scaleStroke);
+  const revScaleY = Math.pow(1 / scaleY, scaleStroke);
+  const tgtStrokeX = strokeWidth * revScaleX;
+  const tgtStrokeY = strokeWidth * revScaleY;
+
+  const finalScale = Math.min(Math.min(revScaleX, revScaleY) * 0.999, 1.0);
+  const offsetX = (tgtStrokeX / finalScale - strokeWidth) / 2;
+  const offsetY = (tgtStrokeY / finalScale - strokeWidth) / 2;
+
+  const offsetAmount = 10.0;
+  const preScaleX = offsetAmount / offsetX;
+  const preScaleY = offsetAmount / offsetY;
+
+  if (verbose) {
+    console.log(
+      `scaleX: ${scaleX}, scaleY: ${scaleY}\n` +
+        `revScaleX: ${revScaleX}, revScaleY: ${revScaleY}\n` +
+        `offsetX: ${offsetX}, offsetY: ${offsetY}, finalScale: ${finalScale}\n` +
+        `preScaleX: ${preScaleX}, preScaleY: ${preScaleY}, offsetAmount: ${offsetAmount}`,
+    );
+  }
+
+  points = points.map((p) => new paper.Point(p.x - centerX, p.y - centerY));
+  const preScaledPts = scalePoints(points, preScaleX, preScaleY);
+  const offsetPts = offsetPoints(preScaledPts, offsetAmount);
+  const scaledPts = scalePoints(
+    offsetPts,
+    (finalScale / preScaleX) * scaleX,
+    (finalScale / preScaleY) * scaleY,
+  );
+  const result = scaledPts.map(
+    (p) => new paper.Point(p.x + centerX, p.y + centerY),
+  );
+
+  if (verbose) {
+    console.log(result.map((p) => pr(p)).join(",") + "\n");
+  }
+
+  return result;
+}
+
+function getPrimitivePoints(primitives: Primitive[]) {
+  return primitives.map((primitive) => {
+    return primitive.origins.map((origin, i) => {
+      const dir = primitive.directions[i];
+      const rad = primitive.radii[i];
+      return origin.add(dir.multiply(rad));
+    });
+  });
+}
+
+function scalePoints(points: paper.Point[], scaleX: number, scaleY: number) {
+  const result: paper.Point[] = [];
+  for (const p of points) {
+    result.push(new paper.Point(p.x * scaleX, p.y * scaleY));
+  }
+  return result;
+}
+
+function offsetPoints(primitive: paper.Point[], offsetAmount: number) {
+  // needs to be scaled for clipper js lib
+  const clipperScale = 10000.0;
+  const result = clipper.offsetToPaths({
+    delta: offsetAmount * clipperScale,
+    offsetInputs: [
+      {
+        data: primitive
+          .map((p) => ({
+            x: p.x * clipperScale,
+            y: p.y * clipperScale,
+          }))
+          .toReversed(),
+        joinType: JoinType.Miter,
+        endType: EndType.ClosedPolygon,
+      },
+    ],
+  });
+  if (result === undefined) {
+    throw new Error("clipper.offsetToPaths failed");
+  }
+  return result[0]
+    .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
+    .toReversed();
+}
+
+function unionPaths(primitives: paper.Point[][]): paper.Point[][] {
+  const clipperScale = 10000.0;
+  const inputs = primitives.map((primitive) => ({
+    data: primitive
+      .map((p) => ({
+        x: p.x * clipperScale,
+        y: p.y * clipperScale,
+      }))
+      .toReversed(),
+    closed: true,
+  }));
+  const result = clipper.clipToPaths({
+    clipType: ClipType.Union,
+    subjectFillType: PolyFillType.NonZero,
+    subjectInputs: inputs,
+  });
+  if (result === undefined) {
+    throw new Error("clipper.clipToPolyTree failed");
+  }
+  return result.map((path) =>
+    path
+      .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
+      .toReversed(),
+  );
+}
+
 // Returns a unit tangent for each point using a central-difference window of
 // ±halfWindow steps (treats the array as a closed loop).
 function computePolygonTangents(
@@ -517,80 +490,6 @@ function computePolygonTangents(
     const t = next.subtract(prev);
     return t.length > 1e-10 ? t.normalize() : new paper.Point(1, 0);
   });
-}
-
-// DTW-based point matching. The cost of pairing reg point i with bold point j
-// is: position_distance + tangentWeight * (1 - dot(tA[i], tB[j])).
-// The tangent term (∈ [0,2]) steers the warp path away from matches where the
-// outline tangents are not parallel, reducing kinks in the interpolated result.
-function matchTwoShapes(
-  shapeA: paper.Point[],
-  tangentsA: paper.Point[],
-  shapeB: paper.Point[],
-  tangentsB: paper.Point[],
-  tangentWeight: number,
-): number[] {
-  const n = shapeA.length;
-  const m = shapeB.length;
-
-  if (n === 0 || m === 0) return [];
-
-  function pointCost(i: number, j: number): number {
-    const posCost = shapeA[i].getDistance(shapeB[j]);
-    const tA = tangentsA[i];
-    const tB = tangentsB[j];
-    const dot = tA.x * tB.x + tA.y * tB.y;
-    return posCost + tangentWeight * (1 - dot);
-  }
-
-  const dtw: number[][] = Array.from({ length: n }, () =>
-    Array(m).fill(Infinity),
-  );
-
-  dtw[0][0] = pointCost(0, 0);
-
-  for (let i = 1; i < n; i++) {
-    dtw[i][0] = dtw[i - 1][0] + pointCost(i, 0);
-  }
-
-  for (let j = 1; j < m; j++) {
-    dtw[0][j] = dtw[0][j - 1] + pointCost(0, j);
-  }
-
-  for (let i = 1; i < n; i++) {
-    for (let j = 1; j < m; j++) {
-      dtw[i][j] =
-        pointCost(i, j) +
-        Math.min(dtw[i - 1][j], dtw[i][j - 1], dtw[i - 1][j - 1]);
-    }
-  }
-
-  const mapping: number[] = new Array(n);
-  let i = n - 1;
-  let j = m - 1;
-
-  while (i > 0 || j > 0) {
-    mapping[i] = j;
-
-    if (i === 0) {
-      j--;
-    } else if (j === 0) {
-      i--;
-    } else {
-      const minCost = Math.min(dtw[i - 1][j - 1], dtw[i - 1][j], dtw[i][j - 1]);
-      if (minCost === dtw[i - 1][j - 1]) {
-        i--;
-        j--;
-      } else if (minCost === dtw[i - 1][j]) {
-        i--;
-      } else {
-        j--;
-      }
-    }
-  }
-
-  mapping[0] = 0;
-  return mapping;
 }
 
 function transformFabricPathData(
