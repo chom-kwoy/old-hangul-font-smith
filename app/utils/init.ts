@@ -21,4 +21,11 @@ export function initDrawContexts() {
     borderColor: "grey",
     borderScaleFactor: 1.2,
   };
+
+  // Remove rotation handle globally
+  fabric.InteractiveFabricObject.ownDefaults.controls = (() => {
+    const controls = fabric.FabricObject.createControls().controls;
+    delete controls.mtr;
+    return controls;
+  })();
 }

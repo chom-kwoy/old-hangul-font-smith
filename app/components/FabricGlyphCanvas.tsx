@@ -31,7 +31,11 @@ export function FabricGlyphCanvas({
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
   const viewportRef = useRef<fabric.TMat2D | null>(null);
 
-  const pathObjectsRef = useRef<fabric.Path[]>([]);
+  type PathObjects = {
+    main: fabric.Path;
+    display: fabric.Path;
+  };
+  const pathObjectsRef = useRef<PathObjects[]>([]);
   const bgPathObjectsRef = useRef<fabric.Path[]>([]);
   const otherObjectsRef = useRef<fabric.FabricObject[]>([]);
   const currentPathRef = useRef<PathData | null>(null);
@@ -244,44 +248,55 @@ export function FabricGlyphCanvas({
 
     currentPathRef.current = path ? path.clone() : null;
 
-    for (const obj of pathObjectsRef.current) canvas.remove(obj);
+    for (const obj of pathObjectsRef.current) {
+      canvas.remove(obj.main);
+      canvas.remove(obj.display);
+    }
     pathObjectsRef.current = [];
-    for (const obj of otherObjectsRef.current) canvas.remove(obj);
+    for (const obj of otherObjectsRef.current) {
+      canvas.remove(obj);
+    }
     otherObjectsRef.current = [];
 
     const pathSelectable = interactive;
-    const fabricPaths =
+    const mainFabricPaths =
       currentPathRef.current !== null
         ? currentPathRef.current.makeFabricPaths(width, height, {
             selectable: pathSelectable,
             evented: pathSelectable,
+            fill: "#FF000001",
+            stroke: "#FF000001",
+            strokeWidth: interactive ? 3 : 0,
+            perPixelTargetFind: true,
+          })
+        : [];
+    const displayFabricPaths =
+      currentPathRef.current !== null
+        ? currentPathRef.current.makeFabricPaths(width, height, {
+            selectable: false,
+            evented: false,
             fill: "black",
             stroke: amber[600],
             strokeWidth: interactive ? 3 : 0,
             perPixelTargetFind: true,
           })
         : [];
-    pathObjectsRef.current.push(...fabricPaths);
+    pathObjectsRef.current.push(
+      ...mainFabricPaths.map((mainPath, i) => ({
+        main: mainPath,
+        display: displayFabricPaths[i],
+      })),
+    );
 
     if (interactive) {
-      if (currentPathRef.current !== null) {
-        const refPaths = currentPathRef.current.makeFabricPaths(width, height, {
-          selectable: false,
-          evented: false,
-          fill: blue[500],
-          opacity: 0.3,
-        });
-        pathObjectsRef.current.push(...refPaths);
-        canvas.add(...refPaths);
-      }
-
-      for (let i = 0; i < fabricPaths.length; ++i) {
-        const fabricPath = fabricPaths[i];
+      for (let i = 0; i < mainFabricPaths.length; ++i) {
+        const mainFabricPath = mainFabricPaths[i];
+        const displayFabricPath = displayFabricPaths[i];
         let editing = false;
-        fabricPath.on("mousedblclick", () => {
+        mainFabricPath.on("mousedblclick", () => {
           editing = !editing;
           if (editing) {
-            fabricPath.controls = createPathControls(fabricPath, {
+            mainFabricPath.controls = createPathControls(mainFabricPath, {
               pointStyle: {
                 controlSize: 10.0,
                 controlFill: "white",
@@ -296,100 +311,132 @@ export function FabricGlyphCanvas({
                 strokeCompositeOperation: "difference",
               },
             });
-            fabricPath.hasBorders = false;
+            mainFabricPath.hasBorders = false;
           } else {
-            fabricPath.controls =
+            mainFabricPath.controls =
               fabric.controlsUtils.createObjectDefaultControls();
-            fabricPath.hasBorders = true;
+            mainFabricPath.hasBorders = true;
             deselectPathControls();
           }
-          fabricPath.setCoords();
+          mainFabricPath.setCoords();
           canvas.requestRenderAll();
         });
-        fabricPath.on("deselected", () => {
+        mainFabricPath.on("deselected", () => {
           deselectPathControls();
         });
-        fabricPath.on("modified", (event) => {
-          if (event.transform && currentPathRef.current) {
-            const scaleX = fabricPath.scaleX / (width / 1000);
-            const scaleY = fabricPath.scaleY / (height / 1000);
-            if (
-              event.transform.action === "scale" ||
-              event.transform.action === "scaleX" ||
-              event.transform.action === "scaleY"
-            ) {
-              currentPathRef.current.scalePath(i, scaleX, scaleY);
-            } else {
-              currentPathRef.current.updatePath(i, fabricPath);
-            }
-            onPathChangedRef.current?.(currentPathRef.current.clone());
+        mainFabricPath.on("moving", (event) => {
+          displayFabricPath.left = mainFabricPath.left;
+          displayFabricPath.top = mainFabricPath.top;
+          canvas.requestRenderAll();
+        });
+        mainFabricPath.on("scaling", (event) => {
+          displayFabricPath.left = mainFabricPath.left;
+          displayFabricPath.top = mainFabricPath.top;
+
+          const scaleX = mainFabricPath.scaleX / (width / 1000);
+          const scaleY = mainFabricPath.scaleY / (height / 1000);
+          const scaled = currentPathRef.current?.scalePath(i, scaleX, scaleY, {
+            verbose: true,
+          });
+          if (scaled) {
+            displayFabricPath.scaleX = width / 1000;
+            displayFabricPath.scaleY = height / 1000;
+            displayFabricPath.set({ path: scaled });
+            displayFabricPath.setBoundingBox();
+            displayFabricPath.setDimensions();
+            displayFabricPath.setCoords();
+          } else {
+            displayFabricPath.scaleX = mainFabricPath.scaleX;
+            displayFabricPath.scaleY = mainFabricPath.scaleY;
           }
+
+          canvas.requestRenderAll();
+        });
+        mainFabricPath.on("modified", (event) => {
+          console.log("modified", event);
+          // if (event.transform && currentPathRef.current) {
+          //   const scaleX = mainFabricPath.scaleX / (width / 1000);
+          //   const scaleY = mainFabricPath.scaleY / (height / 1000);
+          //   if (
+          //     event.transform.action === "scale" ||
+          //     event.transform.action === "scaleX" ||
+          //     event.transform.action === "scaleY"
+          //   ) {
+          //     currentPathRef.current.scalePath(i, scaleX, scaleY);
+          //   } else {
+          //     currentPathRef.current.updatePath(i, mainFabricPath);
+          //   }
+          //   onPathChangedRef.current?.(currentPathRef.current.clone());
+          // }
         });
       }
     }
 
-    canvas.add(...fabricPaths);
+    canvas.add(...mainFabricPaths, ...displayFabricPaths);
 
-    // Medial axis skeleton overlay
-    const medialSkeletons = currentPathRef.current?.getMedialSkeleton() ?? [];
-    const medialAxisLines = medialSkeletons.map((skeleton) => {
-      const pathData = skeleton.segments.flatMap((seg): TSimplePathData => {
-        const p0 = skeleton.points[seg[0]];
-        const p1 = skeleton.points[seg[1]];
-        return [["M", p0.x, p0.y], ["L", p1.x, p1.y], ["Z"]];
-      });
-      const bbox = fabricPathDataToPaper(pathData).bounds;
-      return new fabric.Path(pathData, {
-        left: bbox.center.x * (width / 1000),
-        top: bbox.center.y * (height / 1000),
-        scaleX: width / 1000,
-        scaleY: height / 1000,
-        stroke: "#FFFFAA",
-        strokeWidth: 2,
-        selectable: false,
-        evented: false,
-      });
-    });
-    const localPrimitives = medialSkeletons.flatMap((skeleton) => {
-      return skeleton.primitives.map((prim, primIdx) => {
-        const path: TSimplePathData = [];
-        for (let i = 0; i < prim.origins.length; ++i) {
-          const origin = prim.origins[i];
-          const dir = prim.directions[i];
-          const r = prim.radii[i];
-          const pt = origin.add(dir.multiply(r));
-          if (path.length === 0) {
-            path.push(["M", pt.x, pt.y]);
-          } else {
-            path.push(["L", pt.x, pt.y]);
-          }
-        }
-        path.push(["Z"]);
-        const bbox = fabricPathDataToPaper(path).bounds;
-        const color = [
-          "#AAAAFF",
-          "#FFAAAA",
-          "#AAFFAA",
-          "#ffd1fa",
-          "#96f8ff",
-          "#ffdac1",
-          "#72ffdb",
-        ][primIdx % 7];
-        return new fabric.Path(path, {
+    const drawSkeletons = false;
+    if (drawSkeletons) {
+      // Medial axis skeleton overlay
+      const medialSkeletons = currentPathRef.current?.getMedialSkeleton() ?? [];
+      const medialAxisLines = medialSkeletons.map((skeleton) => {
+        const pathData = skeleton.segments.flatMap((seg): TSimplePathData => {
+          const p0 = skeleton.points[seg[0]];
+          const p1 = skeleton.points[seg[1]];
+          return [["M", p0.x, p0.y], ["L", p1.x, p1.y], ["Z"]];
+        });
+        const bbox = fabricPathDataToPaper(pathData).bounds;
+        return new fabric.Path(pathData, {
           left: bbox.center.x * (width / 1000),
           top: bbox.center.y * (height / 1000),
           scaleX: width / 1000,
           scaleY: height / 1000,
-          stroke: color,
+          stroke: "#FFFFAA",
           strokeWidth: 2,
-          fill: null,
           selectable: false,
           evented: false,
         });
       });
-    });
-    otherObjectsRef.current.push(...medialAxisLines, ...localPrimitives);
-    canvas.add(...medialAxisLines, ...localPrimitives);
+      const localPrimitives = medialSkeletons.flatMap((skeleton) => {
+        return skeleton.primitives.map((prim, primIdx) => {
+          const path: TSimplePathData = [];
+          for (let i = 0; i < prim.origins.length; ++i) {
+            const origin = prim.origins[i];
+            const dir = prim.directions[i];
+            const r = prim.radii[i];
+            const pt = origin.add(dir.multiply(r));
+            if (path.length === 0) {
+              path.push(["M", pt.x, pt.y]);
+            } else {
+              path.push(["L", pt.x, pt.y]);
+            }
+          }
+          path.push(["Z"]);
+          const bbox = fabricPathDataToPaper(path).bounds;
+          const color = [
+            "#AAAAFF",
+            "#FFAAAA",
+            "#AAFFAA",
+            "#ffd1fa",
+            "#96f8ff",
+            "#ffdac1",
+            "#72ffdb",
+          ][primIdx % 7];
+          return new fabric.Path(path, {
+            left: bbox.center.x * (width / 1000),
+            top: bbox.center.y * (height / 1000),
+            scaleX: width / 1000,
+            scaleY: height / 1000,
+            stroke: color,
+            strokeWidth: 2,
+            fill: null,
+            selectable: false,
+            evented: false,
+          });
+        });
+      });
+      otherObjectsRef.current.push(...medialAxisLines, ...localPrimitives);
+      canvas.add(...medialAxisLines, ...localPrimitives);
+    }
 
     adjustStrokes(canvas);
   }, [path, width, height, interactive, adjustStrokes]);
@@ -409,10 +456,10 @@ export function FabricGlyphCanvas({
       canvas.requestRenderAll();
 
       currentPathRef.current.filterPaths((_, i) => {
-        return !activeObjects.includes(pathObjectsRef.current[i]);
+        return !activeObjects.includes(pathObjectsRef.current[i].main);
       });
       pathObjectsRef.current = pathObjectsRef.current.filter(
-        (fp) => !activeObjects.includes(fp),
+        (fp) => !activeObjects.includes(fp.main),
       );
       onPathChangedRef.current?.(currentPathRef.current.clone());
     }
@@ -425,7 +472,7 @@ export function FabricGlyphCanvas({
   // element itself. fabric.js moves the canvas into its own wrapper div on init,
   // so if React owned the canvas directly it would fail to remove it on unmount.
   return (
-    <div className={className}>
+    <div className={className} style={{ width, height }}>
       <canvas ref={canvasElemRef} />
     </div>
   );

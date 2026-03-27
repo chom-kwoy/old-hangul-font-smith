@@ -236,42 +236,6 @@ export default class PathData {
     this.#skeletons = null;
   }
 
-  updatePath(index: number, newPath: TSimplePathData | fabric.Path): void {
-    if (index >= 0 && index < this.#paths.length) {
-      if (newPath instanceof fabric.Path) {
-        if (!newPath.canvas) {
-          throw new Error("fabric.Path must be added to a canvas");
-        }
-        const [canvasWidth, canvasHeight] = [
-          newPath.canvas.width,
-          newPath.canvas.height,
-        ];
-        const bbox = fabricPathDataToPaper(newPath.path).bounds;
-        const [offsetX, offsetY] = [
-          newPath.left * (1000 / canvasWidth) - bbox.width / 2 - bbox.left,
-          newPath.top * (1000 / canvasHeight) - bbox.height / 2 - bbox.top,
-        ];
-        const [scaleX, scaleY] = [
-          newPath.scaleX / (canvasWidth / 1000),
-          newPath.scaleY / (canvasHeight / 1000),
-        ];
-        newPath = transformFabricPathData(
-          newPath.path,
-          offsetX,
-          offsetY,
-          bbox.center.x,
-          bbox.center.y,
-          scaleX,
-          scaleY,
-        );
-      }
-      this.#paths[index] = newPath;
-      this.#skeletons = null; // invalidate cache
-    } else {
-      throw new Error(`Invalid subpath index: ${index}`);
-    }
-  }
-
   scalePath(
     index: number,
     scaleX: number,
@@ -328,7 +292,7 @@ export default class PathData {
     newPath.simplify(0.1);
 
     // this.updatePath(index, newPath);
-    return newPath;
+    return paperToFabricPathData(newPath);
   }
 
   getMedialSkeleton(): FittedMedialAxisGraph[] {

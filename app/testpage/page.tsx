@@ -66,7 +66,9 @@ export default function TestPage() {
   return (
     <Box
       sx={{ display: "flex", justifyContent: "center", alignItems: "center" }}
+      className="h-screen w-screen bg-stone-100 flex-col"
     >
+      <div>GlyphView Test</div>
       <GlyphView
         className="outline outline-stone-500 rounded-lg overflow-hidden"
         width={700}
