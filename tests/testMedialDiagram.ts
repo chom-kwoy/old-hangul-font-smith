@@ -85,10 +85,14 @@ console.log(`Medial skeletons: ${medialSkeletons.length} in ${elapsedTime}ms`);
 for (const skeleton of medialSkeletons) {
   console.log(
     skeleton.segments
-      .map(
-        ([a, b]) =>
-          `polygon((${skeleton.points[a].x.toFixed(1)},${(-skeleton.points[a].y).toFixed(1)}),(${skeleton.points[b].x.toFixed(1)},${(-skeleton.points[b].y).toFixed(1)}))`,
-      )
+      .map(([a, b]) => {
+        const p1 = skeleton.points[a];
+        const p2 = skeleton.points[b];
+        return (
+          `polygon((${p1.x.toFixed(1)},${(1000 - p1.y).toFixed(1)}),` +
+          `(${p2.x.toFixed(1)},${(1000 - p2.y).toFixed(1)}))`
+        );
+      })
       .join(","),
   );
   skeleton.primitives.forEach((primitive, i) => {
@@ -99,7 +103,7 @@ for (const skeleton of medialSkeletons) {
           const p = origin.add(
             primitive.directions[i].multiply(primitive.radii[i]),
           );
-          return `(${p.x.toFixed(2)},${(1000 - p.y).toFixed(2)}+k)`;
+          return `(${p.x.toFixed(2)}+k,${(1000 - p.y).toFixed(2)})`;
         })
         .join(",") + "\n",
     );

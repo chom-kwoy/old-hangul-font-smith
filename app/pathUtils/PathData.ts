@@ -260,7 +260,7 @@ export default class PathData {
     }
   }
 
-  getRegAndBold(strokeWidth: number, boldnessFactor: number) {
+  genRegAndBold(strokeWidth: number, boldnessFactor: number) {
     const skeletons = this.getMedialSkeleton();
 
     function getPrimitivePoints(primitives: Primitive[]) {
@@ -273,64 +273,82 @@ export default class PathData {
       });
     }
 
+    // needs to be scaled for clipper js lib
+    const clipperScale = 10000.0;
+
+    // specifies how important the tangent angles are for aligning the two paths
+    const tangentWeight = 50.0;
     const offsetAmount = strokeWidth * (boldnessFactor - 1.0);
+
+    function offsetPoints(primitive: paper.Point[]) {
+      const shape = new Shape(
+        [
+          primitive.map((p) => ({
+            X: p.x * clipperScale,
+            Y: p.y * clipperScale,
+          })),
+        ],
+        true,
+      );
+      const boldShape = shape.offset(offsetAmount * clipperScale, {});
+      return boldShape
+        .mapToLower()[0]
+        .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
+        .toReversed();
+    }
 
     const regular: paper.Point[][][] = [];
     const bold: paper.Point[][][] = [];
     for (const skeleton of skeletons) {
-      const regPrimitives = getPrimitivePoints(skeleton.primitives);
+      const regPrimitives = getPrimitivePoints(skeleton.primitives).map(
+        (regPoints) => {
+          return regPoints; // interpolatePoints(regPoints, 1.0);
+        },
+      );
       const boldPrimitives = regPrimitives.map((primitive, i) => {
-        const regPoints = regPrimitives[i];
-        const scale = 1000.0; // needs to be scaled for clipper js lib
-        const shape = new Shape(
-          [primitive.map((p) => ({ X: p.x * scale, Y: p.y * scale }))],
-          true,
-        );
-        const boldShape = shape.offset(offsetAmount * scale, {});
-        let boldPoints = boldShape
-          .mapToLower()[0]
-          .map((p) => new paper.Point(p.x / scale, p.y / scale))
-          .toReversed();
+        const regPoints = primitive;
+        let boldPoints = offsetPoints(primitive);
 
         // interpolate points so that they are spaced roughly 1 unit apart
-        const interpolated: paper.Point[] = [];
-        const tgtDst = 1.0;
-        for (let j = 0; j < boldPoints.length; ++j) {
-          const p0 = boldPoints[j];
-          const p1 = boldPoints[(j + 1) % boldPoints.length];
-          const dst = p0.getDistance(p1);
-          const n = Math.ceil(dst / tgtDst);
-          for (let k = 0; k < n; ++k) {
-            const t = (k + 1) / (n + 1);
-            interpolated.push(p0.add(p1.subtract(p0).multiply(t)));
-          }
-        }
-        boldPoints = interpolated;
+        boldPoints = interpolatePoints(boldPoints, 2.0);
 
-        // match first points
-        const firstOrigin = skeleton.primitives[i].origins[0];
-        const firstDir = skeleton.primitives[i].directions[0];
-        const firstRad = skeleton.primitives[i].radii[0];
-        const line = new paper.Path.Line(
-          firstOrigin,
-          firstOrigin.add(firstDir.multiply(firstRad)),
-        );
-        let minDst = Infinity;
+        // Compute tangents for both polygons. Bold points are dense,
+        // so use a wider half-window to average out the stairstepping
+        // from linear interpolation between clipper vertices.
+        const regTangents = computePolygonTangents(regPoints, 1);
+        const allBoldTangents = computePolygonTangents(boldPoints, 5);
+
+        // Find the bold start index that minimizes a combined position +
+        // tangent-alignment cost. Pure position matching can pick the wrong end
+        // of a symmetric stroke; tangent weighting breaks the tie.
+        const regTan0 = regTangents[0];
+        let minCost = Infinity;
         let minIdx = 0;
         for (let j = 0; j < boldPoints.length; ++j) {
-          const nearest = line.getNearestPoint(boldPoints[j]);
-          const dst = nearest.getDistance(boldPoints[j]);
-          if (dst < minDst) {
-            minDst = dst;
+          const posDist = regPoints[0].getDistance(boldPoints[j]);
+          const bt = allBoldTangents[j];
+          const dot = regTan0.x * bt.x + regTan0.y * bt.y;
+          const totalCost = posDist + tangentWeight * (1 - dot);
+          if (totalCost < minCost) {
+            minCost = totalCost;
             minIdx = j;
           }
         }
-        // shuffle list so that minIdx becomes 0th index
+        // shuffle both arrays so minIdx becomes index 0
         boldPoints = boldPoints
           .slice(minIdx)
           .concat(boldPoints.slice(0, minIdx));
+        const boldTangents = allBoldTangents
+          .slice(minIdx)
+          .concat(allBoldTangents.slice(0, minIdx));
 
-        const mapping = matchTwoShapes(regPoints, boldPoints);
+        const mapping = matchTwoShapes(
+          regPoints,
+          regTangents,
+          boldPoints,
+          boldTangents,
+          tangentWeight,
+        );
 
         return mapping.map((j) => boldPoints[j]);
       });
@@ -366,7 +384,7 @@ export default class PathData {
     verbose = verbose ?? false;
 
     const skeletons = this.getMedialSkeleton();
-    const regAndBold = this.getRegAndBold(strokeWidth, boldnessFactor);
+    const regAndBold = this.genRegAndBold(strokeWidth, boldnessFactor);
     if (index < 0 || index >= skeletons.length) {
       throw new Error(`Invalid subpath index: ${index}`);
     }
@@ -384,6 +402,23 @@ export default class PathData {
         console.log(
           `bold primitive #${i}: ${prim.length} vertices\n` +
             prim.map((p) => pr(p, 500)).join(",") +
+            "\n",
+        );
+      });
+
+      console.log("correspondences: ");
+      regPrimitives.map((regPrim, i) => {
+        const boldPrim = boldPrimitives[i];
+
+        console.log(
+          `correspondence #${i}:\n` +
+            regPrim
+              .map((regPt, j) => {
+                const boldPt = boldPrim[j];
+                // return `polygon(${pr(regPt, 500)},${pr(boldPt, 500)})`;
+                return `(t*${(regPt.x + 500).toFixed(1)}+(1-t)*${(boldPt.x + 500).toFixed(1)},u*${(1000 - regPt.y).toFixed(1)}+(1-u)*${(1000 - boldPt.y).toFixed(1)})`;
+              })
+              .join(",") +
             "\n",
         );
       });
@@ -412,6 +447,7 @@ export default class PathData {
       for (let j = 0; j < regPrimitive.length; ++j) {
         const pr = regPrimitive[j];
         const pb = boldPrimitive[j];
+        const dist = pr.getDistance(pb);
         const newPoint = new paper.Point({
           x: qx * pr.x + (1 - qx) * pb.x,
           y: qy * pr.y + (1 - qy) * pb.y,
@@ -468,43 +504,64 @@ export default class PathData {
   }
 }
 
+// Returns a unit tangent for each point using a central-difference window of
+// ±halfWindow steps (treats the array as a closed loop).
+function computePolygonTangents(
+  points: paper.Point[],
+  halfWindow = 1,
+): paper.Point[] {
+  const n = points.length;
+  return points.map((_, i) => {
+    const prev = points[(i - halfWindow + n) % n];
+    const next = points[(i + halfWindow) % n];
+    const t = next.subtract(prev);
+    return t.length > 1e-10 ? t.normalize() : new paper.Point(1, 0);
+  });
+}
+
+// DTW-based point matching. The cost of pairing reg point i with bold point j
+// is: position_distance + tangentWeight * (1 - dot(tA[i], tB[j])).
+// The tangent term (∈ [0,2]) steers the warp path away from matches where the
+// outline tangents are not parallel, reducing kinks in the interpolated result.
 function matchTwoShapes(
   shapeA: paper.Point[],
+  tangentsA: paper.Point[],
   shapeB: paper.Point[],
+  tangentsB: paper.Point[],
+  tangentWeight: number,
 ): number[] {
   const n = shapeA.length;
   const m = shapeB.length;
 
   if (n === 0 || m === 0) return [];
 
+  function pointCost(i: number, j: number): number {
+    const posCost = shapeA[i].getDistance(shapeB[j]);
+    const tA = tangentsA[i];
+    const tB = tangentsB[j];
+    const dot = tA.x * tB.x + tA.y * tB.y;
+    return posCost + tangentWeight * (1 - dot);
+  }
+
   const dtw: number[][] = Array.from({ length: n }, () =>
     Array(m).fill(Infinity),
   );
 
-  // Initialize the starting point
-  dtw[0][0] = shapeA[0].getDistance(shapeB[0]);
+  dtw[0][0] = pointCost(0, 0);
 
-  // Fill the first column
   for (let i = 1; i < n; i++) {
-    dtw[i][0] = dtw[i - 1][0] + shapeA[i].getDistance(shapeB[0]);
+    dtw[i][0] = dtw[i - 1][0] + pointCost(i, 0);
   }
 
-  // Fill the first row
   for (let j = 1; j < m; j++) {
-    dtw[0][j] = dtw[0][j - 1] + shapeA[0].getDistance(shapeB[j]);
+    dtw[0][j] = dtw[0][j - 1] + pointCost(0, j);
   }
 
-  // Populate the rest of the cost matrix
   for (let i = 1; i < n; i++) {
     for (let j = 1; j < m; j++) {
-      const cost = shapeA[i].getDistance(shapeB[j]);
       dtw[i][j] =
-        cost +
-        Math.min(
-          dtw[i - 1][j], // insertion
-          dtw[i][j - 1], // deletion
-          dtw[i - 1][j - 1], // match
-        );
+        pointCost(i, j) +
+        Math.min(dtw[i - 1][j], dtw[i][j - 1], dtw[i - 1][j - 1]);
     }
   }
 
@@ -512,7 +569,6 @@ function matchTwoShapes(
   let i = n - 1;
   let j = m - 1;
 
-  // Backtrack to find the optimal path
   while (i > 0 || j > 0) {
     mapping[i] = j;
 
@@ -522,8 +578,6 @@ function matchTwoShapes(
       i--;
     } else {
       const minCost = Math.min(dtw[i - 1][j - 1], dtw[i - 1][j], dtw[i][j - 1]);
-
-      // Determine the direction of the optimal step
       if (minCost === dtw[i - 1][j - 1]) {
         i--;
         j--;
@@ -535,15 +589,8 @@ function matchTwoShapes(
     }
   }
 
-  // Map the starting point
   mapping[0] = 0;
-
   return mapping;
-}
-
-function smoothstep(edge0: number, edge1: number, x: number) {
-  const t = Math.max(0.0, Math.min(1.0, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3.0 - 2.0 * t);
 }
 
 function transformFabricPathData(
@@ -657,4 +704,19 @@ export function splitPaths(path: TSimplePathData): TSimplePathData[] {
     }
   }
   return result;
+}
+
+function interpolatePoints(boldPoints: paper.Point[], tgtDst: number) {
+  const interpolated: paper.Point[] = [];
+  for (let j = 0; j < boldPoints.length; ++j) {
+    const p0 = boldPoints[j];
+    const p1 = boldPoints[(j + 1) % boldPoints.length];
+    const dst = p0.getDistance(p1);
+    const n = Math.ceil(dst / tgtDst);
+    for (let k = 0; k < n; ++k) {
+      const t = (k + 1) / (n + 1);
+      interpolated.push(p0.add(p1.subtract(p0).multiply(t)));
+    }
+  }
+  return interpolated;
 }

@@ -173,7 +173,7 @@ function resamplePoints(
   let segIdx = 0;
   for (let k = 0; k < N; k++) {
     const targetLen = k * spacing;
-    while (segIdx < N - 1 && cumLen[segIdx + 1] <= targetLen) segIdx++;
+    while (segIdx < N && cumLen[segIdx + 1] <= targetLen) segIdx++;
 
     const next = (segIdx + 1) % N;
     const segLen = cumLen[segIdx + 1] - cumLen[segIdx];
