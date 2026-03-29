@@ -347,11 +347,6 @@ export function FabricGlyphCanvas({
         mainFabricPath.on("deselected", () => {
           deselectPathControls();
         });
-        mainFabricPath.on("moving", () => {
-          displayFabricPath.left = mainFabricPath.left;
-          displayFabricPath.top = mainFabricPath.top;
-          canvas.requestRenderAll();
-        });
         let baseScaleX = 1.0;
         let baseScaleY = 1.0;
         const origBounds = mainFabricPath.getBoundingRect();
@@ -361,6 +356,11 @@ export function FabricGlyphCanvas({
         };
         let boundOffsetX = 0;
         let boundOffsetY = 0;
+        mainFabricPath.on("moving", () => {
+          displayFabricPath.left = mainFabricPath.left + boundOffsetX;
+          displayFabricPath.top = mainFabricPath.top + boundOffsetY;
+          canvas.requestRenderAll();
+        });
         mainFabricPath.on("scaling", async () => {
           displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
           displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
