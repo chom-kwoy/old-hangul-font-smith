@@ -87,7 +87,7 @@ export class WorkerPool<
   constructor(workerFactory: () => Worker | null, poolSize: number) {
     this.#workers = Array.from(
       { length: poolSize },
-      () => new WorkerHarness<ReqT, RetT>(workerFactory()),
+      (v, i) => new WorkerHarness<ReqT, RetT>(workerFactory(), i),
     );
   }
 
