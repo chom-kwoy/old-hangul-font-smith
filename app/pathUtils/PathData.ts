@@ -64,6 +64,11 @@ class PathWorker {
     });
   }
 
+  async skeletonizePath(path: TSimplePathData): Promise<FittedMedialAxisGraph> {
+    const result = await this.requestTask({ type: "skeletonizePath", path });
+    return result.skeleton;
+  }
+
   async scalePath(
     path: TSimplePathData,
     skeleton: FittedMedialAxisGraph,
@@ -86,6 +91,7 @@ export type SerializedPathData = {
 
 export default class PathData {
   #paths: TSimplePathData[] = [];
+  #skeletonPromise: Promise<FittedMedialAxisGraph[]> | null = null;
   #skeletons: FittedMedialAxisGraph[] | null = null;
 
   constructor(paths: TSimplePathData[]) {
@@ -316,7 +322,7 @@ export default class PathData {
     }
 
     const path = this.#paths[index];
-    const skeleton = this.getMedialSkeleton()[index];
+    const skeleton = (await this.getMedialSkeleton())[index];
 
     return pathWorker.scalePath(path, skeleton, {
       scaleX,
@@ -328,22 +334,14 @@ export default class PathData {
     });
   }
 
-  getMedialSkeleton(): FittedMedialAxisGraph[] {
+  async getMedialSkeleton(): Promise<FittedMedialAxisGraph[]> {
     if (this.#skeletons === null) {
-      this.#skeletons = this.#paths.map((subpath) => {
-        const paperPath = fabricPathDataToPaper(subpath);
-        const medialAxis = extractMedialAxis(paperPath);
-        const medialSkeletonPoints = computeMedialSkeletonPoints(
-          paperPath,
-          medialAxis,
+      if (this.#skeletonPromise === null) {
+        this.#skeletonPromise = Promise.all(
+          this.#paths.map((subpath) => pathWorker.skeletonizePath(subpath)),
         );
-        const medialSkeleton = constructMedialSkeleton(
-          medialSkeletonPoints,
-          medialAxis,
-          paperPath,
-        );
-        return localPrimitiveFitting(paperPath, medialSkeleton);
-      });
+      }
+      this.#skeletons = await this.#skeletonPromise;
     }
     return this.#skeletons;
   }

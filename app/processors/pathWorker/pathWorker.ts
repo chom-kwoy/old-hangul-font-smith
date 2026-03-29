@@ -6,7 +6,13 @@ import {
   fabricPathDataToPaper,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
-import { Primitive } from "@/app/pathUtils/localPrimitiveFitting";
+import {
+  Primitive,
+  localPrimitiveFitting,
+} from "@/app/pathUtils/localPrimitiveFitting";
+import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
+import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
+import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
 import {
   MessageFromPathWorker,
   MessageToPathWorker,
@@ -38,7 +44,26 @@ console.log("Path worker loaded");
 async function handleEvent(
   event: MessageEvent<MessageToPathWorker>,
 ): Promise<MessageFromPathWorker> {
-  if (event.data.type === "scalePath") {
+  if (event.data.type === "skeletonizePath") {
+    const subpath = event.data.path;
+    const paperPath = fabricPathDataToPaper(subpath);
+    const medialAxis = extractMedialAxis(paperPath);
+    const medialSkeletonPoints = computeMedialSkeletonPoints(
+      paperPath,
+      medialAxis,
+    );
+    const medialSkeleton = constructMedialSkeleton(
+      medialSkeletonPoints,
+      medialAxis,
+      paperPath,
+    );
+    const result = localPrimitiveFitting(paperPath, medialSkeleton);
+    return {
+      type: "skeletonizePath",
+      reqId: event.data.reqId,
+      skeleton: result,
+    };
+  } else if (event.data.type === "scalePath") {
     const path = event.data.path;
     const skeleton = event.data.skeleton;
     const options = event.data.options;
