@@ -1,6 +1,7 @@
-import { amber, blue, teal } from "@mui/material/colors";
+import { amber, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
+import paper from "paper";
 import React, { useCallback, useEffect, useRef } from "react";
 
 import PathData from "@/app/pathUtils/PathData";
@@ -329,36 +330,51 @@ export function FabricGlyphCanvas({
           displayFabricPath.top = mainFabricPath.top;
           canvas.requestRenderAll();
         });
+        const enableRescaling = true;
+        let baseScaleX = 1.0;
+        let baseScaleY = 1.0;
         mainFabricPath.on("scaling", async (event) => {
-          const scaleX = mainFabricPath.scaleX / (width / 1000);
-          const scaleY = mainFabricPath.scaleY / (height / 1000);
           displayFabricPath.left = mainFabricPath.left;
           displayFabricPath.top = mainFabricPath.top;
-          displayFabricPath.scaleX = mainFabricPath.scaleX;
-          displayFabricPath.scaleY = mainFabricPath.scaleY;
+          displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
+          displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
           canvas.requestRenderAll();
 
-          const scaled = await currentPathRef.current?.scalePath(
-            i,
-            scaleX,
-            scaleY,
-            {
-              doSimplify: false,
-              verbose: false,
-            },
-          );
-          if (scaled) {
-            displayFabricPath.scaleX = width / 1000;
-            displayFabricPath.scaleY = height / 1000;
-            displayFabricPath.set({ path: scaled });
-            displayFabricPath.setBoundingBox();
-            displayFabricPath.setDimensions();
-            displayFabricPath.setCoords();
-            canvas.requestRenderAll();
+          if (enableRescaling) {
+            const scaleX = mainFabricPath.scaleX / (width / 1000);
+            const scaleY = mainFabricPath.scaleY / (height / 1000);
+            const scaled = await currentPathRef.current?.scalePath(
+              i,
+              scaleX,
+              scaleY,
+              {
+                strokeWidth: 40.0,
+                doSimplify: false,
+                verbose: false,
+              },
+            );
+            if (scaled) {
+              baseScaleX = scaleX;
+              baseScaleY = scaleY;
+
+              const newScaleX = mainFabricPath.scaleX / (width / 1000);
+              const newScaleY = mainFabricPath.scaleY / (height / 1000);
+              displayFabricPath.scaleX = width / 1000;
+              displayFabricPath.scaleY = height / 1000;
+              displayFabricPath.scaleX *= newScaleX / baseScaleX;
+              displayFabricPath.scaleY *= newScaleY / baseScaleY;
+
+              displayFabricPath.set({ path: scaled });
+              displayFabricPath.setBoundingBox();
+              displayFabricPath.setDimensions();
+              displayFabricPath.setCoords();
+              canvas.requestRenderAll();
+            }
           }
         });
         mainFabricPath.on("modified", (event) => {
           console.log("modified", event);
+          // TODO: run scalePath with simplify and smoothing on
           // if (event.transform && currentPathRef.current) {
           //   const scaleX = mainFabricPath.scaleX / (width / 1000);
           //   const scaleY = mainFabricPath.scaleY / (height / 1000);
@@ -408,7 +424,9 @@ export function FabricGlyphCanvas({
             const origin = prim.origins[i];
             const dir = prim.directions[i];
             const r = prim.radii[i];
-            const pt = origin.add(dir.multiply(r));
+            const pt = new paper.Point(origin).add(
+              new paper.Point(dir).multiply(r),
+            );
             if (path.length === 0) {
               path.push(["M", pt.x, pt.y]);
             } else {

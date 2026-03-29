@@ -45,10 +45,10 @@ class PathWorker {
         throw new Error("PathWorker is not initialized");
       }
       const reqId = Math.random();
-      this.#worker.onmessage = (event: MessageEvent<MessageFromPathWorker>) => {
+      const listener = (event: MessageEvent<MessageFromPathWorker>) => {
         const msg = event.data;
-        console.log("Received PathWorker message:", msg);
         if (msg.reqId === reqId) {
+          this.#worker?.removeEventListener("message", listener);
           if (msg.type === request.type) {
             resolve(msg as Ret);
           } else {
@@ -56,6 +56,7 @@ class PathWorker {
           }
         }
       };
+      this.#worker.addEventListener("message", listener);
       this.#worker.postMessage({
         reqId: reqId,
         ...request,
