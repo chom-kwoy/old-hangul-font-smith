@@ -336,7 +336,8 @@ export function FabricGlyphCanvas({
           const scaleX = mainFabricPath.scaleX / (width / 1000);
           const scaleY = mainFabricPath.scaleY / (height / 1000);
           const scaled = currentPathRef.current?.scalePath(i, scaleX, scaleY, {
-            verbose: true,
+            doSimplify: false,
+            verbose: false,
           });
           if (scaled) {
             displayFabricPath.scaleX = width / 1000;

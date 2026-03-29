@@ -121,7 +121,10 @@ for (const skeleton of medialSkeletons) {
 
 for (let i = 0; i < 10; i++) {
   startTime = Date.now();
-  const newPath = path.scalePath(0, 0.6, 0.8, { verbose: false });
+  const newPath = path.scalePath(0, 0.6, 1.5, {
+    doSimplify: false,
+    verbose: false,
+  });
   elapsedTime = Date.now() - startTime;
 
   console.log(`Scaled path in ${elapsedTime}ms`);

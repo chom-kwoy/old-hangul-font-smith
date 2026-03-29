@@ -243,17 +243,20 @@ export default class PathData {
     {
       scaleStroke,
       strokeWidth,
+      doSimplify,
       verbose,
     }: {
       // 0 means stroke is fixed, 1 means fully scaled
       scaleStroke?: number;
       // the original font's average stroke width
       strokeWidth?: number;
+      doSimplify?: boolean;
       verbose?: boolean;
     } = {},
   ) {
     scaleStroke = scaleStroke ?? 0.6;
     strokeWidth = strokeWidth ?? 60.0;
+    doSimplify = doSimplify ?? true;
     verbose = verbose ?? false;
 
     if (index < 0 || index >= this.#paths.length) {
@@ -288,8 +291,10 @@ export default class PathData {
           }),
       ),
     );
-    // newPath.smooth({ type: "catmull-rom", factor: 0.5 });
-    newPath.simplify(0.1);
+    if (doSimplify) {
+      // newPath.smooth({ type: "catmull-rom", factor: 0.5 });
+      newPath.simplify(0.1);
+    }
 
     // this.updatePath(index, newPath);
     return paperToFabricPathData(newPath);
@@ -334,41 +339,60 @@ function scalePathImpl(
   const revScaleY = Math.pow(1 / scaleY, scaleStroke);
   const tgtStrokeX = strokeWidth * revScaleX;
   const tgtStrokeY = strokeWidth * revScaleY;
-
-  const finalScale = Math.min(Math.min(revScaleX, revScaleY) * 0.999, 1.0);
-  const offsetX = (tgtStrokeX / finalScale - strokeWidth) / 2;
-  const offsetY = (tgtStrokeY / finalScale - strokeWidth) / 2;
-
-  const offsetAmount = 10.0;
-  const preScaleX = offsetAmount / offsetX;
-  const preScaleY = offsetAmount / offsetY;
+  const offsetX = (tgtStrokeX - strokeWidth) / 2;
+  const offsetY = (tgtStrokeY - strokeWidth) / 2;
 
   if (verbose) {
     console.log(
       `scaleX: ${scaleX}, scaleY: ${scaleY}\n` +
         `revScaleX: ${revScaleX}, revScaleY: ${revScaleY}\n` +
-        `offsetX: ${offsetX}, offsetY: ${offsetY}, finalScale: ${finalScale}\n` +
-        `preScaleX: ${preScaleX}, preScaleY: ${preScaleY}, offsetAmount: ${offsetAmount}`,
+        `offsetX: ${offsetX}, offsetY: ${offsetY}`,
     );
   }
 
-  points = points.map((p) => new paper.Point(p.x - centerX, p.y - centerY));
-  const preScaledPts = scalePoints(points, preScaleX, preScaleY);
-  const offsetPts = offsetPoints(preScaledPts, offsetAmount);
-  const scaledPts = scalePoints(
-    offsetPts,
-    (finalScale / preScaleX) * scaleX,
-    (finalScale / preScaleY) * scaleY,
-  );
-  const result = scaledPts.map(
-    (p) => new paper.Point(p.x + centerX, p.y + centerY),
+  const clipperScale = 10000.0;
+  const tinyStep = 1 / clipperScale;
+  if (offsetX !== 0) {
+    points = minkowskiSum(
+      points,
+      [
+        new paper.Point(Math.abs(offsetX), -tinyStep),
+        new paper.Point(-Math.abs(offsetX), -tinyStep),
+        new paper.Point(-Math.abs(offsetX), tinyStep),
+        new paper.Point(Math.abs(offsetX), tinyStep),
+      ],
+      offsetX > 0 ? "expand" : "shrink",
+      clipperScale,
+    );
+  }
+  if (offsetY !== 0) {
+    points = minkowskiSum(
+      points,
+      [
+        new paper.Point(-tinyStep, Math.abs(offsetY)),
+        new paper.Point(-tinyStep, -Math.abs(offsetY)),
+        new paper.Point(tinyStep, -Math.abs(offsetY)),
+        new paper.Point(tinyStep, Math.abs(offsetY)),
+      ],
+      offsetY > 0 ? "expand" : "shrink",
+      clipperScale,
+    );
+  }
+
+  // scale the points
+  points = points.map(
+    (pt) =>
+      new paper.Point(
+        (pt.x - centerX) * scaleX + centerX,
+        (pt.y - centerY) * scaleY + centerY,
+      ),
   );
 
   if (verbose) {
-    console.log(result.map((p) => pr(p)).join(",") + "\n");
+    console.log(points.map((p) => pr(p)).join(",") + "\n");
   }
 
-  return result;
+  return points;
 }
 
 function getPrimitivePoints(primitives: Primitive[]) {
@@ -381,38 +405,53 @@ function getPrimitivePoints(primitives: Primitive[]) {
   });
 }
 
-function scalePoints(points: paper.Point[], scaleX: number, scaleY: number) {
-  const result: paper.Point[] = [];
-  for (const p of points) {
-    result.push(new paper.Point(p.x * scaleX, p.y * scaleY));
+function minkowskiSum(
+  points: paper.Point[],
+  pattern: paper.Point[],
+  type: "expand" | "shrink",
+  clipperScale = 10000.0,
+) {
+  let scaledPoints = [
+    points
+      .map((p) => ({
+        x: p.x * clipperScale,
+        y: p.y * clipperScale,
+      }))
+      .toReversed(),
+  ];
+  // make the shape into a 'hole'
+  if (type === "shrink") {
+    const amin = -10000 * clipperScale;
+    const amax = 10000 * clipperScale;
+    scaledPoints = [
+      [
+        { x: amin, y: amax },
+        { x: amin, y: amin },
+        { x: amax, y: amin },
+        { x: amax, y: amax },
+      ],
+      scaledPoints[0].toReversed(),
+    ];
   }
-  return result;
-}
-
-function offsetPoints(primitive: paper.Point[], offsetAmount: number) {
-  // needs to be scaled for clipper js lib
-  const clipperScale = 10000.0;
-  const result = clipper.offsetToPaths({
-    delta: offsetAmount * clipperScale,
-    offsetInputs: [
-      {
-        data: primitive
-          .map((p) => ({
-            x: p.x * clipperScale,
-            y: p.y * clipperScale,
-          }))
-          .toReversed(),
-        joinType: JoinType.Miter,
-        endType: EndType.ClosedPolygon,
-      },
-    ],
-  });
-  if (result === undefined) {
-    throw new Error("clipper.offsetToPaths failed");
-  }
-  return result[0]
-    .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
+  const scaledPattern = pattern
+    .map((p) => ({
+      x: p.x * clipperScale,
+      y: p.y * clipperScale,
+    }))
     .toReversed();
+  const result = clipper.minkowskiSumPaths(scaledPattern, scaledPoints, true);
+  if (result === undefined) {
+    throw new Error("clipper.minkowskiSumPath failed");
+  }
+  if (type === "expand") {
+    return result[0]
+      .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
+      .toReversed();
+  } else {
+    return result[1].map(
+      (p) => new paper.Point(p.x / clipperScale, p.y / clipperScale),
+    );
+  }
 }
 
 function unionPaths(primitives: paper.Point[][]): paper.Point[][] {
@@ -439,67 +478,6 @@ function unionPaths(primitives: paper.Point[][]): paper.Point[][] {
       .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
       .toReversed(),
   );
-}
-
-// Returns a unit tangent for each point using a central-difference window of
-// ±halfWindow steps (treats the array as a closed loop).
-function computePolygonTangents(
-  points: paper.Point[],
-  halfWindow = 1,
-): paper.Point[] {
-  const n = points.length;
-  return points.map((_, i) => {
-    const prev = points[(i - halfWindow + n) % n];
-    const next = points[(i + halfWindow) % n];
-    const t = next.subtract(prev);
-    return t.length > 1e-10 ? t.normalize() : new paper.Point(1, 0);
-  });
-}
-
-function transformFabricPathData(
-  path: TSimplePathData,
-  dx: number,
-  dy: number,
-  cx: number,
-  cy: number,
-  sx: number,
-  sy: number,
-): TSimplePathData {
-  const result: TSimplePathData = [];
-  function trX(x: number): number {
-    return (x - cx) * sx + cx + dx;
-  }
-  function trY(y: number): number {
-    return (y - cy) * sy + cy + dy;
-  }
-  for (const cmd of path) {
-    switch (cmd[0]) {
-      case "M": // move to
-        result.push(["M", trX(cmd[1]), trY(cmd[2])]);
-        break;
-      case "L": // line to
-        result.push(["L", trX(cmd[1]), trY(cmd[2])]);
-        break;
-      case "Q": // quadratic bezier curve
-        result.push(["Q", trX(cmd[1]), trY(cmd[2]), trX(cmd[3]), trY(cmd[4])]);
-        break;
-      case "C": // cubic bezier curve
-        result.push([
-          "C",
-          trX(cmd[1]),
-          trY(cmd[2]),
-          trX(cmd[3]),
-          trY(cmd[4]),
-          trX(cmd[5]),
-          trY(cmd[6]),
-        ]);
-        break;
-      case "Z": // close path
-        result.push(["Z"]);
-        break;
-    }
-  }
-  return result;
 }
 
 // splits a single compound path into multiple paths, preserving holes
@@ -567,19 +545,4 @@ export function splitPaths(path: TSimplePathData): TSimplePathData[] {
     }
   }
   return result;
-}
-
-function interpolatePoints(boldPoints: paper.Point[], tgtDst: number) {
-  const interpolated: paper.Point[] = [];
-  for (let j = 0; j < boldPoints.length; ++j) {
-    const p0 = boldPoints[j];
-    const p1 = boldPoints[(j + 1) % boldPoints.length];
-    const dst = p0.getDistance(p1);
-    const n = Math.ceil(dst / tgtDst);
-    for (let k = 0; k < n; ++k) {
-      const t = (k + 1) / (n + 1);
-      interpolated.push(p0.add(p1.subtract(p0).multiply(t)));
-    }
-  }
-  return interpolated;
 }
