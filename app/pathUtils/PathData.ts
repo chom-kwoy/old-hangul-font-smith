@@ -10,58 +10,30 @@ import {
   intersectCompoundPath,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
-import {
-  FittedMedialAxisGraph,
-  localPrimitiveFitting,
-} from "@/app/pathUtils/localPrimitiveFitting";
-import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
-import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
-import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
+import { FittedMedialAxisGraph } from "@/app/pathUtils/localPrimitiveFitting";
 import {
   MessageFromPathWorker,
   MessageToPathWorker,
   PathScaleOptions,
 } from "@/app/processors/pathWorker/pathWorkerTypes";
+import { WorkerHarness } from "@/app/utils/WorkerHarness";
 import { Bounds } from "@/app/utils/types";
 
-class PathWorker {
-  readonly #worker: Worker | null = null;
-
+class PathWorker extends WorkerHarness<
+  MessageToPathWorker,
+  MessageFromPathWorker
+> {
   constructor() {
     if (typeof window !== "undefined") {
-      this.#worker = new Worker(
-        new URL("../processors/pathWorker/pathWorker.ts", import.meta.url),
-        { type: "module" },
+      super(
+        new Worker(
+          new URL("../processors/pathWorker/pathWorker.ts", import.meta.url),
+          { type: "module" },
+        ),
       );
+    } else {
+      super(null);
     }
-  }
-
-  async requestTask<R extends Omit<MessageToPathWorker, "reqId">>(
-    request: R,
-  ): Promise<Extract<MessageFromPathWorker, { type: R["type"] }>> {
-    type Ret = Extract<MessageFromPathWorker, { type: R["type"] }>;
-    return new Promise((resolve, reject) => {
-      if (this.#worker === null) {
-        throw new Error("PathWorker is not initialized");
-      }
-      const reqId = Math.random();
-      const listener = (event: MessageEvent<MessageFromPathWorker>) => {
-        const msg = event.data;
-        if (msg.reqId === reqId) {
-          this.#worker?.removeEventListener("message", listener);
-          if (msg.type === request.type) {
-            resolve(msg as Ret);
-          } else {
-            reject(new Error(`Unexpected message type: ${msg.type}`));
-          }
-        }
-      };
-      this.#worker.addEventListener("message", listener);
-      this.#worker.postMessage({
-        reqId: reqId,
-        ...request,
-      });
-    });
   }
 
   async skeletonizePath(path: TSimplePathData): Promise<FittedMedialAxisGraph> {
@@ -343,6 +315,10 @@ export default class PathData {
       }
       this.#skeletons = await this.#skeletonPromise;
     }
+    return this.#skeletons;
+  }
+
+  getMedialSkeletonIfAvailable(): FittedMedialAxisGraph[] | null {
     return this.#skeletons;
   }
 }

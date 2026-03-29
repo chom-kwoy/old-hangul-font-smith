@@ -38,6 +38,7 @@ addEventListener(
     postMessage(result);
   },
 );
+postMessage("workerReady");
 
 console.log("Path worker loaded");
 

@@ -75,6 +75,7 @@ export function FabricGlyphCanvas({
       width,
       height,
       backgroundColor: "white",
+      selectionFullyContained: true,
     });
 
     const minZoom = Math.min(width, height) / 1000;
@@ -267,6 +268,9 @@ export function FabricGlyphCanvas({
 
     currentPathRef.current = path ? path.clone() : null;
 
+    // asynchronously compute the medial axis skeleton
+    currentPathRef.current?.getMedialSkeleton();
+
     for (const obj of pathObjectsRef.current) {
       canvas.remove(obj.main);
       canvas.remove(obj.display);
@@ -411,10 +415,10 @@ export function FabricGlyphCanvas({
 
     canvas.add(...mainFabricPaths, ...displayFabricPaths);
 
-    const drawSkeletons = false;
-    if (drawSkeletons) {
+    const drawSkeletons = async () => {
       // Medial axis skeleton overlay
-      const medialSkeletons = currentPathRef.current?.getMedialSkeleton() ?? [];
+      const medialSkeletons =
+        (await currentPathRef.current?.getMedialSkeleton()) ?? [];
       const medialAxisLines = medialSkeletons.map((skeleton) => {
         const pathData = skeleton.segments.flatMap((seg): TSimplePathData => {
           const p0 = skeleton.points[seg[0]];
@@ -471,7 +475,8 @@ export function FabricGlyphCanvas({
       });
       otherObjectsRef.current.push(...medialAxisLines, ...localPrimitives);
       canvas.add(...medialAxisLines, ...localPrimitives);
-    }
+    };
+    drawSkeletons();
 
     adjustStrokes(canvas);
   }, [
