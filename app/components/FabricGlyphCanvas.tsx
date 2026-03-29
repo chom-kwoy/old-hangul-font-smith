@@ -354,11 +354,18 @@ export function FabricGlyphCanvas({
         });
         let baseScaleX = 1.0;
         let baseScaleY = 1.0;
+        const origBounds = mainFabricPath.getBoundingRect();
+        const origCenter = {
+          x: origBounds.left + origBounds.width / 2,
+          y: origBounds.top + origBounds.height / 2,
+        };
+        let boundOffsetX = 0;
+        let boundOffsetY = 0;
         mainFabricPath.on("scaling", async () => {
-          displayFabricPath.left = mainFabricPath.left;
-          displayFabricPath.top = mainFabricPath.top;
           displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
           displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
+          displayFabricPath.left = mainFabricPath.left + boundOffsetX;
+          displayFabricPath.top = mainFabricPath.top + boundOffsetY;
           adjustStroke(displayFabricPath);
           canvas.requestRenderAll();
 
@@ -378,9 +385,14 @@ export function FabricGlyphCanvas({
             if (scaled) {
               baseScaleX = scaleX;
               baseScaleY = scaleY;
+              const bounds = fabricPathDataToPaper(scaled).bounds;
+              boundOffsetX = bounds.center.x - origCenter.x;
+              boundOffsetY = bounds.center.y - origCenter.y;
 
               displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
               displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
+              displayFabricPath.left = mainFabricPath.left + boundOffsetX;
+              displayFabricPath.top = mainFabricPath.top + boundOffsetY;
 
               displayFabricPath.set({ path: scaled });
               displayFabricPath.setBoundingBox();

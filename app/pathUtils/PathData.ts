@@ -16,24 +16,25 @@ import {
   MessageToPathWorker,
   PathScaleOptions,
 } from "@/app/processors/pathWorker/pathWorkerTypes";
-import { WorkerHarness } from "@/app/utils/WorkerHarness";
+import { WorkerHarness, WorkerPool } from "@/app/utils/WorkerHarness";
 import { Bounds } from "@/app/utils/types";
 
-class PathWorker extends WorkerHarness<
+class PathWorkerPool extends WorkerPool<
   MessageToPathWorker,
   MessageFromPathWorker
 > {
-  constructor() {
-    if (typeof window !== "undefined") {
-      super(
-        new Worker(
+  constructor(numWorkers: number) {
+    const workerFactory = () => {
+      if (typeof window !== "undefined") {
+        return new Worker(
           new URL("../processors/pathWorker/pathWorker.ts", import.meta.url),
           { type: "module" },
-        ),
-      );
-    } else {
-      super(null);
-    }
+        );
+      } else {
+        return null;
+      }
+    };
+    super(workerFactory, numWorkers);
   }
 
   async skeletonizePath(path: TSimplePathData): Promise<FittedMedialAxisGraph> {
@@ -55,7 +56,7 @@ class PathWorker extends WorkerHarness<
     return result.path;
   }
 }
-const pathWorker = new PathWorker();
+const pathWorkerPool = new PathWorkerPool(4);
 
 export type SerializedPathData = {
   readonly _paths_serialized: TSimplePathData[];
@@ -223,10 +224,10 @@ export default class PathData {
       result.push(
         new fabric.Path(comp, {
           ...options,
-          left: offsetX + bbox.center.x * scaleX,
-          top: offsetY + bbox.center.y * scaleY,
           scaleX: scaleX,
           scaleY: scaleY,
+          left: offsetX + bbox.center.x * scaleX,
+          top: offsetY + bbox.center.y * scaleY,
         }),
       );
     }
@@ -296,7 +297,7 @@ export default class PathData {
     const path = this.#paths[index];
     const skeleton = (await this.getMedialSkeleton())[index];
 
-    return pathWorker.scalePath(path, skeleton, {
+    return pathWorkerPool.scalePath(path, skeleton, {
       scaleX,
       scaleY,
       scaleStroke,
@@ -310,15 +311,11 @@ export default class PathData {
     if (this.#skeletons === null) {
       if (this.#skeletonPromise === null) {
         this.#skeletonPromise = Promise.all(
-          this.#paths.map((subpath) => pathWorker.skeletonizePath(subpath)),
+          this.#paths.map((subpath) => pathWorkerPool.skeletonizePath(subpath)),
         );
       }
       this.#skeletons = await this.#skeletonPromise;
     }
-    return this.#skeletons;
-  }
-
-  getMedialSkeletonIfAvailable(): FittedMedialAxisGraph[] | null {
     return this.#skeletons;
   }
 }

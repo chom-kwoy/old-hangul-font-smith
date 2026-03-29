@@ -40,8 +40,6 @@ addEventListener(
 );
 postMessage("workerReady");
 
-console.log("Path worker loaded");
-
 async function handleEvent(
   event: MessageEvent<MessageToPathWorker>,
 ): Promise<MessageFromPathWorker> {
