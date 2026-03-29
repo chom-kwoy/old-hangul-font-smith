@@ -19,6 +19,7 @@ export function FabricGlyphCanvas({
   interactive,
   onPathChanged,
   className,
+  enableRescaling,
 }: {
   path: PathData | null;
   bgPaths?: PathData[];
@@ -27,7 +28,10 @@ export function FabricGlyphCanvas({
   interactive: boolean;
   onPathChanged?: (path: PathData | null) => void;
   className?: string;
+  enableRescaling?: boolean;
 }) {
+  enableRescaling = enableRescaling ?? true;
+
   const canvasElemRef = useRef<HTMLCanvasElement | null>(null);
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
   const viewportRef = useRef<fabric.TMat2D | null>(null);
@@ -45,19 +49,21 @@ export function FabricGlyphCanvas({
   const onPathChangedRef = useRef(onPathChanged);
   onPathChangedRef.current = onPathChanged;
 
+  const adjustStroke = useCallback((obj_: fabric.FabricObject) => {
+    const obj = obj_ as typeof obj_ & {
+      originalScale: number | undefined;
+      originalStrokeWidth: number | undefined;
+    };
+    if (obj.originalStrokeWidth === undefined) {
+      obj.originalStrokeWidth = obj.strokeWidth;
+    }
+    const objScale = (obj.scaleX + obj.scaleY) / 2;
+    const multiplier = 1 / obj.canvas!.getZoom() / objScale;
+    obj.set("strokeWidth", obj.originalStrokeWidth * multiplier);
+  }, []);
+
   const adjustStrokes = useCallback((canvas: fabric.Canvas) => {
-    canvas.forEachObject(function (obj_) {
-      const obj = obj_ as typeof obj_ & {
-        originalScale: number | undefined;
-        originalStrokeWidth: number | undefined;
-      };
-      if (obj.originalStrokeWidth === undefined) {
-        obj.originalStrokeWidth = obj.strokeWidth;
-      }
-      const objScale = (obj.scaleX + obj.scaleY) / 2;
-      const multiplier = 1 / canvas.getZoom() / objScale;
-      obj.set("strokeWidth", obj.originalStrokeWidth * multiplier);
-    });
+    canvas.forEachObject(adjustStroke);
   }, []);
 
   // Effect 1: canvas lifecycle — runs when interactive or dimensions change.
@@ -71,23 +77,28 @@ export function FabricGlyphCanvas({
       backgroundColor: "white",
     });
 
+    const minZoom = Math.min(width, height) / 1000;
+    const tx = width / 2 - 500 * minZoom;
+    const ty = height / 2 - 500 * minZoom;
+    const initialVpt: fabric.TMat2D = [minZoom, 0, 0, minZoom, tx, ty];
+
     canvas.selection = interactive;
 
     // Gridlines
     const horzGrid: fabric.XY[] = [
       { x: 0, y: 0 },
-      { x: width, y: 0 },
+      { x: 1000, y: 0 },
     ];
     const vertGrid: fabric.XY[] = [
       { x: 0, y: 0 },
-      { x: 0, y: height },
+      { x: 0, y: 1000 },
     ];
     const N_MINOR = 10;
     for (let i = 1; i < N_MINOR; ++i) {
       canvas.add(
         new fabric.Polyline(horzGrid, {
-          left: width / 2,
-          top: (i * height) / N_MINOR,
+          left: 1000 / 2,
+          top: (i * 1000) / N_MINOR,
           stroke: "lightgrey",
           strokeWidth: 1,
           selectable: false,
@@ -96,8 +107,8 @@ export function FabricGlyphCanvas({
       );
       canvas.add(
         new fabric.Polyline(vertGrid, {
-          left: (i * width) / N_MINOR,
-          top: height / 2,
+          left: (i * 1000) / N_MINOR,
+          top: 1000 / 2,
           stroke: "lightgrey",
           strokeWidth: 1,
           selectable: false,
@@ -108,8 +119,8 @@ export function FabricGlyphCanvas({
     for (const grid of [horzGrid, vertGrid]) {
       canvas.add(
         new fabric.Polyline(grid, {
-          left: width / 2,
-          top: height / 2,
+          left: 1000 / 2,
+          top: 1000 / 2,
           stroke: "red",
           strokeWidth: 1,
           selectable: false,
@@ -126,9 +137,9 @@ export function FabricGlyphCanvas({
     function constrainViewport(c: fabric.Canvas) {
       const vpt = c.viewportTransform;
       vpt[4] = Math.min(vpt[4], 0);
-      vpt[4] = Math.max(vpt[4], width * (1 - vpt[0] - vpt[2]));
+      vpt[4] = Math.max(vpt[4], width - 1000 * (vpt[0] + vpt[2]));
       vpt[5] = Math.min(vpt[5], 0);
-      vpt[5] = Math.max(vpt[5], height * (1 - vpt[1] - vpt[3]));
+      vpt[5] = Math.max(vpt[5], height - 1000 * (vpt[1] + vpt[3]));
       c.setViewportTransform(c.viewportTransform);
     }
 
@@ -137,8 +148,7 @@ export function FabricGlyphCanvas({
         const delta = opt.e.deltaY;
         let zoom = canvas.getZoom();
         zoom *= 0.997 ** delta;
-        if (zoom > 20) zoom = 20;
-        if (zoom < 1) zoom = 1;
+        zoom = Math.min(Math.max(zoom, minZoom), 20 * minZoom);
         canvas.zoomToPoint(
           new fabric.Point(opt.e.offsetX, opt.e.offsetY),
           zoom,
@@ -194,7 +204,7 @@ export function FabricGlyphCanvas({
       }
     });
 
-    canvas.viewportTransform = viewportRef.current ?? [1, 0, 0, 1, 0, 0];
+    canvas.viewportTransform = viewportRef.current ?? initialVpt;
     adjustStrokes(canvas);
 
     // Reset content refs so the content effects below repopulate the new canvas
@@ -223,7 +233,7 @@ export function FabricGlyphCanvas({
 
     for (const p of bgPaths) {
       bgPathObjectsRef.current.push(
-        ...p.makeFabricPaths(width, height, {
+        ...p.makeFabricPaths({
           selectable: false,
           evented: false,
           strokeWidth: 2,
@@ -238,7 +248,15 @@ export function FabricGlyphCanvas({
       canvas.sendObjectToBack(obj);
     }
     adjustStrokes(canvas);
-  }, [bgPaths, width, height, interactive, adjustStrokes]);
+  }, [
+    bgPaths,
+    width,
+    height,
+    interactive,
+    enableRescaling,
+    adjustStrokes,
+    adjustStroke,
+  ]);
 
   // Effect 3: foreground path — runs after canvas init when path or dimensions change.
   useEffect(() => {
@@ -262,7 +280,7 @@ export function FabricGlyphCanvas({
     const pathSelectable = interactive;
     const mainFabricPaths =
       currentPathRef.current !== null
-        ? currentPathRef.current.makeFabricPaths(width, height, {
+        ? currentPathRef.current.makeFabricPaths({
             selectable: pathSelectable,
             evented: pathSelectable,
             fill: "#FF000001",
@@ -273,7 +291,7 @@ export function FabricGlyphCanvas({
         : [];
     const displayFabricPaths =
       currentPathRef.current !== null
-        ? currentPathRef.current.makeFabricPaths(width, height, {
+        ? currentPathRef.current.makeFabricPaths({
             selectable: false,
             evented: false,
             fill: "black",
@@ -325,24 +343,24 @@ export function FabricGlyphCanvas({
         mainFabricPath.on("deselected", () => {
           deselectPathControls();
         });
-        mainFabricPath.on("moving", (event) => {
+        mainFabricPath.on("moving", () => {
           displayFabricPath.left = mainFabricPath.left;
           displayFabricPath.top = mainFabricPath.top;
           canvas.requestRenderAll();
         });
-        const enableRescaling = true;
         let baseScaleX = 1.0;
         let baseScaleY = 1.0;
-        mainFabricPath.on("scaling", async (event) => {
+        mainFabricPath.on("scaling", async () => {
           displayFabricPath.left = mainFabricPath.left;
           displayFabricPath.top = mainFabricPath.top;
           displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
           displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
+          adjustStroke(displayFabricPath);
           canvas.requestRenderAll();
 
           if (enableRescaling) {
-            const scaleX = mainFabricPath.scaleX / (width / 1000);
-            const scaleY = mainFabricPath.scaleY / (height / 1000);
+            const scaleX = mainFabricPath.scaleX;
+            const scaleY = mainFabricPath.scaleY;
             const scaled = await currentPathRef.current?.scalePath(
               i,
               scaleX,
@@ -357,17 +375,15 @@ export function FabricGlyphCanvas({
               baseScaleX = scaleX;
               baseScaleY = scaleY;
 
-              const newScaleX = mainFabricPath.scaleX / (width / 1000);
-              const newScaleY = mainFabricPath.scaleY / (height / 1000);
-              displayFabricPath.scaleX = width / 1000;
-              displayFabricPath.scaleY = height / 1000;
-              displayFabricPath.scaleX *= newScaleX / baseScaleX;
-              displayFabricPath.scaleY *= newScaleY / baseScaleY;
+              displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
+              displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
 
               displayFabricPath.set({ path: scaled });
               displayFabricPath.setBoundingBox();
               displayFabricPath.setDimensions();
               displayFabricPath.setCoords();
+
+              adjustStroke(displayFabricPath);
               canvas.requestRenderAll();
             }
           }
@@ -407,10 +423,8 @@ export function FabricGlyphCanvas({
         });
         const bbox = fabricPathDataToPaper(pathData).bounds;
         return new fabric.Path(pathData, {
-          left: bbox.center.x * (width / 1000),
-          top: bbox.center.y * (height / 1000),
-          scaleX: width / 1000,
-          scaleY: height / 1000,
+          left: bbox.center.x,
+          top: bbox.center.y,
           stroke: "#FFFFAA",
           strokeWidth: 2,
           selectable: false,
@@ -445,10 +459,8 @@ export function FabricGlyphCanvas({
             "#72ffdb",
           ][primIdx % 7];
           return new fabric.Path(path, {
-            left: bbox.center.x * (width / 1000),
-            top: bbox.center.y * (height / 1000),
-            scaleX: width / 1000,
-            scaleY: height / 1000,
+            left: bbox.center.x,
+            top: bbox.center.y,
             stroke: color,
             strokeWidth: 2,
             fill: null,
@@ -462,7 +474,15 @@ export function FabricGlyphCanvas({
     }
 
     adjustStrokes(canvas);
-  }, [path, width, height, interactive, adjustStrokes]);
+  }, [
+    path,
+    width,
+    height,
+    interactive,
+    enableRescaling,
+    adjustStrokes,
+    adjustStroke,
+  ]);
 
   // Effect 4: Delete/Backspace key handling, scoped to this canvas instance.
   useEffect(() => {

@@ -55,7 +55,10 @@ export function GlyphView({
     if (!node) return;
     // Read dimensions synchronously so the initial render gets the correct size,
     // then keep tracking with ResizeObserver for subsequent changes.
-    setDialogContentSize({ width: node.clientWidth, height: node.clientHeight });
+    setDialogContentSize({
+      width: node.clientWidth,
+      height: node.clientHeight,
+    });
     const observer = new ResizeObserver((entries) => {
       if (entries[0]) {
         const { width, height } = entries[0].contentRect;

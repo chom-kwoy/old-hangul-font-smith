@@ -254,7 +254,9 @@ export function VarsetMapView({
       // Add paths
       const makeMainPath = (path: PathData | null) => {
         if (!path) return [];
-        return path.makeFabricPaths(cellSize, cellSize, {
+        return path.makeFabricPaths({
+          scaleX: cellSize / 1000,
+          scaleY: cellSize / 1000,
           offsetX: offX * cellSize,
           offsetY: offY * cellSize,
           selectable: false,
@@ -263,7 +265,9 @@ export function VarsetMapView({
       };
       const makeZoomPath = (path: PathData | null) => {
         if (!path) return [];
-        return path.makeFabricPaths(zoomSize, zoomSize, {
+        return path.makeFabricPaths({
+          scaleX: zoomSize / 1000,
+          scaleY: zoomSize / 1000,
           offsetX: (offX + 1) * cellSize,
           offsetY: offY * cellSize,
           selectable: false,

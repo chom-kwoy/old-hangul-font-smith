@@ -223,27 +223,32 @@ export default class PathData {
     return new PathData(result);
   }
 
-  makeFabricPaths(
-    width: number,
-    height: number,
-    {
-      offsetX,
-      offsetY,
-      ...options
-    }: { offsetX?: number; offsetY?: number } & Partial<fabric.PathProps> = {},
-  ): fabric.Path[] {
-    offsetX = offsetX || 0;
-    offsetY = offsetY || 0;
+  makeFabricPaths({
+    scaleX,
+    scaleY,
+    offsetX,
+    offsetY,
+    ...options
+  }: {
+    scaleX?: number;
+    scaleY?: number;
+    offsetX?: number;
+    offsetY?: number;
+  } & Partial<fabric.PathProps> = {}): fabric.Path[] {
+    scaleX = scaleX ?? 1.0;
+    scaleY = scaleY ?? 1.0;
+    offsetX = offsetX ?? 0;
+    offsetY = offsetY ?? 0;
     const result: fabric.Path[] = [];
     for (const comp of this.#paths) {
       const bbox = fabricPathDataToPaper(comp).bounds;
       result.push(
         new fabric.Path(comp, {
           ...options,
-          left: offsetX + bbox.center.x * (width / 1000),
-          top: offsetY + bbox.center.y * (height / 1000),
-          scaleX: width / 1000,
-          scaleY: height / 1000,
+          left: offsetX + bbox.center.x * scaleX,
+          top: offsetY + bbox.center.y * scaleY,
+          scaleX: scaleX,
+          scaleY: scaleY,
         }),
       );
     }
