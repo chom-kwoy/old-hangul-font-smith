@@ -2,9 +2,13 @@ import opentype from "opentype.js";
 
 import PathData from "@/app/pathUtils/PathData";
 import {
-  GenerateFontMessage,
-  MessageToMainThread,
-} from "@/app/processors/makeFont/makeFontWorkerTypes";
+  MessageFromFontAnalyzerWorker,
+  MessageToFontAnalyzerWorker,
+} from "@/app/processors/analyzeFont/fontAnalyzerWorkerTypes";
+import {
+  MessageFromFontGenWorker,
+  MessageToFontGenWorker,
+} from "@/app/processors/makeFont/fontGenWorkerTypes";
 import { FontMetadata, GenerateOptions, JamoVarsets } from "@/app/utils/types";
 
 export class FontProcessor {
@@ -16,11 +20,11 @@ export class FontProcessor {
   constructor() {
     if (typeof window !== "undefined") {
       this.analyzeFontWorker = new Worker(
-        new URL("analyzeFont/analyzeFontWorker.ts", import.meta.url),
+        new URL("analyzeFont/fontAnalyzerWorker.ts", import.meta.url),
         { type: "module" },
       );
       this.makeFontWorker = new Worker(
-        new URL("makeFont/makeFontWorker.ts", import.meta.url),
+        new URL("makeFont/fontGenWorker.ts", import.meta.url),
         { type: "module" },
       );
     }
@@ -31,7 +35,9 @@ export class FontProcessor {
     this.font = opentype.parse(buffer);
     this.fontFile = file;
     return new Promise((resolve, reject) => {
-      this.analyzeFontWorker.onmessage = (event: MessageEvent) => {
+      this.analyzeFontWorker.onmessage = (
+        event: MessageEvent<MessageFromFontAnalyzerWorker>,
+      ) => {
         if (event.data.type === "fontParsed") {
           resolve(event.data.metadata);
         } else if (event.data.type === "error") {
@@ -41,13 +47,15 @@ export class FontProcessor {
       this.analyzeFontWorker?.postMessage({
         type: "loadFont",
         buffer: buffer,
-      });
+      } satisfies MessageToFontAnalyzerWorker);
     });
   }
 
   async getSampleImage(sampleText: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.analyzeFontWorker.onmessage = (event: MessageEvent) => {
+      this.analyzeFontWorker.onmessage = (
+        event: MessageEvent<MessageFromFontAnalyzerWorker>,
+      ) => {
         if (event.data.type === "sampleImage") {
           resolve(event.data.sampleImage);
         } else if (event.data.type === "error") {
@@ -57,14 +65,16 @@ export class FontProcessor {
       this.analyzeFontWorker?.postMessage({
         type: "getSampleImage",
         sampleText: sampleText,
-      });
+      } satisfies MessageToFontAnalyzerWorker);
     });
   }
 
   async analyzeJamoVarsets(): Promise<JamoVarsets> {
     return new Promise((resolve, reject) => {
-      this.analyzeFontWorker.onmessage = (event: MessageEvent) => {
-        if (event.data.type === "jamoVarsets") {
+      this.analyzeFontWorker.onmessage = (
+        event: MessageEvent<MessageFromFontAnalyzerWorker>,
+      ) => {
+        if (event.data.type === "fontAnalyzed") {
           resolve(event.data.jamoVarsets);
         } else if (event.data.type === "error") {
           reject(event.data.error);
@@ -72,7 +82,7 @@ export class FontProcessor {
       };
       this.analyzeFontWorker?.postMessage({
         type: "analyzeFont",
-      });
+      } satisfies MessageToFontAnalyzerWorker);
     });
   }
 
@@ -89,14 +99,16 @@ export class FontProcessor {
       buffer: await this.fontFile.arrayBuffer(),
       jamoVarsets: jamoVarsets,
       options: options,
-    } as GenerateFontMessage);
+    } satisfies MessageToFontGenWorker);
 
     const blob = await new Promise<Blob>((resolve) => {
       if (!this.makeFontWorker) {
         throw new Error("Worker not initialized.");
       }
-      this.makeFontWorker.onmessage = (event: MessageEvent) => {
-        const msg: MessageToMainThread = event.data;
+      this.makeFontWorker.onmessage = (
+        event: MessageEvent<MessageFromFontGenWorker>,
+      ) => {
+        const msg = event.data;
         if (msg.type === "fontBlob") {
           resolve(msg.blob);
         }

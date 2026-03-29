@@ -236,8 +236,8 @@ function getInitialSeeds(
   if (medialAxis.segments.length === 0) return [];
   if (medialAxis.segments.length === 1) {
     return [
-      medialAxis.points[medialAxis.segments[0][0]],
-      medialAxis.points[medialAxis.segments[0][1]],
+      new paper.Point(medialAxis.points[medialAxis.segments[0][0]]),
+      new paper.Point(medialAxis.points[medialAxis.segments[0][1]]),
     ];
   }
 
@@ -246,7 +246,7 @@ function getInitialSeeds(
     const segment = medialAxis.segments[segIndex];
     // Pick either start (0) or end (1) of the segment
     const ptIndex = random() > 0.5 ? 1 : 0;
-    return medialAxis.points[segment[ptIndex]];
+    return new paper.Point(medialAxis.points[segment[ptIndex]]);
   };
 
   const p1 = getRandomPoint();
@@ -282,7 +282,7 @@ function projectToMedialAxis(
       closestPt = proj;
     }
   }
-  return closestPt;
+  return new paper.Point(closestPt);
 }
 
 function getDistanceToBoundary(

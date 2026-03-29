@@ -1,31 +1,31 @@
 import { JamoVarsets } from "@/app/utils/types";
 
-export type MessageToFontWorker =
-  | GenerateFontMessage
-  | GetSampleImageMessage
-  | AnalyzeFontMessage;
+export type MessageToFontAnalyzerWorker =
+  | GenerateFontRequest
+  | SampleImageRequest
+  | AnalyzeFontRequest;
 
-export interface GenerateFontMessage {
+export interface GenerateFontRequest {
   type: "loadFont";
   buffer: ArrayBuffer;
 }
 
-export interface GetSampleImageMessage {
+export interface SampleImageRequest {
   type: "getSampleImage";
   sampleText: string;
 }
 
-export interface AnalyzeFontMessage {
+export interface AnalyzeFontRequest {
   type: "analyzeFont";
 }
 
-export type MessageToMainThread =
-  | FontBlobMessage
-  | SampleImageMessage
-  | FontAnalyzedMessage
+export type MessageFromFontAnalyzerWorker =
+  | GenerateFontResult
+  | SampleImageResult
+  | AnalyzeFontResult
   | ErrorMessage;
 
-export interface FontBlobMessage {
+export interface GenerateFontResult {
   type: "fontParsed";
   metadata: {
     name: string;
@@ -35,12 +35,12 @@ export interface FontBlobMessage {
   };
 }
 
-export interface SampleImageMessage {
+export interface SampleImageResult {
   type: "sampleImage";
   sampleImage: string;
 }
 
-export interface FontAnalyzedMessage {
+export interface AnalyzeFontResult {
   type: "fontAnalyzed";
   jamoVarsets: JamoVarsets;
 }

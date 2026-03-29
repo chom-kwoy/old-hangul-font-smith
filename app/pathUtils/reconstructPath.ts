@@ -67,8 +67,8 @@ function createPathFromPrimitive(prim: Primitive): paper.Path {
   // Calculate boundary points: P = Origin + Radius * Direction
   for (let i = 0; i < prim.radii.length; i++) {
     const r = prim.radii[i];
-    const dir = prim.directions[i];
-    const origin = prim.origins[i]; // Array of origins for edges, or repeated center for points
+    const dir = new paper.Point(prim.directions[i]);
+    const origin = new paper.Point(prim.origins[i]); // Array of origins for edges, or repeated center for points
 
     // P = O + r*d
     const point = origin.add(dir.multiply(r));

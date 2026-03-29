@@ -1,9 +1,14 @@
 import { Delaunay } from "d3-delaunay";
 import paper from "paper";
 
+export type Point = {
+  x: number;
+  y: number;
+};
+
 // Define the new return type
 export interface MedialAxisGraph {
-  points: paper.Point[];
+  points: Point[];
   segments: [number, number][]; // pairs of indices into `points`
 }
 
@@ -31,7 +36,7 @@ export function extractMedialAxis(
   ]);
 
   // Output structures
-  const uniquePoints: paper.Point[] = [];
+  const uniquePoints: Point[] = [];
   const segments: [number, number][] = [];
 
   // Map from Delaunay Triangle Index -> Index in uniquePoints array
@@ -50,7 +55,7 @@ export function extractMedialAxis(
     const pt = new paper.Point(x, y);
 
     const newIndex = uniquePoints.length;
-    uniquePoints.push(pt);
+    uniquePoints.push({ x: pt.x, y: pt.y });
     triangleToPointIndex.set(triangleIndex, newIndex);
     return newIndex;
   };

@@ -1,14 +1,6 @@
-// import Shape from "@doodle3d/clipper-js";
 import { DOMParser } from "@xmldom/xmldom";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
-import * as clipperLib from "js-angusj-clipper/web";
-import {
-  ClipType,
-  EndType,
-  JoinType,
-  PolyFillType,
-} from "js-angusj-clipper/web";
 import opentype from "opentype.js";
 import paper from "paper";
 
@@ -20,18 +12,72 @@ import {
 } from "@/app/pathUtils/convert";
 import {
   FittedMedialAxisGraph,
-  Primitive,
   localPrimitiveFitting,
 } from "@/app/pathUtils/localPrimitiveFitting";
 import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
+import {
+  MessageFromPathWorker,
+  MessageToPathWorker,
+  PathScaleOptions,
+} from "@/app/processors/pathWorker/pathWorkerTypes";
 import { Bounds } from "@/app/utils/types";
 
-const clipper = await clipperLib.loadNativeClipperLibInstanceAsync(
-  // let it autodetect which one to use, but also available WasmOnly and AsmJsOnly
-  clipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback,
-);
+class PathWorker {
+  readonly #worker: Worker | null = null;
+
+  constructor() {
+    if (typeof window !== "undefined") {
+      this.#worker = new Worker(
+        new URL("../processors/pathWorker/pathWorker.ts", import.meta.url),
+        { type: "module" },
+      );
+    }
+  }
+
+  async requestTask<R extends Omit<MessageToPathWorker, "reqId">>(
+    request: R,
+  ): Promise<Extract<MessageFromPathWorker, { type: R["type"] }>> {
+    type Ret = Extract<MessageFromPathWorker, { type: R["type"] }>;
+    return new Promise((resolve, reject) => {
+      if (this.#worker === null) {
+        throw new Error("PathWorker is not initialized");
+      }
+      const reqId = Math.random();
+      this.#worker.onmessage = (event: MessageEvent<MessageFromPathWorker>) => {
+        const msg = event.data;
+        console.log("Received PathWorker message:", msg);
+        if (msg.reqId === reqId) {
+          if (msg.type === request.type) {
+            resolve(msg as Ret);
+          } else {
+            reject(new Error(`Unexpected message type: ${msg.type}`));
+          }
+        }
+      };
+      this.#worker.postMessage({
+        reqId: reqId,
+        ...request,
+      });
+    });
+  }
+
+  async scalePath(
+    path: TSimplePathData,
+    skeleton: FittedMedialAxisGraph,
+    options: PathScaleOptions,
+  ): Promise<TSimplePathData> {
+    const result = await this.requestTask({
+      type: "scalePath",
+      path,
+      skeleton,
+      options,
+    });
+    return result.path;
+  }
+}
+const pathWorker = new PathWorker();
 
 export type SerializedPathData = {
   readonly _paths_serialized: TSimplePathData[];
@@ -236,7 +282,7 @@ export default class PathData {
     this.#skeletons = null;
   }
 
-  scalePath(
+  async scalePath(
     index: number,
     scaleX: number,
     scaleY: number,
@@ -253,7 +299,7 @@ export default class PathData {
       doSimplify?: boolean;
       verbose?: boolean;
     } = {},
-  ) {
+  ): Promise<TSimplePathData> {
     scaleStroke = scaleStroke ?? 0.6;
     strokeWidth = strokeWidth ?? 60.0;
     doSimplify = doSimplify ?? true;
@@ -263,41 +309,17 @@ export default class PathData {
       throw new Error(`Invalid subpath index: ${index}`);
     }
 
+    const path = this.#paths[index];
     const skeleton = this.getMedialSkeleton()[index];
-    const bbox = fabricPathDataToPaper(this.#paths[index]).bounds;
 
-    const newPrimitives = getPrimitivePoints(skeleton.primitives).map(
-      (regPrimitive) => {
-        return scalePathImpl(
-          regPrimitive,
-          scaleX,
-          scaleY,
-          bbox.center.x,
-          bbox.center.y,
-          scaleStroke,
-          strokeWidth,
-          verbose,
-        );
-      },
-    );
-
-    const union = unionPaths(newPrimitives);
-    const newPath = new paper.CompoundPath(
-      union.map(
-        (path) =>
-          new paper.Path({
-            segments: path,
-            closed: true,
-          }),
-      ),
-    );
-    if (doSimplify) {
-      // newPath.smooth({ type: "catmull-rom", factor: 0.5 });
-      newPath.simplify(0.1);
-    }
-
-    // this.updatePath(index, newPath);
-    return paperToFabricPathData(newPath);
+    return pathWorker.scalePath(path, skeleton, {
+      scaleX,
+      scaleY,
+      scaleStroke,
+      strokeWidth,
+      doSimplify,
+      verbose,
+    });
   }
 
   getMedialSkeleton(): FittedMedialAxisGraph[] {
@@ -319,168 +341,6 @@ export default class PathData {
     }
     return this.#skeletons;
   }
-}
-
-function scalePathImpl(
-  points: paper.Point[],
-  scaleX: number,
-  scaleY: number,
-  centerX: number,
-  centerY: number,
-  scaleStroke: number,
-  strokeWidth: number,
-  verbose: boolean = false,
-): paper.Point[] {
-  function pr(pt: { x: number; y: number }, xoffset = 0, yoffset = 0) {
-    return `(${(xoffset + pt.x).toFixed(1)},${(yoffset + 1000 - pt.y).toFixed(1)})`;
-  }
-
-  const revScaleX = Math.pow(1 / scaleX, scaleStroke);
-  const revScaleY = Math.pow(1 / scaleY, scaleStroke);
-  const tgtStrokeX = strokeWidth * revScaleX;
-  const tgtStrokeY = strokeWidth * revScaleY;
-  const offsetX = (tgtStrokeX - strokeWidth) / 2;
-  const offsetY = (tgtStrokeY - strokeWidth) / 2;
-
-  if (verbose) {
-    console.log(
-      `scaleX: ${scaleX}, scaleY: ${scaleY}\n` +
-        `revScaleX: ${revScaleX}, revScaleY: ${revScaleY}\n` +
-        `offsetX: ${offsetX}, offsetY: ${offsetY}`,
-    );
-  }
-
-  const clipperScale = 10000.0;
-  const tinyStep = 1 / clipperScale;
-  if (offsetX !== 0) {
-    // expand or shrink the pattern in the X direction
-    // by doing a Minkowski sum with a thin rectangle.
-    points = minkowskiSum(
-      points,
-      [
-        new paper.Point(Math.abs(offsetX), -tinyStep),
-        new paper.Point(-Math.abs(offsetX), -tinyStep),
-        new paper.Point(-Math.abs(offsetX), tinyStep),
-        new paper.Point(Math.abs(offsetX), tinyStep),
-      ],
-      offsetX > 0 ? "expand" : "shrink",
-      clipperScale,
-    );
-  }
-  if (offsetY !== 0) {
-    // expand or shrink the pattern in the Y direction
-    points = minkowskiSum(
-      points,
-      [
-        new paper.Point(-tinyStep, Math.abs(offsetY)),
-        new paper.Point(-tinyStep, -Math.abs(offsetY)),
-        new paper.Point(tinyStep, -Math.abs(offsetY)),
-        new paper.Point(tinyStep, Math.abs(offsetY)),
-      ],
-      offsetY > 0 ? "expand" : "shrink",
-      clipperScale,
-    );
-  }
-
-  // scale the points so that the shape expands/contracts from the center
-  points = points.map(
-    (pt) =>
-      new paper.Point(
-        (pt.x - centerX) * scaleX + centerX,
-        (pt.y - centerY) * scaleY + centerY,
-      ),
-  );
-
-  if (verbose) {
-    console.log(points.map((p) => pr(p)).join(",") + "\n");
-  }
-
-  return points;
-}
-
-function getPrimitivePoints(primitives: Primitive[]) {
-  return primitives.map((primitive) => {
-    return primitive.origins.map((origin, i) => {
-      const dir = primitive.directions[i];
-      const rad = primitive.radii[i];
-      return origin.add(dir.multiply(rad));
-    });
-  });
-}
-
-function minkowskiSum(
-  points: paper.Point[],
-  pattern: paper.Point[],
-  type: "expand" | "shrink",
-  clipperScale = 10000.0,
-) {
-  let scaledPoints = [
-    points
-      .map((p) => ({
-        x: p.x * clipperScale,
-        y: p.y * clipperScale,
-      }))
-      .toReversed(),
-  ];
-  // make the shape into a 'hole'
-  if (type === "shrink") {
-    const amin = -10000 * clipperScale;
-    const amax = 10000 * clipperScale;
-    scaledPoints = [
-      [
-        { x: amin, y: amax },
-        { x: amin, y: amin },
-        { x: amax, y: amin },
-        { x: amax, y: amax },
-      ],
-      scaledPoints[0].toReversed(),
-    ];
-  }
-  const scaledPattern = pattern
-    .map((p) => ({
-      x: p.x * clipperScale,
-      y: p.y * clipperScale,
-    }))
-    .toReversed();
-  const result = clipper.minkowskiSumPaths(scaledPattern, scaledPoints, true);
-  if (result === undefined) {
-    throw new Error("clipper.minkowskiSumPath failed");
-  }
-  if (type === "expand") {
-    return result[0]
-      .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
-      .toReversed();
-  } else {
-    return result[1].map(
-      (p) => new paper.Point(p.x / clipperScale, p.y / clipperScale),
-    );
-  }
-}
-
-function unionPaths(primitives: paper.Point[][]): paper.Point[][] {
-  const clipperScale = 10000.0;
-  const inputs = primitives.map((primitive) => ({
-    data: primitive
-      .map((p) => ({
-        x: p.x * clipperScale,
-        y: p.y * clipperScale,
-      }))
-      .toReversed(),
-    closed: true,
-  }));
-  const result = clipper.clipToPaths({
-    clipType: ClipType.Union,
-    subjectFillType: PolyFillType.NonZero,
-    subjectInputs: inputs,
-  });
-  if (result === undefined) {
-    throw new Error("clipper.clipToPolyTree failed");
-  }
-  return result.map((path) =>
-    path
-      .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
-      .toReversed(),
-  );
 }
 
 // splits a single compound path into multiple paths, preserving holes

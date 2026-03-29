@@ -450,7 +450,7 @@ function addPositionalVariants(
   }
 }
 
-export async function makeFont(
+export async function fontGen(
   fontData: ArrayBuffer,
   jamoVarsets: JamoVarsets,
   options: GenerateOptions,

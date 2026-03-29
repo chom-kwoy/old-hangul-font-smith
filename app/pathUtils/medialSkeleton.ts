@@ -1,7 +1,7 @@
 import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import paper from "paper";
 
-import { MedialAxisGraph } from "@/app/pathUtils/medialAxis";
+import { MedialAxisGraph, Point } from "@/app/pathUtils/medialAxis";
 
 /**
  * Constructs the Medial Skeleton (M_S) from selected vertices (V) and the Raw Medial Axis (M).
@@ -67,7 +67,7 @@ export function constructMedialSkeleton(
     // Explore neighbors
     const neighbors = rawAdj[u];
     for (const v of neighbors) {
-      const weight = rawPoints[u].getDistance(rawPoints[v]);
+      const weight = new paper.Point(rawPoints[u]).getDistance(rawPoints[v]);
 
       // Safety: Prevent NaN propagation if geometry is invalid
       if (!Number.isFinite(weight)) continue;
@@ -130,7 +130,9 @@ export function constructMedialSkeleton(
         } else {
           // Invalid: Introduce "Interface Point" (Steiner point)
           // The interface is the midpoint of the raw edge where domains switch
-          const interfacePt = rawPoints[u].add(rawPoints[v]).divide(2);
+          const interfacePt = new paper.Point(rawPoints[u])
+            .add(rawPoints[v])
+            .divide(2);
 
           const newPtIdx = finalPoints.length;
           finalPoints.push(interfacePt);
@@ -185,7 +187,7 @@ function buildAdjacencyList(graph: MedialAxisGraph): number[][] {
   return adj;
 }
 
-function getNearestNodeIndex(pt: paper.Point, nodes: paper.Point[]): number {
+function getNearestNodeIndex(pt: paper.Point, nodes: Point[]): number {
   let minDst = Infinity;
   let idx = -1;
   for (let i = 0; i < nodes.length; i++) {

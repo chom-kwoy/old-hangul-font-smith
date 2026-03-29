@@ -329,16 +329,24 @@ export function FabricGlyphCanvas({
           displayFabricPath.top = mainFabricPath.top;
           canvas.requestRenderAll();
         });
-        mainFabricPath.on("scaling", (event) => {
-          displayFabricPath.left = mainFabricPath.left;
-          displayFabricPath.top = mainFabricPath.top;
-
+        mainFabricPath.on("scaling", async (event) => {
           const scaleX = mainFabricPath.scaleX / (width / 1000);
           const scaleY = mainFabricPath.scaleY / (height / 1000);
-          const scaled = currentPathRef.current?.scalePath(i, scaleX, scaleY, {
-            doSimplify: false,
-            verbose: false,
-          });
+          displayFabricPath.left = mainFabricPath.left;
+          displayFabricPath.top = mainFabricPath.top;
+          displayFabricPath.scaleX = mainFabricPath.scaleX;
+          displayFabricPath.scaleY = mainFabricPath.scaleY;
+          canvas.requestRenderAll();
+
+          const scaled = await currentPathRef.current?.scalePath(
+            i,
+            scaleX,
+            scaleY,
+            {
+              doSimplify: false,
+              verbose: false,
+            },
+          );
           if (scaled) {
             displayFabricPath.scaleX = width / 1000;
             displayFabricPath.scaleY = height / 1000;
@@ -346,12 +354,8 @@ export function FabricGlyphCanvas({
             displayFabricPath.setBoundingBox();
             displayFabricPath.setDimensions();
             displayFabricPath.setCoords();
-          } else {
-            displayFabricPath.scaleX = mainFabricPath.scaleX;
-            displayFabricPath.scaleY = mainFabricPath.scaleY;
+            canvas.requestRenderAll();
           }
-
-          canvas.requestRenderAll();
         });
         mainFabricPath.on("modified", (event) => {
           console.log("modified", event);

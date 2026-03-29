@@ -14,9 +14,9 @@ import {
 } from "@/app/hangul/jamos";
 import PathData from "@/app/pathUtils/PathData";
 import {
-  MessageToFontWorker,
-  MessageToMainThread,
-} from "@/app/processors/analyzeFont/analyzeFontWorkerTypes";
+  MessageFromFontAnalyzerWorker,
+  MessageToFontAnalyzerWorker,
+} from "@/app/processors/analyzeFont/fontAnalyzerWorkerTypes";
 import { ConsonantSets, JamoVarsets, VowelSets } from "@/app/utils/types";
 
 // Initialize paper.js context
@@ -42,7 +42,7 @@ async function loadFont(buffer: ArrayBuffer) {
   };
 }
 
-async function getSampleImage(sampleText: string) {
+async function getSampleImage(sampleText: string): Promise<string> {
   const canvas = new OffscreenCanvas(1400, 200);
   const ctx = canvas.getContext("2d");
 
@@ -70,7 +70,7 @@ async function getSampleImage(sampleText: string) {
   const blob = await canvas.convertToBlob({ type: "image/png" });
   return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
+    reader.onloadend = () => resolve(reader.result as string);
     reader.readAsDataURL(blob);
   });
 }
@@ -173,52 +173,60 @@ async function analyzeJamoVarsets() {
   return result;
 }
 
+async function handleEvent(
+  event: MessageEvent<MessageToFontAnalyzerWorker>,
+): Promise<MessageFromFontAnalyzerWorker> {
+  if (event.data.type === "loadFont") {
+    try {
+      const result = await loadFont(event.data.buffer);
+      return {
+        type: "fontParsed",
+        metadata: result,
+      };
+    } catch (err) {
+      console.error("Error loading font:", err);
+      return {
+        type: "error",
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  } else if (event.data.type === "getSampleImage") {
+    try {
+      const sampleImage: string = await getSampleImage(event.data.sampleText);
+      return {
+        type: "sampleImage",
+        sampleImage: sampleImage,
+      };
+    } catch (err) {
+      console.error("Error generating sample image:", err);
+      return {
+        type: "error",
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  } else if (event.data.type === "analyzeFont") {
+    try {
+      const result = await analyzeJamoVarsets();
+      return {
+        type: "fontAnalyzed",
+        jamoVarsets: result,
+      };
+    } catch (err) {
+      console.error("Error analyzing font:", err);
+      return {
+        type: "error",
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  } else {
+    throw new Error("Invalid event type");
+  }
+}
+
 addEventListener(
   "message",
-  async (event: MessageEvent<MessageToFontWorker>) => {
+  async (event: MessageEvent<MessageToFontAnalyzerWorker>) => {
     console.log("AnalyzeFontWorker received message:", event.data);
-    if (event.data.type === "loadFont") {
-      try {
-        const result = await loadFont(event.data.buffer);
-        postMessage({
-          type: "fontParsed",
-          metadata: result,
-        } as MessageToMainThread);
-      } catch (err) {
-        console.error("Error loading font:", err);
-        postMessage({
-          type: "error",
-          error: err instanceof Error ? err.message : "Unknown error",
-        } as MessageToMainThread);
-      }
-    } else if (event.data.type === "getSampleImage") {
-      try {
-        const sampleImage = await getSampleImage(event.data.sampleText);
-        postMessage({
-          type: "sampleImage",
-          sampleImage: sampleImage,
-        } as MessageToMainThread);
-      } catch (err) {
-        console.error("Error generating sample image:", err);
-        postMessage({
-          type: "error",
-          error: err instanceof Error ? err.message : "Unknown error",
-        } as MessageToMainThread);
-      }
-    } else if (event.data.type === "analyzeFont") {
-      try {
-        const result = await analyzeJamoVarsets();
-        postMessage({
-          type: "jamoVarsets",
-          jamoVarsets: result,
-        });
-      } catch (err) {
-        console.error("Error analyzing font:", err);
-        postMessage({
-          type: "error",
-          error: err instanceof Error ? err.message : "Unknown error",
-        } as MessageToMainThread);
-      }
-    }
+    postMessage(await handleEvent(event));
   },
 );

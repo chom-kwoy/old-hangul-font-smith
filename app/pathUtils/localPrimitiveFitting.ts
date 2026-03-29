@@ -1,6 +1,6 @@
 import paper from "paper";
 
-import { MedialAxisGraph } from "@/app/pathUtils/medialAxis";
+import { MedialAxisGraph, Point } from "@/app/pathUtils/medialAxis";
 
 // --- Interfaces ---
 
@@ -15,8 +15,8 @@ export interface Primitive {
   // Geometric definition of the fitted primitive
   // For "point": origin is the center.
   // For "edge": origins trace the medial segment (the "bone").
-  origins: paper.Point[];
-  directions: paper.Point[];
+  origins: Point[];
+  directions: Point[];
   radii: number[];
 }
 
@@ -118,8 +118,8 @@ export function localPrimitiveFitting(
 
     // Generate capsule discretization (Origins + Directions) specific to this segment
     const { origins, directions } = generateCapsuleDiscretization(
-      pA,
-      pB,
+      new paper.Point(pA),
+      new paper.Point(pB),
       opts.num_directions,
     );
 
