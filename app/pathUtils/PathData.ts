@@ -353,6 +353,8 @@ function scalePathImpl(
   const clipperScale = 10000.0;
   const tinyStep = 1 / clipperScale;
   if (offsetX !== 0) {
+    // expand or shrink the pattern in the X direction
+    // by doing a Minkowski sum with a thin rectangle.
     points = minkowskiSum(
       points,
       [
@@ -366,6 +368,7 @@ function scalePathImpl(
     );
   }
   if (offsetY !== 0) {
+    // expand or shrink the pattern in the Y direction
     points = minkowskiSum(
       points,
       [
@@ -379,7 +382,7 @@ function scalePathImpl(
     );
   }
 
-  // scale the points
+  // scale the points so that the shape expands/contracts from the center
   points = points.map(
     (pt) =>
       new paper.Point(
