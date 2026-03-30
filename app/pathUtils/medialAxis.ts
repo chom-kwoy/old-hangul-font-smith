@@ -23,6 +23,31 @@ export function extractMedialAxis(
   // 1. Sampling: Use the helper function
   const boundaryPoints = sampleBoundary(path, sampleSpacing);
 
+  // Track which sub-path each boundary sample belongs to so we can determine
+  // true adjacency per sub-path (needed for correct spur pruning in Filter B).
+  const subPathRanges: Array<{ start: number; end: number }> = [];
+  {
+    let idx = 0;
+    for (const child of path.children as paper.Path[]) {
+      const count = Math.ceil(child.length / sampleSpacing);
+      subPathRanges.push({ start: idx, end: idx + count });
+      idx += count;
+    }
+  }
+
+  function isAdjacentOnPath(a: number, b: number): boolean {
+    for (const { start, end } of subPathRanges) {
+      if (a >= start && a < end && b >= start && b < end) {
+        const localDiff = Math.abs(a - b);
+        const len = end - start;
+        // Adjacent if consecutive within the sub-path, or first/last (wrap-around).
+        return localDiff === 1 || localDiff === len - 1;
+      }
+    }
+    // Points on different sub-paths are never adjacent.
+    return false;
+  }
+
   // d3-delaunay requires a flat array of [x, y] coordinate pairs
   const pointsArray = boundaryPoints.map((p) => [p.x, p.y] as [number, number]);
 
@@ -88,14 +113,13 @@ export function extractMedialAxis(
       }
 
       // Filter B: "Spur" Pruning (Adjacency Filter)
+      // The two Delaunay vertices that share edge `e` are consecutive halfedges
+      // within triangle t1. If those boundary samples are adjacent on the same
+      // sub-path the Voronoi edge is a near-boundary spur and should be pruned.
       const indexA = delaunay.triangles[e];
       const indexB = delaunay.triangles[getNextHalfedge(e)];
 
-      const indexDiff = Math.abs(indexA - indexB);
-      const isAdjacent =
-        indexDiff === 1 || indexDiff > boundaryPoints.length - 5;
-
-      if (!isAdjacent) {
+      if (!isAdjacentOnPath(indexA, indexB)) {
         const idx1 = getOrAddPointIndex(t1);
         const idx2 = getOrAddPointIndex(t2);
         segments.push([idx1, idx2]);
