@@ -10,7 +10,7 @@ export class WorkerHarness<
 > {
   readonly #workerLoadedPromise: Promise<Worker> | null = null;
   #worker: Worker | null = null;
-  #pendingTasks: Map<number, Promise<any>> = new Map();
+  #pendingTasks: Map<number, Promise<RetT>> = new Map();
   readonly #workerId: number;
 
   constructor(worker: Worker | null, workerId: number = 0) {

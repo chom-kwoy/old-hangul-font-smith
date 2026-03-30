@@ -2,6 +2,12 @@ import { Delaunay } from "d3-delaunay";
 import paper from "paper";
 import seedrandom from "seedrandom";
 
+import {
+  FlatBoundary,
+  buildFlatBoundary,
+  nearestDistFlatBoundary,
+  rayIntersectFlatBoundary,
+} from "@/app/pathUtils/flatBoundary";
 import { MedialAxisGraph, sampleBoundary } from "@/app/pathUtils/medialAxis";
 
 /**
@@ -34,6 +40,9 @@ export function computeMedialSkeletonPoints(
   }
 
   const boundarySamples = sampleBoundary(path, 10);
+  const flatBoundary = buildFlatBoundary(path);
+  // Reusable buffer for ray-intersection segment tracking
+  const tested = new Uint8Array(flatBoundary.count);
 
   const MAX_ITERATIONS = 20;
   const LLOYD_STEPS = 5;
@@ -43,7 +52,7 @@ export function computeMedialSkeletonPoints(
     // The paper minimizes E_centrality (Eq. 8).
     // We approximate this using Lloyd's Relaxation constrained to the Medial Axis.
     for (let l = 0; l < LLOYD_STEPS; l++) {
-      V = optimizePositions(V, path, medialAxis);
+      V = optimizePositions(V, medialAxis, boundarySamples);
     }
 
     if (verbose) {
@@ -59,7 +68,8 @@ export function computeMedialSkeletonPoints(
     // Identify uncovered regions and add new seeds.
     const uncoveredPoints = getUncoveredBoundaryPoints(
       V,
-      path,
+      flatBoundary,
+      tested,
       boundarySamples,
       tolerance,
     );
@@ -97,46 +107,37 @@ export function computeMedialSkeletonPoints(
 
 /**
  * Optimizes vertex positions to minimize Centrality Energy.
- * Moves v towards the centroid of its Restricted Voronoi Cell (RVC).
+ * Uses Lloyd's Relaxation via Delaunay nearest-cell assignment on boundary
+ * samples — avoids expensive paper.js boolean path intersection.
  */
 function optimizePositions(
   currentV: paper.Point[],
-  path: paper.CompoundPath,
   medialAxis: MedialAxisGraph,
+  boundarySamples: paper.Point[],
 ): paper.Point[] {
-  // 1. Compute Voronoi Diagram of V
   const pointsArray = currentV.map((p) => [p.x, p.y] as [number, number]);
   const delaunay = Delaunay.from(pointsArray);
-  const voronoi = delaunay.voronoi([
-    path.bounds.left,
-    path.bounds.top,
-    path.bounds.right,
-    path.bounds.bottom,
-  ]);
+
+  // Accumulate the centroid of boundary samples belonging to each Voronoi cell.
+  const sumX = new Float64Array(currentV.length);
+  const sumY = new Float64Array(currentV.length);
+  const counts = new Int32Array(currentV.length);
+
+  for (const sample of boundarySamples) {
+    const idx = delaunay.find(sample.x, sample.y);
+    sumX[idx] += sample.x;
+    sumY[idx] += sample.y;
+    counts[idx]++;
+  }
 
   const newV: paper.Point[] = [];
-
   for (let i = 0; i < currentV.length; i++) {
-    // 2. Compute Restricted Voronoi Cell (RVC)
-    // RVC = Voronoi Cell (i) INTERSECT Shape S
-    const cell = voronoi.cellPolygon(i);
-    const segments = cell.map((point) => new paper.Segment(point));
-    const cellPolygon = new paper.Path(segments);
-
-    // In Paper.js, we intersect the cell with the shape to get the RVC
-    const rvc = path.intersect(cellPolygon);
-
-    if (!rvc.isEmpty()) {
-      // 3. Move to Centroid (Lloyd's step)
-      // The centroid of the RVC minimizes the distance energy.
-      const centroid = getCentroid(rvc);
-
-      // 4. Constraint Projection
-      // The vertex must stay on the Medial Axis.
-      const constrainedPt = projectToMedialAxis(centroid, medialAxis);
-      newV.push(constrainedPt);
+    if (counts[i] > 0) {
+      const cx = sumX[i] / counts[i];
+      const cy = sumY[i] / counts[i];
+      const proj = projectToMedialAxisFast(cx, cy, medialAxis);
+      newV.push(new paper.Point(proj.x, proj.y));
     } else {
-      // If cell is empty (numerical error or outside), keep original
       newV.push(currentV[i]);
     }
   }
@@ -146,46 +147,41 @@ function optimizePositions(
 
 /**
  * Evaluates E_coverage for Generalized Enveloping Primitives.
- * Uses robust ray-casting (getIntersections) to ensure visibility.
  */
 function getUncoveredBoundaryPoints(
   V: paper.Point[],
-  path: paper.CompoundPath,
+  flatBoundary: FlatBoundary,
+  tested: Uint8Array,
   samples: paper.Point[],
   stretchTolerance: number = 3.0,
 ): paper.Point[] {
-  const inscribedRadii = V.map((v) => getDistanceToBoundary(v, path));
+  const inscribedRadii = V.map((v) =>
+    nearestDistFlatBoundary(v.x, v.y, flatBoundary),
+  );
 
   const uncovered: paper.Point[] = [];
 
   for (const sample of samples) {
     let isCovered = false;
 
-    // Find the best candidate primitive (closest skeleton vertex)
     let bestV: paper.Point | null = null;
     let inscribedRadius = Infinity;
     let minDist = Infinity;
 
     for (let i = 0; i < V.length; i++) {
       const v = V[i];
-      const radius = inscribedRadii[i];
-      const dist = sample.getDistance(v);
+      const dist = Math.hypot(sample.x - v.x, sample.y - v.y);
       if (dist < minDist) {
         minDist = dist;
         bestV = v;
-        inscribedRadius = radius;
+        inscribedRadius = inscribedRadii[i];
       }
     }
 
     if (bestV) {
-      // 1. Geometric Check (Stretch Ratio)
-      // Check if the primitive can physically stretch this far
       const stretchRatio = minDist / (inscribedRadius + 0.001);
-
       if (stretchRatio <= stretchTolerance) {
-        // 2. Topology Check (Visibility)
-        // Use robust ray casting instead of midpoint check
-        if (isVisible(bestV, sample, path)) {
+        if (isVisible(bestV, sample, flatBoundary, tested)) {
           isCovered = true;
         }
       }
@@ -199,32 +195,32 @@ function getUncoveredBoundaryPoints(
 }
 
 /**
- * Checks if a line segment between two points is strictly contained within the shape.
- * Uses Paper.js `getIntersections` to detect boundary crossings.
+ * Checks if the line segment from start to end is unobstructed by the boundary.
+ * Casts a ray from start toward end; if the first boundary intersection is at
+ * or beyond the endpoint, the view is clear.
  */
 function isVisible(
   start: paper.Point,
   end: paper.Point,
-  path: paper.CompoundPath,
+  fb: FlatBoundary,
+  tested: Uint8Array,
 ): boolean {
-  // Create a temporary ray
-  const ray = new paper.Path.Line(start, end);
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return true;
 
-  // Compute intersections with the shape boundary
-  const intersections = ray.getIntersections(path);
-
-  // Analysis:
-  // We expect an intersection at 'end' (the boundary sample).
-  // Any intersection significantly BEFORE 'end' means the view is blocked.
-  for (const loc of intersections) {
-    // If we hit an obstacle more than 1 pixel away from the target sample,
-    // it's a blockage.
-    if (loc.point.getDistance(end) > 1.0) {
-      return false; // Blocked
-    }
-  }
-
-  return true; // Clear line of sight
+  tested.fill(0);
+  const d = rayIntersectFlatBoundary(
+    start.x,
+    start.y,
+    dx / len,
+    dy / len,
+    fb,
+    tested,
+  );
+  // Any intersection significantly before the endpoint means the view is blocked.
+  return d >= len - 1.0;
 }
 
 // --- Helper Functions ---
@@ -262,42 +258,46 @@ function getInitialSeeds(
   return [p1, p2];
 }
 
+/**
+ * Projects a point onto the nearest location on any medial axis segment.
+ * Pure arithmetic — no paper.js object allocation.
+ */
+function projectToMedialAxisFast(
+  px: number,
+  py: number,
+  medialAxis: MedialAxisGraph,
+): { x: number; y: number } {
+  let bestX = medialAxis.points[0].x;
+  let bestY = medialAxis.points[0].y;
+  let minDist = Infinity;
+
+  for (const [i1, i2] of medialAxis.segments) {
+    const ax = medialAxis.points[i1].x,
+      ay = medialAxis.points[i1].y;
+    const dx = medialAxis.points[i2].x - ax,
+      dy = medialAxis.points[i2].y - ay;
+    const lenSq = dx * dx + dy * dy;
+    let t = lenSq > 1e-10 ? ((px - ax) * dx + (py - ay) * dy) / lenSq : 0;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    const cx = ax + t * dx,
+      cy = ay + t * dy;
+    const dist = Math.hypot(px - cx, py - cy);
+    if (dist < minDist) {
+      minDist = dist;
+      bestX = cx;
+      bestY = cy;
+    }
+  }
+  return { x: bestX, y: bestY };
+}
+
 function projectToMedialAxis(
   pt: paper.Point,
   medialAxis: MedialAxisGraph,
 ): paper.Point {
-  let closestPt = medialAxis.points[medialAxis.segments[0][0]];
-  let minDst = Infinity;
-
-  for (const [i1, i2] of medialAxis.segments) {
-    const p1 = medialAxis.points[i1];
-    const p2 = medialAxis.points[i2];
-    // Project pt onto line segment p1-p2
-    const line = new paper.Path.Line(p1, p2);
-    const proj = line.getNearestPoint(pt);
-    const dst = proj.getDistance(pt);
-
-    if (dst < minDst) {
-      minDst = dst;
-      closestPt = proj;
-    }
-  }
-  return new paper.Point(closestPt);
-}
-
-function getDistanceToBoundary(
-  pt: paper.Point,
-  path: paper.CompoundPath,
-): number {
-  return path.getNearestPoint(pt).getDistance(pt);
-}
-
-function getCentroid(item: paper.Item): paper.Point {
-  // Paper.js `position` of a Path is its bounding box center,
-  // but for RVC we generally want the area centroid.
-  // `item.bounds.center` is a fast approx; `position` is often sufficient.
-  // For strict accuracy, one would integrate, but Paper.js doesn't expose moment integrals directly.
-  return item.bounds.center;
+  const p = projectToMedialAxisFast(pt.x, pt.y, medialAxis);
+  return new paper.Point(p.x, p.y);
 }
 
 function findFurthestPoint(
@@ -310,7 +310,7 @@ function findFurthestPoint(
   for (const c of candidates) {
     let minDist = Infinity;
     for (const r of references) {
-      const d = c.getDistance(r);
+      const d = Math.hypot(c.x - r.x, c.y - r.y);
       if (d < minDist) minDist = d;
     }
     if (minDist > maxMinDist) {
@@ -322,5 +322,7 @@ function findFurthestPoint(
 }
 
 function isDuplicate(pt: paper.Point, list: paper.Point[]): boolean {
-  return list.some((p) => p.getDistance(pt) < 1.0);
+  return list.some(
+    (p) => Math.hypot(p.x - pt.x, p.y - pt.y) < 1.0,
+  );
 }
