@@ -79,7 +79,7 @@ Z" />
 const path = PathData.fromSvg(svg_nieun_hieuh);
 
 let startTime = Date.now();
-const medialSkeletons = path.getMedialSkeleton();
+const medialSkeletons = path.getMedialSkeletonSync();
 let elapsedTime = Date.now() - startTime;
 console.log(`Medial skeletons: ${medialSkeletons.length} in ${elapsedTime}ms`);
 for (const skeleton of medialSkeletons) {
@@ -100,8 +100,10 @@ for (const skeleton of medialSkeletons) {
     console.log(
       primitive.origins
         .map((origin, i) => {
-          const p = origin.add(
-            primitive.directions[i].multiply(primitive.radii[i]),
+          const dir = primitive.directions[i];
+          const r = primitive.radii[i];
+          const p = new paper.Point(origin).add(
+            new paper.Point(dir).multiply(r),
           );
           return `(${p.x.toFixed(2)}+k,${(1000 - p.y).toFixed(2)})`;
         })
@@ -123,6 +125,7 @@ for (let i = 0; i < 10; i++) {
   startTime = Date.now();
   const newPath = path.scalePath(0, 0.6, 1.5, {
     doSimplify: false,
+    threaded: false,
     verbose: false,
   });
   elapsedTime = Date.now() - startTime;

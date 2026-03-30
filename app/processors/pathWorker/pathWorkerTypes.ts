@@ -1,6 +1,7 @@
 import { TSimplePathData } from "fabric";
 
 import { FittedMedialAxisGraph } from "@/app/pathUtils/localPrimitiveFitting";
+import { PathScaleOptions } from "@/app/pathUtils/skeleton";
 
 export type MessageToPathWorker = SkeletonizePathRequest | ScalePathRequest;
 
@@ -17,14 +18,6 @@ export interface ScalePathRequest {
   skeleton: FittedMedialAxisGraph;
   options: PathScaleOptions;
 }
-export type PathScaleOptions = {
-  scaleX: number;
-  scaleY: number;
-  scaleStroke: number;
-  strokeWidth: number;
-  doSimplify: boolean;
-  verbose: boolean;
-};
 
 export type MessageFromPathWorker = SkeletonizePathResult | ScalePathResult;
 

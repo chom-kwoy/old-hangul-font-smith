@@ -2,7 +2,7 @@ import { amber, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
 import paper from "paper";
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 
 import PathData from "@/app/pathUtils/PathData";
 import { fabricPathDataToPaper } from "@/app/pathUtils/convert";
@@ -442,11 +442,14 @@ export function FabricGlyphCanvas({
     }
 
     canvas.add(...mainFabricPaths, ...displayFabricPaths);
+    adjustStrokes(canvas);
 
-    const drawSkeletons = async () => {
-      // Medial axis skeleton overlay
-      const medialSkeletons =
-        (await currentPathRef.current?.getMedialSkeleton()) ?? [];
+    let isValid = true;
+    currentPathRef.current?.getMedialSkeleton().then((medialSkeletons) => {
+      if (!isValid || !medialSkeletons) {
+        // Don't update the canvas if the path has changed
+        return;
+      }
       const medialAxisLines = medialSkeletons.map((skeleton) => {
         const pathData = skeleton.segments.flatMap((seg): TSimplePathData => {
           const p0 = skeleton.points[seg[0]];
@@ -504,10 +507,11 @@ export function FabricGlyphCanvas({
       otherObjectsRef.current.push(...medialAxisLines, ...localPrimitives);
       canvas.add(...medialAxisLines, ...localPrimitives);
       adjustStrokes(canvas);
-    };
-    drawSkeletons();
+    });
 
-    adjustStrokes(canvas);
+    return () => {
+      isValid = false;
+    };
   }, [path, width, height, interactive, enableRescaling]);
 
   // Effect 4: Delete/Backspace key handling, scoped to this canvas instance.

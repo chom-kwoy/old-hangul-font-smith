@@ -1,10 +1,10 @@
 import { TSimplePathData } from "fabric";
 
 import { FittedMedialAxisGraph } from "@/app/pathUtils/localPrimitiveFitting";
+import { PathScaleOptions } from "@/app/pathUtils/skeleton";
 import {
   MessageFromPathWorker,
   MessageToPathWorker,
-  PathScaleOptions,
 } from "@/app/processors/pathWorker/pathWorkerTypes";
 import { WorkerPool } from "@/app/utils/WorkerHarness";
 

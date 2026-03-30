@@ -12,6 +12,11 @@ import {
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/localPrimitiveFitting";
+import {
+  PathScaleOptions,
+  scalePath,
+  skeletonize,
+} from "@/app/pathUtils/skeleton";
 import { Bounds } from "@/app/utils/types";
 
 export type SerializedPathData = {
@@ -225,46 +230,6 @@ export default class PathData {
     this.#skeletons = null;
   }
 
-  async scalePath(
-    index: number,
-    scaleX: number,
-    scaleY: number,
-    {
-      scaleStroke,
-      strokeWidth,
-      doSimplify,
-      verbose,
-    }: {
-      // 0 means stroke is fixed, 1 means fully scaled
-      scaleStroke?: number;
-      // the original font's average stroke width
-      strokeWidth?: number;
-      doSimplify?: boolean;
-      verbose?: boolean;
-    } = {},
-  ): Promise<TSimplePathData> {
-    scaleStroke = scaleStroke ?? 0.6;
-    strokeWidth = strokeWidth ?? 60.0;
-    doSimplify = doSimplify ?? true;
-    verbose = verbose ?? false;
-
-    if (index < 0 || index >= this.#originalPaths.length) {
-      throw new Error(`Invalid subpath index: ${index}`);
-    }
-
-    const path = this.#originalPaths[index];
-    const skeleton = (await this.getMedialSkeleton())[index];
-
-    return pathWorkerPool.scalePath(path, skeleton, {
-      scaleX,
-      scaleY,
-      scaleStroke,
-      strokeWidth,
-      doSimplify,
-      verbose,
-    });
-  }
-
   async getMedialSkeleton(): Promise<FittedMedialAxisGraph[]> {
     if (this.#skeletons === null) {
       if (this.#skeletonPromise === null) {
@@ -277,6 +242,62 @@ export default class PathData {
       this.#skeletons = await this.#skeletonPromise;
     }
     return this.#skeletons;
+  }
+
+  // used for testing
+  getMedialSkeletonSync(): FittedMedialAxisGraph[] {
+    if (this.#skeletons !== null) return this.#skeletons;
+    this.#skeletons = this.#originalPaths.map(skeletonize);
+    return this.#skeletons;
+  }
+
+  async scalePath(
+    index: number,
+    scaleX: number,
+    scaleY: number,
+    {
+      scaleStroke,
+      strokeWidth,
+      doSimplify,
+      threaded,
+      verbose,
+    }: {
+      // 0 means stroke is fixed, 1 means fully scaled
+      scaleStroke?: number;
+      // the original font's average stroke width
+      strokeWidth?: number;
+      doSimplify?: boolean;
+      threaded?: boolean;
+      verbose?: boolean;
+    } = {},
+  ): Promise<TSimplePathData> {
+    scaleStroke = scaleStroke ?? 0.6;
+    strokeWidth = strokeWidth ?? 60.0;
+    doSimplify = doSimplify ?? true;
+    threaded = threaded ?? true;
+    verbose = verbose ?? false;
+
+    if (index < 0 || index >= this.#originalPaths.length) {
+      throw new Error(`Invalid subpath index: ${index}`);
+    }
+
+    const path = this.#originalPaths[index];
+    const options: PathScaleOptions = {
+      scaleX,
+      scaleY,
+      scaleStroke,
+      strokeWidth,
+      doSimplify,
+      verbose,
+    };
+
+    if (!threaded) {
+      const skeleton = this.getMedialSkeletonSync()[index];
+      return scalePath(path, skeleton, options);
+    } else {
+      const skeleton = (await this.getMedialSkeleton())[index];
+      return pathWorkerPool.scalePath(path, skeleton, options);
+    }
   }
 }
 
