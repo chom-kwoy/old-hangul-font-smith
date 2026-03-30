@@ -18,6 +18,7 @@ import {
   MessageToPathWorker,
 } from "@/app/processors/pathWorker/pathWorkerTypes";
 import { initDrawContexts } from "@/app/utils/init";
+import { WorkerErrorResponse } from "@/app/utils/WorkerHarness";
 
 // initialize the paper.js context
 initDrawContexts();
@@ -33,9 +34,16 @@ addEventListener(
   "message",
   async (event: MessageEvent<MessageToPathWorker>) => {
     // console.log("Path worker received message:", event.data);
-    const result = await handleEvent(event);
-    // console.log("Path worker sending message:", result);
-    postMessage(result);
+    try {
+      postMessage(await handleEvent(event));
+    } catch (err) {
+      const response: WorkerErrorResponse = {
+        type: "error",
+        reqId: event.data.reqId,
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+      postMessage(response);
+    }
   },
 );
 postMessage("workerReady");

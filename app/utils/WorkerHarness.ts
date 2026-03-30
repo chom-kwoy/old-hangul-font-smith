@@ -1,3 +1,9 @@
+export interface WorkerErrorResponse {
+  type: "error";
+  reqId: number;
+  error: string;
+}
+
 export class WorkerHarness<
   ReqT extends { type: string; reqId: number },
   RetT extends { type: string; reqId: number },
@@ -44,11 +50,13 @@ export class WorkerHarness<
       }
       const start = performance.now();
       return new Promise<Ret>((resolve, reject) => {
-        const listener = (event: MessageEvent<RetT>) => {
+        const listener = (event: MessageEvent<RetT | WorkerErrorResponse>) => {
           const msg = event.data;
           if (msg.reqId === reqId) {
             worker?.removeEventListener("message", listener);
-            if (msg.type === request.type) {
+            if (msg.type === "error") {
+              reject(new Error((msg as WorkerErrorResponse).error));
+            } else if (msg.type === request.type) {
               console.debug(
                 `Worker ${this.#workerId}: got response for ${msg.type} in ${(performance.now() - start).toFixed(1)}ms\n` +
                   `Remaining tasks: ${this.#pendingTasks.size - 1}`,

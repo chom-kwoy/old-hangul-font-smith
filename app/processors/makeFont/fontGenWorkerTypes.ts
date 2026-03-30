@@ -4,6 +4,7 @@ export type MessageToFontGenWorker = GenerateFontRequest;
 
 export interface GenerateFontRequest {
   type: "generateFont";
+  reqId: number;
   buffer: ArrayBuffer;
   jamoVarsets: JamoVarsets;
   options: GenerateOptions;
@@ -12,6 +13,7 @@ export interface GenerateFontRequest {
 export type MessageFromFontGenWorker = GenerateFontResult;
 
 export interface GenerateFontResult {
-  type: "fontBlob";
+  type: "generateFont";
+  reqId: number;
   blob: Blob;
 }

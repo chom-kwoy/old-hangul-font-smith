@@ -4,6 +4,7 @@ import { TSimplePathData } from "fabric";
 import opentype from "opentype.js";
 import paper from "paper";
 
+import { pathWorkerPool } from "@/app/pathUtils/PathWorkerPool";
 import {
   fabricPathDataToPaper,
   fabricPathDataToSVG,
@@ -11,68 +12,23 @@ import {
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/localPrimitiveFitting";
-import {
-  MessageFromPathWorker,
-  MessageToPathWorker,
-  PathScaleOptions,
-} from "@/app/processors/pathWorker/pathWorkerTypes";
-import { WorkerHarness, WorkerPool } from "@/app/utils/WorkerHarness";
 import { Bounds } from "@/app/utils/types";
-
-class PathWorkerPool extends WorkerPool<
-  MessageToPathWorker,
-  MessageFromPathWorker
-> {
-  constructor(numWorkers: number) {
-    const workerFactory = () => {
-      if (typeof window !== "undefined") {
-        return new Worker(
-          new URL("../processors/pathWorker/pathWorker.ts", import.meta.url),
-          { type: "module" },
-        );
-      } else {
-        return null;
-      }
-    };
-    super(workerFactory, numWorkers);
-  }
-
-  async skeletonizePath(path: TSimplePathData): Promise<FittedMedialAxisGraph> {
-    const result = await this.requestTask({ type: "skeletonizePath", path });
-    return result.skeleton;
-  }
-
-  async scalePath(
-    path: TSimplePathData,
-    skeleton: FittedMedialAxisGraph,
-    options: PathScaleOptions,
-  ): Promise<TSimplePathData> {
-    const result = await this.requestTask({
-      type: "scalePath",
-      path,
-      skeleton,
-      options,
-    });
-    return result.path;
-  }
-}
-const pathWorkerPool = new PathWorkerPool(4);
 
 export type SerializedPathData = {
   readonly _paths_serialized: TSimplePathData[];
 };
 
 export default class PathData {
-  #paths: TSimplePathData[] = [];
+  #originalPaths: TSimplePathData[] = [];
   #skeletonPromise: Promise<FittedMedialAxisGraph[]> | null = null;
   #skeletons: FittedMedialAxisGraph[] | null = null;
 
   constructor(paths: TSimplePathData[]) {
-    this.#paths = paths;
+    this.#originalPaths = paths;
   }
 
   serialize(): SerializedPathData {
-    return { _paths_serialized: this.#paths };
+    return { _paths_serialized: this.#originalPaths };
   }
 
   static deserialize(data: SerializedPathData): PathData {
@@ -144,7 +100,7 @@ export default class PathData {
       return (1000 - y) * scale + sTypoDescender + offsetY;
     }
     const result: TSimplePathData = [];
-    for (const subpath of this.#paths) {
+    for (const subpath of this.#originalPaths) {
       for (const cmd of subpath) {
         switch (cmd[0]) {
           case "M": // move to
@@ -219,7 +175,7 @@ export default class PathData {
     offsetX = offsetX ?? 0;
     offsetY = offsetY ?? 0;
     const result: fabric.Path[] = [];
-    for (const comp of this.#paths) {
+    for (const comp of this.#originalPaths) {
       const bbox = fabricPathDataToPaper(comp).bounds;
       result.push(
         new fabric.Path(comp, {
@@ -236,7 +192,7 @@ export default class PathData {
 
   exportSvg(): string {
     let svgData = "";
-    for (const comp of this.#paths) {
+    for (const comp of this.#originalPaths) {
       svgData += `<path d="${fabricPathDataToSVG(comp)}" />\n`;
     }
     return `\
@@ -247,7 +203,7 @@ export default class PathData {
 
   intersectBoundsList(boundsList: Bounds[], threshold: number = 0.5) {
     const result: TSimplePathData[] = [];
-    for (const compoundPath of this.#paths) {
+    for (const compoundPath of this.#originalPaths) {
       const newPath = paperToFabricPathData(
         intersectCompoundPath(
           fabricPathDataToPaper(compoundPath),
@@ -263,7 +219,9 @@ export default class PathData {
   }
 
   filterPaths(pred: (path: TSimplePathData, index: number) => boolean): void {
-    this.#paths = this.#paths.filter((path, index) => pred(path, index));
+    this.#originalPaths = this.#originalPaths.filter((path, index) =>
+      pred(path, index),
+    );
     this.#skeletons = null;
   }
 
@@ -290,11 +248,11 @@ export default class PathData {
     doSimplify = doSimplify ?? true;
     verbose = verbose ?? false;
 
-    if (index < 0 || index >= this.#paths.length) {
+    if (index < 0 || index >= this.#originalPaths.length) {
       throw new Error(`Invalid subpath index: ${index}`);
     }
 
-    const path = this.#paths[index];
+    const path = this.#originalPaths[index];
     const skeleton = (await this.getMedialSkeleton())[index];
 
     return pathWorkerPool.scalePath(path, skeleton, {
@@ -311,7 +269,9 @@ export default class PathData {
     if (this.#skeletons === null) {
       if (this.#skeletonPromise === null) {
         this.#skeletonPromise = Promise.all(
-          this.#paths.map((subpath) => pathWorkerPool.skeletonizePath(subpath)),
+          this.#originalPaths.map((subpath) =>
+            pathWorkerPool.skeletonizePath(subpath),
+          ),
         );
       }
       this.#skeletons = await this.#skeletonPromise;

@@ -18,6 +18,7 @@ import {
   MessageToFontAnalyzerWorker,
 } from "@/app/processors/analyzeFont/fontAnalyzerWorkerTypes";
 import { ConsonantSets, JamoVarsets, VowelSets } from "@/app/utils/types";
+import { WorkerErrorResponse } from "@/app/utils/WorkerHarness";
 
 // Initialize paper.js context
 paper.setup(new paper.Size(1, 1));
@@ -176,48 +177,16 @@ async function analyzeJamoVarsets() {
 async function handleEvent(
   event: MessageEvent<MessageToFontAnalyzerWorker>,
 ): Promise<MessageFromFontAnalyzerWorker> {
+  const { reqId } = event.data;
   if (event.data.type === "loadFont") {
-    try {
-      const result = await loadFont(event.data.buffer);
-      return {
-        type: "fontParsed",
-        metadata: result,
-      };
-    } catch (err) {
-      console.error("Error loading font:", err);
-      return {
-        type: "error",
-        error: err instanceof Error ? err.message : "Unknown error",
-      };
-    }
+    const metadata = await loadFont(event.data.buffer);
+    return { type: "loadFont", reqId, metadata };
   } else if (event.data.type === "getSampleImage") {
-    try {
-      const sampleImage: string = await getSampleImage(event.data.sampleText);
-      return {
-        type: "sampleImage",
-        sampleImage: sampleImage,
-      };
-    } catch (err) {
-      console.error("Error generating sample image:", err);
-      return {
-        type: "error",
-        error: err instanceof Error ? err.message : "Unknown error",
-      };
-    }
+    const sampleImage = await getSampleImage(event.data.sampleText);
+    return { type: "getSampleImage", reqId, sampleImage };
   } else if (event.data.type === "analyzeFont") {
-    try {
-      const result = await analyzeJamoVarsets();
-      return {
-        type: "fontAnalyzed",
-        jamoVarsets: result,
-      };
-    } catch (err) {
-      console.error("Error analyzing font:", err);
-      return {
-        type: "error",
-        error: err instanceof Error ? err.message : "Unknown error",
-      };
-    }
+    const jamoVarsets = await analyzeJamoVarsets();
+    return { type: "analyzeFont", reqId, jamoVarsets };
   } else {
     throw new Error("Invalid event type");
   }
@@ -227,6 +196,16 @@ addEventListener(
   "message",
   async (event: MessageEvent<MessageToFontAnalyzerWorker>) => {
     console.log("AnalyzeFontWorker received message:", event.data);
-    postMessage(await handleEvent(event));
+    try {
+      postMessage(await handleEvent(event));
+    } catch (err) {
+      const response: WorkerErrorResponse = {
+        type: "error",
+        reqId: event.data.reqId,
+        error: err instanceof Error ? err.message : "Unknown error",
+      };
+      postMessage(response);
+    }
   },
 );
+postMessage("workerReady");

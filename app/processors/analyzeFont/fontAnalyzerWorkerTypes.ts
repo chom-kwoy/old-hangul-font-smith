@@ -1,51 +1,46 @@
-import { JamoVarsets } from "@/app/utils/types";
+import { FontMetadata, JamoVarsets } from "@/app/utils/types";
 
 export type MessageToFontAnalyzerWorker =
-  | GenerateFontRequest
-  | SampleImageRequest
+  | LoadFontRequest
+  | GetSampleImageRequest
   | AnalyzeFontRequest;
 
-export interface GenerateFontRequest {
+export interface LoadFontRequest {
   type: "loadFont";
+  reqId: number;
   buffer: ArrayBuffer;
 }
 
-export interface SampleImageRequest {
+export interface GetSampleImageRequest {
   type: "getSampleImage";
+  reqId: number;
   sampleText: string;
 }
 
 export interface AnalyzeFontRequest {
   type: "analyzeFont";
+  reqId: number;
 }
 
 export type MessageFromFontAnalyzerWorker =
-  | GenerateFontResult
-  | SampleImageResult
-  | AnalyzeFontResult
-  | ErrorMessage;
+  | LoadFontResult
+  | GetSampleImageResult
+  | AnalyzeFontResult;
 
-export interface GenerateFontResult {
-  type: "fontParsed";
-  metadata: {
-    name: string;
-    style: string;
-    family: string;
-    numGlyphs: number;
-  };
+export interface LoadFontResult {
+  type: "loadFont";
+  reqId: number;
+  metadata: FontMetadata;
 }
 
-export interface SampleImageResult {
-  type: "sampleImage";
+export interface GetSampleImageResult {
+  type: "getSampleImage";
+  reqId: number;
   sampleImage: string;
 }
 
 export interface AnalyzeFontResult {
-  type: "fontAnalyzed";
+  type: "analyzeFont";
+  reqId: number;
   jamoVarsets: JamoVarsets;
-}
-
-export interface ErrorMessage {
-  type: "error";
-  error: string;
 }

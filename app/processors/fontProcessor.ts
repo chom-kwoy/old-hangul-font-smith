@@ -10,80 +10,59 @@ import {
   MessageToFontGenWorker,
 } from "@/app/processors/makeFont/fontGenWorkerTypes";
 import { FontMetadata, GenerateOptions, JamoVarsets } from "@/app/utils/types";
+import { WorkerHarness } from "@/app/utils/WorkerHarness";
 
 export class FontProcessor {
-  analyzeFontWorker!: Worker;
-  makeFontWorker!: Worker;
+  #analyzeWorker: WorkerHarness<
+    MessageToFontAnalyzerWorker,
+    MessageFromFontAnalyzerWorker
+  >;
+  #genWorker: WorkerHarness<MessageToFontGenWorker, MessageFromFontGenWorker>;
   font: opentype.Font | null = null;
   fontFile: File | null = null;
 
   constructor() {
-    if (typeof window !== "undefined") {
-      this.analyzeFontWorker = new Worker(
-        new URL("analyzeFont/fontAnalyzerWorker.ts", import.meta.url),
-        { type: "module" },
-      );
-      this.makeFontWorker = new Worker(
-        new URL("makeFont/fontGenWorker.ts", import.meta.url),
-        { type: "module" },
-      );
-    }
+    this.#analyzeWorker = new WorkerHarness(
+      typeof window !== "undefined"
+        ? new Worker(
+            new URL("analyzeFont/fontAnalyzerWorker.ts", import.meta.url),
+            { type: "module" },
+          )
+        : null,
+    );
+    this.#genWorker = new WorkerHarness(
+      typeof window !== "undefined"
+        ? new Worker(new URL("makeFont/fontGenWorker.ts", import.meta.url), {
+            type: "module",
+          })
+        : null,
+    );
   }
 
   async loadFont(file: File): Promise<FontMetadata> {
     const buffer = await file.arrayBuffer();
     this.font = opentype.parse(buffer);
     this.fontFile = file;
-    return new Promise((resolve, reject) => {
-      this.analyzeFontWorker.onmessage = (
-        event: MessageEvent<MessageFromFontAnalyzerWorker>,
-      ) => {
-        if (event.data.type === "fontParsed") {
-          resolve(event.data.metadata);
-        } else if (event.data.type === "error") {
-          reject(event.data.error);
-        }
-      };
-      this.analyzeFontWorker?.postMessage({
-        type: "loadFont",
-        buffer: buffer,
-      } satisfies MessageToFontAnalyzerWorker);
+    const result = await this.#analyzeWorker.requestTask({
+      type: "loadFont",
+      buffer,
     });
+    return result.metadata;
   }
 
   async getSampleImage(sampleText: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      this.analyzeFontWorker.onmessage = (
-        event: MessageEvent<MessageFromFontAnalyzerWorker>,
-      ) => {
-        if (event.data.type === "sampleImage") {
-          resolve(event.data.sampleImage);
-        } else if (event.data.type === "error") {
-          reject(event.data.error);
-        }
-      };
-      this.analyzeFontWorker?.postMessage({
-        type: "getSampleImage",
-        sampleText: sampleText,
-      } satisfies MessageToFontAnalyzerWorker);
+    const result = await this.#analyzeWorker.requestTask({
+      type: "getSampleImage",
+      sampleText,
     });
+    return result.sampleImage;
   }
 
   async analyzeJamoVarsets(): Promise<JamoVarsets> {
-    return new Promise((resolve, reject) => {
-      this.analyzeFontWorker.onmessage = (
-        event: MessageEvent<MessageFromFontAnalyzerWorker>,
-      ) => {
-        if (event.data.type === "fontAnalyzed") {
-          resolve(event.data.jamoVarsets);
-        } else if (event.data.type === "error") {
-          reject(event.data.error);
-        }
-      };
-      this.analyzeFontWorker?.postMessage({
-        type: "analyzeFont",
-      } satisfies MessageToFontAnalyzerWorker);
+    const result = await this.#analyzeWorker.requestTask({
+      type: "analyzeFont",
     });
+    return result.jamoVarsets;
   }
 
   async downloadFont(
@@ -93,35 +72,19 @@ export class FontProcessor {
     if (!this.fontFile) {
       throw new Error("Call loadFont() first.");
     }
-
-    this.makeFontWorker.postMessage({
+    const result = await this.#genWorker.requestTask({
       type: "generateFont",
       buffer: await this.fontFile.arrayBuffer(),
-      jamoVarsets: jamoVarsets,
-      options: options,
-    } satisfies MessageToFontGenWorker);
-
-    const blob = await new Promise<Blob>((resolve) => {
-      if (!this.makeFontWorker) {
-        throw new Error("Worker not initialized.");
-      }
-      this.makeFontWorker.onmessage = (
-        event: MessageEvent<MessageFromFontGenWorker>,
-      ) => {
-        const msg = event.data;
-        if (msg.type === "fontBlob") {
-          resolve(msg.blob);
-        }
-      };
+      jamoVarsets,
+      options,
     });
 
     const newFileName = this.fontFile.name.replace(
       /\.([a-zA-Z]*?)$/i,
       "_modified.$1",
     );
-
     const link = document.createElement("a");
-    link.href = window.URL.createObjectURL(blob);
+    link.href = window.URL.createObjectURL(result.blob);
     link.download = newFileName;
     link.click();
     link.remove();
@@ -139,7 +102,6 @@ export class FontProcessor {
     if (!this.font) {
       throw new Error("Call loadFont() first.");
     }
-    // Font metric scaling (Em units usually 1000 or 2048)
     const unitsPerEm = this.font.unitsPerEm;
     const sTypoDescender = this.font.tables.os2.sTypoDescender;
     return PathData.fromOpentype(path, unitsPerEm, sTypoDescender);
