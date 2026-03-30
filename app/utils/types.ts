@@ -68,9 +68,12 @@ export type VowelVarsetType =
 export type VarsetType = ConsonantVarsetType | VowelVarsetType;
 
 export type SavedState = {
+  id?: number;
   metadata: FontMetadata;
+  fileName: string;
   previewImage: string;
   jamoVarsets: JamoVarsets;
+  fontBuffer: ArrayBuffer;
   progress: number;
   date: number;
 };

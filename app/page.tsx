@@ -10,12 +10,10 @@ import {
   Snackbar,
 } from "@mui/material";
 import Button from "@mui/material/Button";
-import { produce } from "immer";
 import moment from "moment";
 import React, { useEffect, useState } from "react";
 import { MaterialSymbol } from "react-material-symbols-react19";
 import "react-material-symbols-react19/outlined";
-import { useLocalStorage } from "react-use";
 
 import { Editor } from "@/app/components/Editor";
 import { VisuallyHiddenInput } from "@/app/components/VisuallyHiddenInput";
@@ -23,6 +21,12 @@ import { getProgress } from "@/app/hangul/jamos";
 import { FontProcessor } from "@/app/processors/fontProcessor";
 import { fontLoaded } from "@/app/redux/features/font/font-slice";
 import { useAppDispatch, useAppStore } from "@/app/redux/hooks";
+import {
+  addSavedFont,
+  deleteSavedFont,
+  getAllSavedFonts,
+  updateSavedFont,
+} from "@/app/utils/db";
 import { initDrawContexts } from "@/app/utils/init";
 import schedulerYield from "@/app/utils/schedulerYield";
 import { FontMetadata, JamoVarsets, SavedState } from "@/app/utils/types";
@@ -61,20 +65,12 @@ export default function Home() {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState("");
 
-  // Access localstorage for saved fonts
-  const [savedFonts_, setSavedFonts] = useLocalStorage<SavedState[]>(
-    "saved-fonts",
-    [],
-  );
+  const [savedFonts, setSavedFonts] = useState<SavedState[]>([]);
+  const [curSavedFontId, setCurSavedFontId] = useState<number | null>(null);
 
-  // Workaround for hydration mismatch error
-  const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsMounted(true);
+    getAllSavedFonts().then(setSavedFonts);
   }, []);
-  const savedFonts = isMounted ? (savedFonts_ ?? []) : [];
-  const [curSavedFontIdx, setCurSavedFontIdx] = useState<number | null>(null);
 
   async function handleFileChange(files: FileList | null) {
     if (!files || !files.length) {
@@ -101,72 +97,45 @@ export default function Home() {
 
     setAppState(AppState.READY_TO_GENERATE);
 
-    setCurSavedFontIdx(savedFonts.length);
-    setSavedFonts(
-      produce(savedFonts, (prevSavedFonts) => {
-        prevSavedFonts.push({
-          metadata: metadata,
-          previewImage: sampleImage,
-          jamoVarsets: varsets,
-          progress: getProgress(varsets),
-          date: moment().valueOf(),
-        });
-      }),
-    );
+    const newId = await addSavedFont({
+      metadata,
+      fileName: files[0].name,
+      previewImage: sampleImage,
+      jamoVarsets: varsets,
+      fontBuffer: await files[0].arrayBuffer(),
+      progress: getProgress(varsets),
+      date: moment().valueOf(),
+    });
+    setCurSavedFontId(newId);
+    setSavedFonts(await getAllSavedFonts());
   }
 
-  async function loadSavedFont(index: number, saved: SavedState) {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = FONT_MIME_TYPES;
-    input.onchange = async () => {
-      const files = input.files;
-      if (!files || !files.length) {
-        setAppState(AppState.ERROR);
-        setErrorMsg("No file found.");
-        return;
-      }
+  async function loadSavedFont(saved: SavedState) {
+    setAppState(AppState.PROCESSING_FONT);
+    await schedulerYield();
 
-      setAppState(AppState.PROCESSING_FONT);
+    const file = new File([saved.fontBuffer], saved.fileName);
+    const loadedMetadata = await fontProcessor.loadFont(file);
 
-      // Allow page to render before heavy operation
-      await schedulerYield();
+    setFontMetadata(loadedMetadata);
+    setPreviewImage(saved.previewImage);
+    dispatch(fontLoaded(saved.jamoVarsets));
 
-      const loadedMetadata = await fontProcessor.loadFont(files[0]);
-      if (
-        saved.metadata.name !== loadedMetadata.name ||
-        saved.metadata.family !== loadedMetadata.family ||
-        saved.metadata.style !== loadedMetadata.style
-      ) {
-        setAppState(AppState.ERROR);
-        setErrorMsg("You need to select the same font file as before.");
-        return;
-      }
+    setAppState(AppState.READY_TO_GENERATE);
 
-      setFontMetadata(loadedMetadata);
-      setPreviewImage(saved.previewImage);
-      dispatch(fontLoaded(saved.jamoVarsets));
-
-      setAppState(AppState.READY_TO_GENERATE);
-
-      setCurSavedFontIdx(index);
-      // update date
-      setSavedFonts(
-        produce(savedFonts, (prevSavedFonts) => {
-          prevSavedFonts[index].date = moment().valueOf();
-        }),
-      );
-    };
-    input.click();
+    setCurSavedFontId(saved.id!);
+    const updated = { ...saved, date: moment().valueOf() };
+    await updateSavedFont(updated);
+    setSavedFonts(await getAllSavedFonts());
   }
 
-  function saveFont(newJamoVarsets: JamoVarsets) {
-    if (curSavedFontIdx !== null) {
-      setSavedFonts(
-        produce(savedFonts, (prevSavedFonts) => {
-          prevSavedFonts[curSavedFontIdx].jamoVarsets = newJamoVarsets;
-        }),
-      );
+  async function saveFont(newJamoVarsets: JamoVarsets) {
+    if (curSavedFontId !== null) {
+      const current = savedFonts.find((f) => f.id === curSavedFontId);
+      if (current) {
+        await updateSavedFont({ ...current, jamoVarsets: newJamoVarsets });
+        setSavedFonts(await getAllSavedFonts());
+      }
       setSnackbarMsg("Saved.");
       setSnackbarOpen(true);
     }
@@ -272,7 +241,7 @@ export default function Home() {
                     if (jamoVarsets) {
                       saveFont(jamoVarsets);
                       setAppState(AppState.IDLE);
-                      setCurSavedFontIdx(null);
+                      setCurSavedFontId(null);
                     }
                   }}
                   className="text-sm text-stone-500 hover:text-stone-800 underline"
@@ -292,17 +261,15 @@ export default function Home() {
               </h2>
             </div>
             <div className="text-sm text-stone-600 pb-1">
-              Select a font to continue editing. After selecting,{" "}
-              <strong>re-upload the source font file</strong> to resume your
-              session.
+              Select a font to continue editing.
             </div>
             <div className="bg-stone-50 border border-stone-200 p-10">
               <div className="flex flex-wrap justify-evenly items-center gap-10">
                 {savedFonts.map((font, i) => (
                   <div
-                    key={i}
+                    key={font.id}
                     className="w-80 flex-none shadow-sm rounded-xl bg-white hover:bg-amber-200 transition-colors duration-300 ease-in-out border border-stone-200 p-2 cursor-pointer"
-                    onClick={() => loadSavedFont(i, savedFonts[i])}
+                    onClick={() => loadSavedFont(font)}
                   >
                     <div className="flex">
                       <div className="text-stone-700 self-center">
@@ -313,7 +280,7 @@ export default function Home() {
                           <IconButton
                             aria-label="options"
                             onClick={handleClick}
-                            value={i}
+                            value={String(font.id)}
                           >
                             <MaterialSymbol
                               icon={"more_horiz"}
@@ -332,14 +299,11 @@ export default function Home() {
                             }}
                           >
                             <MenuItem
-                              onClick={() => {
+                              onClick={async () => {
                                 if (anchorEl) {
-                                  const i = parseInt(anchorEl.value);
-                                  setSavedFonts(
-                                    produce(savedFonts, (prevSavedFonts) => {
-                                      prevSavedFonts.splice(i, 1);
-                                    }),
-                                  );
+                                  const id = parseInt(anchorEl.value);
+                                  await deleteSavedFont(id);
+                                  setSavedFonts(await getAllSavedFonts());
                                   setAnchorEl(null);
                                 }
                               }}
