@@ -123,7 +123,7 @@ for (const skeleton of medialSkeletons) {
 
 for (let i = 0; i < 10; i++) {
   startTime = Date.now();
-  const newPath = path.scalePath(0, 0.6, 1.5, {
+  await path.scalePath(0, 0.6, 1.5, {
     doSimplify: false,
     threaded: false,
     verbose: false,

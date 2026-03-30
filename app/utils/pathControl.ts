@@ -109,9 +109,13 @@ const movePathPoint = (
 
   // Compute delta in path-data space before setDimensions() updates pathOffset
   const deltaX =
-    mouseLocalPosition.x + pathOffset.x - (path[commandIndex][pointIndex] as number);
+    mouseLocalPosition.x +
+    pathOffset.x -
+    (path[commandIndex][pointIndex] as number);
   const deltaY =
-    mouseLocalPosition.y + pathOffset.y - (path[commandIndex][pointIndex + 1] as number);
+    mouseLocalPosition.y +
+    pathOffset.y -
+    (path[commandIndex][pointIndex + 1] as number);
 
   path[commandIndex][pointIndex] = mouseLocalPosition.x + pathOffset.x;
   path[commandIndex][pointIndex + 1] = mouseLocalPosition.y + pathOffset.y;
@@ -191,7 +195,10 @@ const lastControlPoints: Control[] = [];
 class PathPointControl extends Control {
   declare commandIndex: number;
   declare pointIndex: number;
-  declare linkedControlPoints: Array<{ commandIndex: number; pointIndex: number }>;
+  declare linkedControlPoints: Array<{
+    commandIndex: number;
+    pointIndex: number;
+  }>;
   declare controlFill: string;
   declare controlStroke: string;
   declare controlSize: number;
@@ -249,7 +256,7 @@ class PathControlPointControl extends PathPointControl {
     styleOverride: ControlRenderingStyleOverride | undefined,
     fabricObject: Path,
   ) {
-    const { path, controls } = fabricObject;
+    const { path } = fabricObject;
     const {
       commandIndex,
       pointIndex,
@@ -257,8 +264,6 @@ class PathControlPointControl extends PathPointControl {
       connectToPointIndex,
     } = this;
     const [commandType] = path[commandIndex];
-
-    const parentControl = controls[`c_${connectToCommandIndex}_${commandType}`];
 
     super.render(ctx, left, top, styleOverride, fabricObject);
 
@@ -468,9 +473,9 @@ export function createPathControls(
   for (const [cmdIdxStr, cps] of Object.entries(controlPoints)) {
     const cmdIdx = parseInt(cmdIdxStr);
     const commandType = path.path[cmdIdx][0] as TSimpleParseCommandType;
-    const anchorControl = controls[
-      `c_${cmdIdx}_${commandType}`
-    ] as PathPointControl | undefined;
+    const anchorControl = controls[`c_${cmdIdx}_${commandType}`] as
+      | PathPointControl
+      | undefined;
     if (anchorControl) {
       anchorControl.linkedControlPoints = cps.map(({ control: cp }) => ({
         commandIndex: (cp as PathControlPointControl).commandIndex,

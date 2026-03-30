@@ -267,7 +267,7 @@ export default function Home() {
               <div className="flex flex-wrap justify-evenly items-center gap-10">
                 {savedFonts.map((font, i) => (
                   <div
-                    key={font.id}
+                    key={i}
                     className="w-80 flex-none shadow-sm rounded-xl bg-white hover:bg-amber-200 transition-colors duration-300 ease-in-out border border-stone-200 p-2 cursor-pointer"
                     onClick={() => loadSavedFont(font)}
                   >
