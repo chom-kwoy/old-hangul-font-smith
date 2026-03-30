@@ -23,7 +23,7 @@ import { MedialAxisGraph, sampleBoundary } from "@/app/pathUtils/medialAxis";
 export function computeMedialSkeletonPoints(
   path: paper.CompoundPath,
   medialAxis: MedialAxisGraph,
-  tolerance: number = 100.0,
+  tolerance: number = 3.0,
   verbose: boolean = false,
 ): paper.Point[] {
   const random = seedrandom("42");
@@ -153,7 +153,7 @@ function getUncoveredBoundaryPoints(
   flatBoundary: FlatBoundary,
   tested: Uint8Array,
   samples: paper.Point[],
-  stretchTolerance: number = 3.0,
+  stretchTolerance: number,
 ): paper.Point[] {
   const inscribedRadii = V.map((v) =>
     nearestDistFlatBoundary(v.x, v.y, flatBoundary),
@@ -322,7 +322,5 @@ function findFurthestPoint(
 }
 
 function isDuplicate(pt: paper.Point, list: paper.Point[]): boolean {
-  return list.some(
-    (p) => Math.hypot(p.x - pt.x, p.y - pt.y) < 1.0,
-  );
+  return list.some((p) => Math.hypot(p.x - pt.x, p.y - pt.y) < 1.0);
 }

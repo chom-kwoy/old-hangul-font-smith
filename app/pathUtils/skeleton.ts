@@ -205,7 +205,11 @@ function minkowskiSum(
       y: p.y * clipperScale,
     }))
     .toReversed();
-  const result = clipper.minkowskiSumPaths(scaledPattern, scaledPoints, true);
+  const cleanedPoints = clipper.simplifyPolygons(
+    scaledPoints,
+    PolyFillType.EvenOdd,
+  );
+  const result = clipper.minkowskiSumPaths(scaledPattern, cleanedPoints, true);
   if (result === undefined) {
     throw new Error("clipper.minkowskiSumPath failed");
   }
@@ -214,7 +218,14 @@ function minkowskiSum(
       .map((p) => new paper.Point(p.x / clipperScale, p.y / clipperScale))
       .toReversed();
   } else {
-    return result[1].map(
+    if (result.length < 2) {
+      throw new Error(
+        "minkowskiSum shrink should return 2 paths, instead got: " +
+          result.length +
+          " path(s)",
+      );
+    }
+    return result[result.length - 1].map(
       (p) => new paper.Point(p.x / clipperScale, p.y / clipperScale),
     );
   }

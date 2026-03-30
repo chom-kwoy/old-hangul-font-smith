@@ -17,6 +17,7 @@ addEventListener(
     try {
       postMessage(await handleEvent(event));
     } catch (err) {
+      console.error("Error in path worker:", err);
       const response: WorkerErrorResponse = {
         type: "error",
         reqId: event.data.reqId,

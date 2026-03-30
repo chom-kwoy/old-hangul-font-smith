@@ -1,10 +1,9 @@
 import paper from "paper";
 
 import PathData from "@/app/pathUtils/PathData";
+import { initDrawContexts } from "@/app/utils/init";
 
-// @ts-expect-error no argument is also allowed
-paper.setup();
-paper.settings.insertItems = false;
+initDrawContexts();
 
 const svg_kiyeok = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
 <path d="M 703,263
@@ -76,7 +75,47 @@ Z" />
 
 </svg>`;
 
-const path = PathData.fromSvg(svg_nieun_hieuh);
+const hieuh_t4 = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <path d="M 340,842
+C 340,910 402,959 511,959
+C 620,959 684,910 684,842
+C 684,775 620,725 511,725
+C 402,725 340,775 340,842
+Z
+M 408,842
+C 408,792 446,763 512,763
+C 578,763 616,792 616,842
+C 616,880 578,914 512,914
+C 446,914 408,880 408,842
+Z" />
+<path d="M 719,681
+C 777,680 788,674 788,652
+C 788,634 771,624 713,624
+C 695,624 674,629 662,635
+C 650,641 634,645 615,647
+C 588,649 557,650 506,651
+C 408,655 370,657 358,657
+C 330,657 315,657 297,656
+C 274,655 254,653 223,649
+C 209,647 204,661 214,667
+C 233,681 275,709 309,709
+C 313,709 324,707 336,703
+C 349,698 360,695 370,694
+C 422,691 476,689 518,687
+Z" />
+<path d="M 387,539
+C 368,533 354,546 366,560
+C 385,581 417,602 442,602
+L 570,602
+C 602,602 611,591 611,575
+C 611,558 597,552 566,552
+L 466,552
+C 435,552 411,547 387,539
+Z" />
+
+</svg>`;
+
+const path = PathData.fromSvg(hieuh_t4);
 
 let startTime = Date.now();
 const medialSkeletons = path.getMedialSkeletonSync();
@@ -105,19 +144,10 @@ for (const skeleton of medialSkeletons) {
           const p = new paper.Point(origin).add(
             new paper.Point(dir).multiply(r),
           );
-          return `(${p.x.toFixed(2)}+k,${(1000 - p.y).toFixed(2)})`;
+          return `(${p.x.toFixed(2)},${(1000 - p.y).toFixed(2)})`;
         })
         .join(",") + "\n",
     );
-    // console.log("origins");
-    // console.log(
-    //   primitive.origins
-    //     .map((origin, i) => {
-    //       const p = origin;
-    //       return `(${p.x.toFixed(2)},${(-p.y).toFixed(2)})`;
-    //     })
-    //     .join(","),
-    // );
   });
 }
 

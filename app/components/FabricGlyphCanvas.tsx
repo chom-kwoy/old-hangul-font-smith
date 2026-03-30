@@ -274,6 +274,30 @@ export function FabricGlyphCanvas({
       }
     });
 
+    if (interactive) {
+      canvas.on("object:moving", () => {
+        const activeObjects = canvas.getActiveObjects();
+        for (const obj of activeObjects) {
+          const state = pathObjectsRef.current.find((p) => p.main === obj);
+          if (state) handleMove(state);
+        }
+      });
+      canvas.on("object:scaling", () => {
+        const activeObjects = canvas.getActiveObjects();
+        for (const obj of activeObjects) {
+          const idx = pathObjectsRef.current.findIndex((p) => p.main === obj);
+          if (idx >= 0 && currentPathRef.current) {
+            handleScale(
+              pathObjectsRef.current[idx],
+              currentPathRef.current,
+              idx,
+              enableRescaling,
+            );
+          }
+        }
+      });
+    }
+
     canvas.viewportTransform = viewportRef.current ?? initialVpt;
     adjustStrokes(canvas);
 
@@ -289,7 +313,7 @@ export function FabricGlyphCanvas({
       canvas?.dispose();
       fabricCanvasRef.current = null;
     };
-  }, [interactive, width, height]);
+  }, [interactive, width, height, enableRescaling]);
 
   // Effect 2: background paths — runs after canvas init when bgPaths or dimensions change.
   useEffect(() => {
@@ -386,25 +410,6 @@ export function FabricGlyphCanvas({
     );
 
     if (interactive) {
-      canvas.on("object:moving", () => {
-        const activeObjects = canvas.getActiveObjects();
-        for (const obj of activeObjects) {
-          const state = pathObjectsRef.current.find((p) => p.main === obj);
-          if (state) {
-            handleMove(state);
-          }
-        }
-      });
-      canvas.on("object:scaling", () => {
-        const activeObjects = canvas.getActiveObjects();
-        for (const obj of activeObjects) {
-          const idx = pathObjectsRef.current.findIndex((p) => p.main === obj);
-          if (idx >= 0 && currentPathRef.current) {
-            const state = pathObjectsRef.current[idx];
-            handleScale(state, currentPathRef.current, idx, enableRescaling);
-          }
-        }
-      });
       for (let i = 0; i < mainFabricPaths.length; ++i) {
         const state = pathObjectsRef.current[i];
         state.main.on("mousedblclick", () => {
@@ -521,18 +526,27 @@ export function FabricGlyphCanvas({
       const canvas = fabricCanvasRef.current;
       if (!canvas || !currentPathRef.current) return;
 
-      const activeObjects = canvas.getActiveObjects();
-      if (activeObjects.length === 0) return;
+      const activeObjects = new Set(canvas.getActiveObjects());
+      if (activeObjects.size === 0) return;
+
+      const toDelete = pathObjectsRef.current.filter((p) =>
+        activeObjects.has(p.main),
+      );
+      if (toDelete.length === 0) return;
 
       canvas.discardActiveObject();
-      for (const obj of activeObjects) canvas.remove(obj);
+      for (const p of toDelete) {
+        canvas.remove(p.main);
+        canvas.remove(p.display);
+      }
       canvas.requestRenderAll();
 
-      currentPathRef.current.filterPaths((_, i) => {
-        return !activeObjects.includes(pathObjectsRef.current[i].main);
-      });
+      const deleteSet = new Set(toDelete);
+      currentPathRef.current.filterPaths(
+        (_, i) => !deleteSet.has(pathObjectsRef.current[i]),
+      );
       pathObjectsRef.current = pathObjectsRef.current.filter(
-        (fp) => !activeObjects.includes(fp.main),
+        (p) => !deleteSet.has(p),
       );
       onPathChangedRef.current?.(currentPathRef.current.clone());
     }
