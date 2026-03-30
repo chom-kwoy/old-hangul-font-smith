@@ -11,6 +11,93 @@ import {
   deselectPathControls,
 } from "@/app/utils/pathControl";
 
+type PathObjects = {
+  main: fabric.Path;
+  display: fabric.Path;
+  baseScaleX: number;
+  baseScaleY: number;
+  boundOffsetX: number;
+  boundOffsetY: number;
+  origCenter: { x: number; y: number };
+  editing: boolean;
+};
+
+function getTransform(obj: fabric.FabricObject) {
+  const mat = obj.calcTransformMatrix();
+  return fabric.util.qrDecompose(mat);
+}
+
+function handleMove(state: PathObjects) {
+  const mainTransform = getTransform(state.main);
+  state.display.left = mainTransform.translateX + state.boundOffsetX;
+  state.display.top = mainTransform.translateY + state.boundOffsetY;
+  state.main.canvas?.requestRenderAll();
+}
+
+async function handleScale(
+  state: PathObjects,
+  pathData: PathData,
+  subPathIndex: number,
+  enableRescaling: boolean,
+) {
+  const mainTransform = getTransform(state.main);
+  state.display.scaleX = mainTransform.scaleX / state.baseScaleX;
+  state.display.scaleY = mainTransform.scaleY / state.baseScaleY;
+  state.display.left = mainTransform.translateX + state.boundOffsetX;
+  state.display.top = mainTransform.translateY + state.boundOffsetY;
+  adjustStroke(state.display);
+  state.main.canvas?.requestRenderAll();
+
+  if (enableRescaling) {
+    const scaleX = state.main.scaleX;
+    const scaleY = state.main.scaleY;
+    const scaled = await pathData.scalePath(subPathIndex, scaleX, scaleY, {
+      strokeWidth: 40.0,
+      doSimplify: false,
+      verbose: false,
+    });
+    if (scaled) {
+      state.baseScaleX = scaleX;
+      state.baseScaleY = scaleY;
+
+      const bounds = fabricPathDataToPaper(scaled).bounds;
+      state.boundOffsetX = bounds.center.x - state.origCenter.x;
+      state.boundOffsetY = bounds.center.y - state.origCenter.y;
+
+      const mainTransform = getTransform(state.main);
+      state.display.scaleX = mainTransform.scaleX / state.baseScaleX;
+      state.display.scaleY = mainTransform.scaleY / state.baseScaleY;
+      state.display.left = mainTransform.translateX + state.boundOffsetX;
+      state.display.top = mainTransform.translateY + state.boundOffsetY;
+
+      state.display.set({ path: scaled });
+      state.display.setBoundingBox();
+      state.display.setDimensions();
+      state.display.setCoords();
+
+      adjustStroke(state.display);
+      state.main.canvas?.requestRenderAll();
+    }
+  }
+}
+
+function adjustStroke(obj_: fabric.FabricObject) {
+  const obj = obj_ as typeof obj_ & {
+    originalScale: number | undefined;
+    originalStrokeWidth: number | undefined;
+  };
+  if (obj.originalStrokeWidth === undefined) {
+    obj.originalStrokeWidth = obj.strokeWidth;
+  }
+  const objScale = (obj.scaleX + obj.scaleY) / 2;
+  const multiplier = 1 / obj.canvas!.getZoom() / objScale;
+  obj.set("strokeWidth", obj.originalStrokeWidth * multiplier);
+}
+
+function adjustStrokes(canvas: fabric.Canvas) {
+  canvas.forEachObject(adjustStroke);
+}
+
 export function FabricGlyphCanvas({
   path,
   bgPaths = [],
@@ -36,10 +123,6 @@ export function FabricGlyphCanvas({
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
   const viewportRef = useRef<fabric.TMat2D | null>(null);
 
-  type PathObjects = {
-    main: fabric.Path;
-    display: fabric.Path;
-  };
   const pathObjectsRef = useRef<PathObjects[]>([]);
   const bgPathObjectsRef = useRef<fabric.Path[]>([]);
   const otherObjectsRef = useRef<fabric.FabricObject[]>([]);
@@ -48,23 +131,6 @@ export function FabricGlyphCanvas({
   // Keep latest callback in a ref so fabric event closures never go stale
   const onPathChangedRef = useRef(onPathChanged);
   onPathChangedRef.current = onPathChanged;
-
-  const adjustStroke = useCallback((obj_: fabric.FabricObject) => {
-    const obj = obj_ as typeof obj_ & {
-      originalScale: number | undefined;
-      originalStrokeWidth: number | undefined;
-    };
-    if (obj.originalStrokeWidth === undefined) {
-      obj.originalStrokeWidth = obj.strokeWidth;
-    }
-    const objScale = (obj.scaleX + obj.scaleY) / 2;
-    const multiplier = 1 / obj.canvas!.getZoom() / objScale;
-    obj.set("strokeWidth", obj.originalStrokeWidth * multiplier);
-  }, []);
-
-  const adjustStrokes = useCallback((canvas: fabric.Canvas) => {
-    canvas.forEachObject(adjustStroke);
-  }, []);
 
   // Effect 1: canvas lifecycle — runs when interactive or dimensions change.
   // Must be defined FIRST so React runs it before the content effects below.
@@ -220,7 +286,7 @@ export function FabricGlyphCanvas({
       canvas?.dispose();
       fabricCanvasRef.current = null;
     };
-  }, [interactive, width, height, adjustStrokes]);
+  }, [interactive, width, height]);
 
   // Effect 2: background paths — runs after canvas init when bgPaths or dimensions change.
   useEffect(() => {
@@ -249,15 +315,7 @@ export function FabricGlyphCanvas({
       canvas.sendObjectToBack(obj);
     }
     adjustStrokes(canvas);
-  }, [
-    bgPaths,
-    width,
-    height,
-    interactive,
-    enableRescaling,
-    adjustStrokes,
-    adjustStroke,
-  ]);
+  }, [bgPaths, width, height, interactive, enableRescaling]);
 
   // Effect 3: foreground path — runs after canvas init when path or dimensions change.
   useEffect(() => {
@@ -305,21 +363,53 @@ export function FabricGlyphCanvas({
           })
         : [];
     pathObjectsRef.current.push(
-      ...mainFabricPaths.map((mainPath, i) => ({
-        main: mainPath,
-        display: displayFabricPaths[i],
-      })),
+      ...mainFabricPaths.map((mainPath, i) => {
+        const origBounds = mainPath.getBoundingRect();
+        const origCenter = {
+          x: origBounds.left + origBounds.width / 2,
+          y: origBounds.top + origBounds.height / 2,
+        };
+        return {
+          main: mainPath,
+          display: displayFabricPaths[i],
+          baseScaleX: 1.0,
+          baseScaleY: 1.0,
+          boundOffsetX: 0,
+          boundOffsetY: 0,
+          origCenter,
+          editing: false,
+        };
+      }),
     );
 
     if (interactive) {
+      canvas.on("object:moving", () => {
+        const activeObjects = canvas.getActiveObjects();
+        if (activeObjects.length === 0) return;
+        for (const obj of activeObjects) {
+          const state = pathObjectsRef.current.find((p) => p.main === obj);
+          if (state) {
+            handleMove(state);
+          }
+        }
+      });
+      canvas.on("object:scaling", () => {
+        const activeObjects = canvas.getActiveObjects();
+        if (activeObjects.length === 0) return;
+        for (const obj of activeObjects) {
+          const idx = pathObjectsRef.current.findIndex((p) => p.main === obj);
+          if (idx >= 0 && currentPathRef.current) {
+            const state = pathObjectsRef.current[idx];
+            handleScale(state, currentPathRef.current, idx, enableRescaling);
+          }
+        }
+      });
       for (let i = 0; i < mainFabricPaths.length; ++i) {
-        const mainFabricPath = mainFabricPaths[i];
-        const displayFabricPath = displayFabricPaths[i];
-        let editing = false;
-        mainFabricPath.on("mousedblclick", () => {
-          editing = !editing;
-          if (editing) {
-            mainFabricPath.controls = createPathControls(mainFabricPath, {
+        const state = pathObjectsRef.current[i];
+        state.main.on("mousedblclick", () => {
+          state.editing = !state.editing;
+          if (state.editing) {
+            state.main.controls = createPathControls(state.main, {
               pointStyle: {
                 controlSize: 10.0,
                 controlFill: "white",
@@ -334,82 +424,33 @@ export function FabricGlyphCanvas({
                 strokeCompositeOperation: "difference",
               },
             });
-            mainFabricPath.hasBorders = false;
+            state.main.hasBorders = false;
           } else {
-            mainFabricPath.controls =
+            state.main.controls =
               fabric.controlsUtils.createObjectDefaultControls();
-            mainFabricPath.hasBorders = true;
+            state.main.hasBorders = true;
             deselectPathControls();
           }
-          mainFabricPath.setCoords();
+          state.main.setCoords();
           canvas.requestRenderAll();
         });
-        mainFabricPath.on("deselected", () => {
+        state.main.on("deselected", () => {
           deselectPathControls();
         });
-        let baseScaleX = 1.0;
-        let baseScaleY = 1.0;
-        const origBounds = mainFabricPath.getBoundingRect();
-        const origCenter = {
-          x: origBounds.left + origBounds.width / 2,
-          y: origBounds.top + origBounds.height / 2,
-        };
-        let boundOffsetX = 0;
-        let boundOffsetY = 0;
-        mainFabricPath.on("moving", () => {
-          displayFabricPath.left = mainFabricPath.left + boundOffsetX;
-          displayFabricPath.top = mainFabricPath.top + boundOffsetY;
-          canvas.requestRenderAll();
+        state.main.on("moving", () => {
+          handleMove(state);
         });
-        mainFabricPath.on("scaling", async () => {
-          displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
-          displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
-          displayFabricPath.left = mainFabricPath.left + boundOffsetX;
-          displayFabricPath.top = mainFabricPath.top + boundOffsetY;
-          adjustStroke(displayFabricPath);
-          canvas.requestRenderAll();
-
-          if (enableRescaling) {
-            const scaleX = mainFabricPath.scaleX;
-            const scaleY = mainFabricPath.scaleY;
-            const scaled = await currentPathRef.current?.scalePath(
-              i,
-              scaleX,
-              scaleY,
-              {
-                strokeWidth: 40.0,
-                doSimplify: false,
-                verbose: false,
-              },
-            );
-            if (scaled) {
-              baseScaleX = scaleX;
-              baseScaleY = scaleY;
-              const bounds = fabricPathDataToPaper(scaled).bounds;
-              boundOffsetX = bounds.center.x - origCenter.x;
-              boundOffsetY = bounds.center.y - origCenter.y;
-
-              displayFabricPath.scaleX = mainFabricPath.scaleX / baseScaleX;
-              displayFabricPath.scaleY = mainFabricPath.scaleY / baseScaleY;
-              displayFabricPath.left = mainFabricPath.left + boundOffsetX;
-              displayFabricPath.top = mainFabricPath.top + boundOffsetY;
-
-              displayFabricPath.set({ path: scaled });
-              displayFabricPath.setBoundingBox();
-              displayFabricPath.setDimensions();
-              displayFabricPath.setCoords();
-
-              adjustStroke(displayFabricPath);
-              canvas.requestRenderAll();
-            }
+        state.main.on("scaling", () => {
+          if (currentPathRef.current) {
+            handleScale(state, currentPathRef.current, i, enableRescaling);
           }
         });
-        mainFabricPath.on("modified", (event) => {
+        state.main.on("modified", (event) => {
           console.log("modified", event);
           // TODO: run scalePath with simplify and smoothing on
           // if (event.transform && currentPathRef.current) {
-          //   const scaleX = mainFabricPath.scaleX / (width / 1000);
-          //   const scaleY = mainFabricPath.scaleY / (height / 1000);
+          //   const scaleX = state.main.scaleX / (width / 1000);
+          //   const scaleY = state.main.scaleY / (height / 1000);
           //   if (
           //     event.transform.action === "scale" ||
           //     event.transform.action === "scaleX" ||
@@ -417,7 +458,7 @@ export function FabricGlyphCanvas({
           //   ) {
           //     currentPathRef.current.scalePath(i, scaleX, scaleY);
           //   } else {
-          //     currentPathRef.current.updatePath(i, mainFabricPath);
+          //     currentPathRef.current.updatePath(i, state.main);
           //   }
           //   onPathChangedRef.current?.(currentPathRef.current.clone());
           // }
@@ -487,19 +528,12 @@ export function FabricGlyphCanvas({
       });
       otherObjectsRef.current.push(...medialAxisLines, ...localPrimitives);
       canvas.add(...medialAxisLines, ...localPrimitives);
+      adjustStrokes(canvas);
     };
     drawSkeletons();
 
     adjustStrokes(canvas);
-  }, [
-    path,
-    width,
-    height,
-    interactive,
-    enableRescaling,
-    adjustStrokes,
-    adjustStroke,
-  ]);
+  }, [path, width, height, interactive, enableRescaling]);
 
   // Effect 4: Delete/Backspace key handling, scoped to this canvas instance.
   useEffect(() => {
