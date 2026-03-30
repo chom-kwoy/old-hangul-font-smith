@@ -34,7 +34,7 @@ function handleMove(state: PathObjects) {
   state.main.canvas?.requestRenderAll();
 }
 
-async function handleScale(
+function handleScale(
   state: PathObjects,
   pathData: PathData,
   subPathIndex: number,
@@ -49,35 +49,38 @@ async function handleScale(
   state.main.canvas?.requestRenderAll();
 
   if (enableRescaling) {
-    const scaleX = state.main.scaleX;
-    const scaleY = state.main.scaleY;
-    const scaled = await pathData.scalePath(subPathIndex, scaleX, scaleY, {
-      strokeWidth: 40.0,
-      doSimplify: false,
-      verbose: false,
-    });
-    if (scaled) {
-      state.baseScaleX = scaleX;
-      state.baseScaleY = scaleY;
+    const scaleX = mainTransform.scaleX;
+    const scaleY = mainTransform.scaleY;
+    pathData
+      .scalePath(subPathIndex, scaleX, scaleY, {
+        strokeWidth: 40.0,
+        doSimplify: false,
+        verbose: false,
+      })
+      .then((scaled) => {
+        if (scaled) {
+          state.baseScaleX = scaleX;
+          state.baseScaleY = scaleY;
 
-      const bounds = fabricPathDataToPaper(scaled).bounds;
-      state.boundOffsetX = bounds.center.x - state.origCenter.x;
-      state.boundOffsetY = bounds.center.y - state.origCenter.y;
+          const bounds = fabricPathDataToPaper(scaled).bounds;
+          state.boundOffsetX = bounds.center.x - state.origCenter.x;
+          state.boundOffsetY = bounds.center.y - state.origCenter.y;
 
-      const mainTransform = getTransform(state.main);
-      state.display.scaleX = mainTransform.scaleX / state.baseScaleX;
-      state.display.scaleY = mainTransform.scaleY / state.baseScaleY;
-      state.display.left = mainTransform.translateX + state.boundOffsetX;
-      state.display.top = mainTransform.translateY + state.boundOffsetY;
+          const mainTransform = getTransform(state.main);
+          state.display.scaleX = mainTransform.scaleX / state.baseScaleX;
+          state.display.scaleY = mainTransform.scaleY / state.baseScaleY;
+          state.display.left = mainTransform.translateX + state.boundOffsetX;
+          state.display.top = mainTransform.translateY + state.boundOffsetY;
 
-      state.display.set({ path: scaled });
-      state.display.setBoundingBox();
-      state.display.setDimensions();
-      state.display.setCoords();
+          state.display.set({ path: scaled });
+          state.display.setBoundingBox();
+          state.display.setDimensions();
+          state.display.setCoords();
 
-      adjustStroke(state.display);
-      state.main.canvas?.requestRenderAll();
-    }
+          adjustStroke(state.display);
+          state.main.canvas?.requestRenderAll();
+        }
+      });
   }
 }
 
@@ -385,7 +388,6 @@ export function FabricGlyphCanvas({
     if (interactive) {
       canvas.on("object:moving", () => {
         const activeObjects = canvas.getActiveObjects();
-        if (activeObjects.length === 0) return;
         for (const obj of activeObjects) {
           const state = pathObjectsRef.current.find((p) => p.main === obj);
           if (state) {
@@ -395,7 +397,6 @@ export function FabricGlyphCanvas({
       });
       canvas.on("object:scaling", () => {
         const activeObjects = canvas.getActiveObjects();
-        if (activeObjects.length === 0) return;
         for (const obj of activeObjects) {
           const idx = pathObjectsRef.current.findIndex((p) => p.main === obj);
           if (idx >= 0 && currentPathRef.current) {
@@ -436,32 +437,6 @@ export function FabricGlyphCanvas({
         });
         state.main.on("deselected", () => {
           deselectPathControls();
-        });
-        state.main.on("moving", () => {
-          handleMove(state);
-        });
-        state.main.on("scaling", () => {
-          if (currentPathRef.current) {
-            handleScale(state, currentPathRef.current, i, enableRescaling);
-          }
-        });
-        state.main.on("modified", (event) => {
-          console.log("modified", event);
-          // TODO: run scalePath with simplify and smoothing on
-          // if (event.transform && currentPathRef.current) {
-          //   const scaleX = state.main.scaleX / (width / 1000);
-          //   const scaleY = state.main.scaleY / (height / 1000);
-          //   if (
-          //     event.transform.action === "scale" ||
-          //     event.transform.action === "scaleX" ||
-          //     event.transform.action === "scaleY"
-          //   ) {
-          //     currentPathRef.current.scalePath(i, scaleX, scaleY);
-          //   } else {
-          //     currentPathRef.current.updatePath(i, state.main);
-          //   }
-          //   onPathChangedRef.current?.(currentPathRef.current.clone());
-          // }
         });
       }
     }
