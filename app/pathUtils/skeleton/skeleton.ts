@@ -24,16 +24,24 @@ const clipper = await clipperLib.loadNativeClipperLibInstanceAsync(
 
 export function skeletonize(path: TSimplePathData) {
   const paperPath = fabricPathDataToPaper(path);
+
+  // Use delaunay triangulation to find the medial axis
   const medialAxis = extractMedialAxis(paperPath);
+
+  // Compute the optimal sparse set of points on the medial axis
   const medialSkeletonPoints = computeMedialSkeletonPoints(
     paperPath,
     medialAxis,
   );
+
+  // Connect the medial skeleton points to each other to form a connected graph
   const medialSkeleton = constructMedialSkeleton(
     medialSkeletonPoints,
     medialAxis,
     paperPath,
   );
+
+  // Fit primitives (expandable circles) to each skeleton component
   return localPrimitiveFitting(paperPath, medialSkeleton);
 }
 
