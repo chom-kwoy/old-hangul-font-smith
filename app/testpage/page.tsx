@@ -12,7 +12,7 @@ export default function TestPage() {
   useState(() => initDrawContexts());
 
   const [path, setPath] = useState(() =>
-    PathData.fromSvg(testPaths.svg_nieun_hieuh),
+    PathData.fromSvg(testPaths.nieun_chieuch),
   );
 
   return (

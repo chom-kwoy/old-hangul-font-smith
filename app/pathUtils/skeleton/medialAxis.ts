@@ -1,6 +1,14 @@
 import { Delaunay } from "d3-delaunay";
 import paper from "paper";
 
+import {
+  buildFlatBoundary,
+  rayIntersectFlatBoundary,
+  sampleBoundary,
+} from "../flatBoundary";
+
+export { sampleBoundary };
+
 export type Point = {
   x: number;
   y: number;
@@ -42,7 +50,11 @@ export function extractMedialAxis(
   // d3-delaunay requires a flat array of [x, y] coordinate pairs
   const pointsArray = boundaryPoints.map((p) => [p.x, p.y] as [number, number]);
 
-  // 2. Compute Voronoi Diagram
+  // 2. Build flat boundary for accurate ray-based interior testing
+  const fb = buildFlatBoundary(path);
+  const tested = new Uint8Array(fb.count);
+
+  // 3. Compute Voronoi Diagram
   const delaunay = Delaunay.from(pointsArray);
   const voronoi = delaunay.voronoi([
     path.bounds.left - 10,
@@ -76,7 +88,7 @@ export function extractMedialAxis(
     return newIndex;
   };
 
-  // 3. Process Voronoi Edges
+  // 4. Process Voronoi Edges
   for (let e = 0; e < delaunay.halfedges.length; e++) {
     if (e < delaunay.halfedges[e]) {
       const t1 = Math.floor(e / 3);
@@ -88,23 +100,27 @@ export function extractMedialAxis(
       const p2y = voronoi.circumcenters[t2 * 2 + 1];
 
       const vStart = new paper.Point(p1x, p1y);
-      const vEnd = new paper.Point(p2x, p2y);
 
-      // 4. Filtering Strategy
+      // 5. Filtering Strategy
 
       // Filter A: Interior Edge Check
-      // Keep a Voronoi edge if its midpoint is inside the shape, OR if both
-      // circumcenter endpoints are inside. The midpoint check handles the common
-      // case. The both-endpoints check handles narrow concavities where the edge
-      // dips slightly outside at its midpoint even though both circumcenters are
-      // genuinely interior — filtering such edges disconnects the medial axis at
-      // thin sections of the stroke.
-      const midPoint = vStart.add(vEnd).divide(2);
-      if (
-        !path.contains(midPoint) &&
-        !(path.contains(vStart) && path.contains(vEnd))
-      ) {
-        continue;
+      // Cast a ray from vStart toward vEnd; if the boundary is hit before
+      // reaching vEnd the edge exits the path and should be rejected.
+      if (!path.contains(vStart)) continue;
+      const edgeDx = p2x - p1x;
+      const edgeDy = p2y - p1y;
+      const edgeLen = Math.hypot(edgeDx, edgeDy);
+      if (edgeLen > 1e-10) {
+        tested.fill(0);
+        const dist = rayIntersectFlatBoundary(
+          p1x,
+          p1y,
+          edgeDx / edgeLen,
+          edgeDy / edgeLen,
+          fb,
+          tested,
+        );
+        if (dist < edgeLen) continue;
       }
 
       // Filter B: "Spur" Pruning (Adjacency Filter)
@@ -122,120 +138,12 @@ export function extractMedialAxis(
     }
   }
 
-  connectIsolatedComponents(uniquePoints, segments);
-
   return {
     points: uniquePoints,
     segments: segments,
   };
 }
 
-/**
- * Post-processing: connects isolated components to the main (largest) component
- * by adding an edge from the closest cross-component node pair.
- *
- * This handles rare geometry-induced disconnections at narrow or concave path
- * sections where the Voronoi edge filters incorrectly drop bridge edges.
- * Mutates `segments` in place.
- */
-function connectIsolatedComponents(
-  points: Point[],
-  segments: [number, number][],
-): void {
-  if (points.length === 0) return;
-
-  // Build adjacency list
-  const adj: number[][] = Array.from({ length: points.length }, () => []);
-  for (const [u, v] of segments) {
-    adj[u].push(v);
-    adj[v].push(u);
-  }
-
-  // BFS to label connected components
-  const comp = new Int32Array(points.length).fill(-1);
-  let numComps = 0;
-  for (let start = 0; start < points.length; start++) {
-    if (comp[start] !== -1) continue;
-    const queue = [start];
-    comp[start] = numComps;
-    for (let qi = 0; qi < queue.length; qi++) {
-      const node = queue[qi];
-      for (const n of adj[node]) {
-        if (comp[n] === -1) {
-          comp[n] = numComps;
-          queue.push(n);
-        }
-      }
-    }
-    numComps++;
-  }
-
-  if (numComps === 1) return;
-
-  // Find the index of the largest component
-  const compSizes = new Int32Array(numComps);
-  for (const c of comp) compSizes[c]++;
-  let mainComp = 0;
-  for (let i = 1; i < numComps; i++) {
-    if (compSizes[i] > compSizes[mainComp]) mainComp = i;
-  }
-
-  // For each non-main component, add an edge from its closest node to the
-  // closest node in the main component.
-  for (let c = 0; c < numComps; c++) {
-    if (c === mainComp) continue;
-    let bestDist = Infinity;
-    let bestU = -1,
-      bestV = -1;
-    for (let u = 0; u < points.length; u++) {
-      if (comp[u] !== c) continue;
-      const pu = points[u];
-      for (let v = 0; v < points.length; v++) {
-        if (comp[v] !== mainComp) continue;
-        const pv = points[v];
-        const dx = pu.x - pv.x;
-        const dy = pu.y - pv.y;
-        const d = dx * dx + dy * dy;
-        if (d < bestDist) {
-          bestDist = d;
-          bestU = u;
-          bestV = v;
-        }
-      }
-    }
-    if (bestU !== -1) {
-      segments.push([bestU, bestV]);
-    }
-  }
-}
-
-export function sampleBoundary(
-  path: paper.CompoundPath,
-  step: number,
-): { points: paper.Point[]; subPathRanges: Array<{ start: number; end: number }> } {
-  const points: paper.Point[] = [];
-  const subPathRanges: Array<{ start: number; end: number }> = [];
-
-  for (const child of path.children as paper.Path[]) {
-    const rangeStart = points.length;
-
-    for (const curve of child.curves) {
-      // Always include the anchor point at the start of this curve segment.
-      points.push(curve.point1.clone());
-      // Then add evenly-spaced interior samples along the curve.
-      const curveLen = curve.length;
-      const numInterior = Math.floor(curveLen / step);
-      for (let i = 1; i <= numInterior; i++) {
-        const pt = curve.getPointAt(i * step);
-        if (pt) points.push(pt);
-      }
-    }
-
-    subPathRanges.push({ start: rangeStart, end: points.length });
-  }
-
-  return { points, subPathRanges };
-}
 
 function getNextHalfedge(e: number): number {
   // If we are at the end of a triangle triplet (indices 2, 5, 8...), wrap back.

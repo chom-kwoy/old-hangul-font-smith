@@ -17,28 +17,59 @@ export interface FlatBoundary {
 
 const GRID_DIM = 20;
 
-export function buildFlatBoundary(path: paper.CompoundPath): FlatBoundary {
-  const flatPath = path.clone() as paper.CompoundPath;
-  flatPath.flatten(0.5);
+export function sampleBoundary(
+  path: paper.CompoundPath,
+  step: number,
+): {
+  points: paper.Point[];
+  subPathRanges: Array<{ start: number; end: number }>;
+} {
+  const points: paper.Point[] = [];
+  const subPathRanges: Array<{ start: number; end: number }> = [];
+
+  for (const child of path.children as paper.Path[]) {
+    const rangeStart = points.length;
+
+    for (const curve of child.curves) {
+      // Always include the anchor point at the start of this curve segment.
+      points.push(curve.point1.clone());
+      // Then add evenly-spaced interior samples along the curve.
+      const curveLen = curve.length;
+      const numInterior = Math.floor(curveLen / step);
+      for (let i = 1; i <= numInterior; i++) {
+        const pt = curve.getPointAt(i * step);
+        if (pt) points.push(pt);
+      }
+    }
+
+    subPathRanges.push({ start: rangeStart, end: points.length });
+  }
+
+  return { points, subPathRanges };
+}
+
+export function buildFlatBoundary(
+  path: paper.CompoundPath,
+  sampleSpacing: number = 5,
+): FlatBoundary {
+  const { points, subPathRanges } = sampleBoundary(path, sampleSpacing);
 
   const x0List: number[] = [],
     y0List: number[] = [];
   const x1List: number[] = [],
     y1List: number[] = [];
 
-  for (const child of flatPath.children as paper.Path[]) {
-    const segs = child.segments;
-    const n = segs.length;
-    for (let i = 0; i < n; i++) {
-      const p0 = segs[i].point;
-      const p1 = segs[(i + 1) % n].point;
+  for (const { start, end } of subPathRanges) {
+    const len = end - start;
+    for (let i = 0; i < len; i++) {
+      const p0 = points[start + i];
+      const p1 = points[start + (i + 1) % len];
       x0List.push(p0.x);
       y0List.push(p0.y);
       x1List.push(p1.x);
       y1List.push(p1.y);
     }
   }
-  flatPath.remove();
 
   const count = x0List.length;
   const x0 = new Float64Array(x0List);
@@ -65,9 +96,15 @@ export function buildFlatBoundary(path: paper.CompoundPath): FlatBoundary {
     const maxY = Math.max(y0[i], y1[i]);
 
     const colMin = Math.max(0, Math.floor((minX - gridMinX) / cellW));
-    const colMax = Math.min(GRID_DIM - 1, Math.floor((maxX - gridMinX) / cellW));
+    const colMax = Math.min(
+      GRID_DIM - 1,
+      Math.floor((maxX - gridMinX) / cellW),
+    );
     const rowMin = Math.max(0, Math.floor((minY - gridMinY) / cellH));
-    const rowMax = Math.min(GRID_DIM - 1, Math.floor((maxY - gridMinY) / cellH));
+    const rowMax = Math.min(
+      GRID_DIM - 1,
+      Math.floor((maxY - gridMinY) / cellH),
+    );
 
     for (let r = rowMin; r <= rowMax; r++) {
       for (let c = colMin; c <= colMax; c++) {

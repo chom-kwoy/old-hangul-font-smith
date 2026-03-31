@@ -509,8 +509,9 @@ export function FabricGlyphCanvas({
           });
         });
       });
-      otherObjectsRef.current.push(...medialAxisLines, ...localPrimitives);
-      canvas.add(...medialAxisLines, ...localPrimitives);
+      // medialAxisLines.push(...localPrimitives);
+      otherObjectsRef.current.push(...medialAxisLines);
+      canvas.add(...medialAxisLines);
       adjustStrokes(canvas);
     });
 
