@@ -9,7 +9,7 @@ initDrawContexts();
 const path = PathData.fromSvg(testPaths.nieun_chieuch);
 
 let startTime = Date.now();
-const medialSkeletons = path.getMedialSkeletonSync();
+const medialSkeletons = path.getMedialSkeletonSync(true);
 let elapsedTime = Date.now() - startTime;
 console.log(`Medial skeletons: ${medialSkeletons.length} in ${elapsedTime}ms`);
 for (const skeleton of medialSkeletons) {

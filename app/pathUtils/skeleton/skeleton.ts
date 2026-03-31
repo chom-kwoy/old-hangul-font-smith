@@ -22,16 +22,37 @@ const clipper = await clipperLib.loadNativeClipperLibInstanceAsync(
   clipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback,
 );
 
-export function skeletonize(path: TSimplePathData) {
+export function skeletonize(
+  path: TSimplePathData,
+  verbose: boolean = false,
+): FittedMedialAxisGraph {
   const paperPath = fabricPathDataToPaper(path);
 
   // Use delaunay triangulation to find the medial axis
   const medialAxis = extractMedialAxis(paperPath);
+  if (verbose) {
+    console.debug(
+      "Medial axis:",
+      medialAxis.segments
+        .map(([a, b]) => {
+          const p1 = medialAxis.points[a];
+          const p2 = medialAxis.points[b];
+          return (
+            `polygon((${p1.x.toFixed(1)},${(1000 - p1.y).toFixed(1)}),` +
+            `(${p2.x.toFixed(1)},${(1000 - p2.y).toFixed(1)}))`
+          );
+        })
+        .join(","),
+      "\n",
+    );
+  }
 
   // Compute the optimal sparse set of points on the medial axis
   const medialSkeletonPoints = computeMedialSkeletonPoints(
     paperPath,
     medialAxis,
+    undefined,
+    verbose,
   );
 
   // Connect the medial skeleton points to each other to form a connected graph

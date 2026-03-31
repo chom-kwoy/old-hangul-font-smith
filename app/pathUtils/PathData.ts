@@ -245,9 +245,11 @@ export default class PathData {
   }
 
   // used for testing
-  getMedialSkeletonSync(): FittedMedialAxisGraph[] {
+  getMedialSkeletonSync(verbose: boolean = false): FittedMedialAxisGraph[] {
     if (this.#skeletons !== null) return this.#skeletons;
-    this.#skeletons = this.#originalPaths.map(skeletonize);
+    this.#skeletons = this.#originalPaths.map((path) =>
+      skeletonize(path, verbose),
+    );
     return this.#skeletons;
   }
 

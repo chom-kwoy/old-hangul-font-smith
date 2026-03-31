@@ -38,7 +38,7 @@ export function computeMedialSkeletonPoints(
   if (verbose) {
     console.info(
       "Initial seeds:",
-      V.map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`).join(","),
+      V.map((p) => `(${p.x.toFixed(0)},${(1000 - p.y).toFixed(0)})`).join(","),
     );
   }
 
@@ -63,7 +63,9 @@ export function computeMedialSkeletonPoints(
         "Iteration",
         iter,
         "V:",
-        V.map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`).join(","),
+        V.map((p) => `(${p.x.toFixed(0)},${(1000 - p.y).toFixed(0)})`).join(
+          ",",
+        ),
       );
     }
 
@@ -83,7 +85,7 @@ export function computeMedialSkeletonPoints(
         uncoveredPoints.length,
         "points:",
         uncoveredPoints
-          .map((p) => `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`)
+          .map((p) => `(${p.x.toFixed(0)},${(1000 - p.y).toFixed(0)})`)
           .join(","),
       );
     }
