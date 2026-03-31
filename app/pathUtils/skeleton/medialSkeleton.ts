@@ -1,7 +1,7 @@
 import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import paper from "paper";
 
-import { MedialAxisGraph, Point } from "@/app/pathUtils/medialAxis";
+import { MedialAxisGraph, Point } from "@/app/pathUtils/skeleton/medialAxis";
 
 /**
  * Constructs the Medial Skeleton (M_S) from selected vertices (V) and the Raw Medial Axis (M).

@@ -11,12 +11,12 @@ import {
   intersectCompoundPath,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
-import { FittedMedialAxisGraph } from "@/app/pathUtils/localPrimitiveFitting";
+import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
   PathScaleOptions,
   scalePath,
   skeletonize,
-} from "@/app/pathUtils/skeleton";
+} from "@/app/pathUtils/skeleton/skeleton";
 import { Bounds } from "@/app/utils/types";
 
 export type SerializedPathData = {

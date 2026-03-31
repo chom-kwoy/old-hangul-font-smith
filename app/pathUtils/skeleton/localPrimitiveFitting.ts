@@ -5,7 +5,7 @@ import {
   buildFlatBoundary,
   rayIntersectFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
-import { MedialAxisGraph, Point } from "@/app/pathUtils/medialAxis";
+import { MedialAxisGraph, Point } from "@/app/pathUtils/skeleton/medialAxis";
 
 // --- Interfaces ---
 
@@ -49,7 +49,7 @@ export function localPrimitiveFitting(
 ): FittedMedialAxisGraph {
   const opts = {
     num_directions: options.num_directions ?? 128,
-    w_expansion: options.w_expansion ?? 0.02,
+    w_expansion: options.w_expansion ?? 0.008,
     w_penalty: options.w_penalty ?? 10000,
     max_progressions: options.max_progressions ?? 25,
     expansion_rate: options.expansion_rate ?? 1.1,
@@ -196,22 +196,20 @@ function resamplePoints(
     const newOrigin = origins[segIdx]
       .multiply(1 - t)
       .add(origins[next].multiply(t));
+    newOrigins.push(newOrigin);
 
     const pt0 = inflated[segIdx];
     const pt1 = inflated[next];
     const newPt = pt0.multiply(1 - t).add(pt1.multiply(t));
     const diff = newPt.subtract(newOrigin);
-    const newDir = diff.normalize();
+
+    newR[k] = diff.length;
+    newDirections.push(diff.normalize());
 
     const tgtPt0 = tgtInflated[segIdx];
     const tgtPt1 = tgtInflated[next];
     const newTgtPt = tgtPt0.multiply(1 - t).add(tgtPt1.multiply(t));
     const newTgtDiff = newTgtPt.subtract(newOrigin);
-
-    newOrigins.push(newOrigin);
-    newDirections.push(newDir);
-
-    newR[k] = diff.length;
     newRTgt[k] = newTgtDiff.length;
   }
 
@@ -293,14 +291,16 @@ function fitSinglePrimitive(
       if (!constraintsActive) break;
     }
 
-    const resampled = resamplePoints(curOrigins, curDirections, r, r_tgt);
-    curOrigins = resampled.origins;
-    curDirections = resampled.directions;
-    r.set(resampled.r);
-    r_tgt.set(resampled.r_tgt);
+    if (prog % 3 == 0 && prog < opts.max_progressions - 1) {
+      const resampled = resamplePoints(curOrigins, curDirections, r, r_tgt);
+      curOrigins = resampled.origins;
+      curDirections = resampled.directions;
+      r.set(resampled.r);
+      r_tgt.set(resampled.r_tgt);
 
-    // recompute max extents because the origins and directions have changed
-    r_max = computeMaxExtents(curOrigins, curDirections, boundary, tested);
+      // recompute max extents because the origins and directions have changed
+      r_max = computeMaxExtents(curOrigins, curDirections, boundary, tested);
+    }
   }
 
   return {

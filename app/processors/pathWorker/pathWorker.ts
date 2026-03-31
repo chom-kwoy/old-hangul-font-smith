@@ -1,4 +1,4 @@
-import { scalePath, skeletonize } from "@/app/pathUtils/skeleton";
+import { scalePath, skeletonize } from "@/app/pathUtils/skeleton/skeleton";
 import {
   MessageFromPathWorker,
   MessageToPathWorker,

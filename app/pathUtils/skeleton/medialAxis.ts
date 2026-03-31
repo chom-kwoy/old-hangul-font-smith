@@ -21,19 +21,10 @@ export function extractMedialAxis(
   sampleSpacing: number = 10,
 ): MedialAxisGraph {
   // 1. Sampling: Use the helper function
-  const boundaryPoints = sampleBoundary(path, sampleSpacing);
-
-  // Track which sub-path each boundary sample belongs to so we can determine
-  // true adjacency per sub-path (needed for correct spur pruning in Filter B).
-  const subPathRanges: Array<{ start: number; end: number }> = [];
-  {
-    let idx = 0;
-    for (const child of path.children as paper.Path[]) {
-      const count = Math.ceil(child.length / sampleSpacing);
-      subPathRanges.push({ start: idx, end: idx + count });
-      idx += count;
-    }
-  }
+  const { points: boundaryPoints, subPathRanges } = sampleBoundary(
+    path,
+    sampleSpacing,
+  );
 
   function isAdjacentOnPath(a: number, b: number): boolean {
     for (const { start, end } of subPathRanges) {
@@ -221,24 +212,29 @@ function connectIsolatedComponents(
 export function sampleBoundary(
   path: paper.CompoundPath,
   step: number,
-): paper.Point[] {
-  // 1. Sampling: Discretize the path boundaries into a cloud of points
-  const boundaryPoints: paper.Point[] = [];
+): { points: paper.Point[]; subPathRanges: Array<{ start: number; end: number }> } {
+  const points: paper.Point[] = [];
+  const subPathRanges: Array<{ start: number; end: number }> = [];
 
-  // Helper to sample a single path item
-  const sampleItem = (item: paper.Path) => {
-    const length = item.length;
-    const count = Math.ceil(length / step);
-    for (let i = 0; i < count; i++) {
-      const offset = (i / count) * length;
-      const pt = item.getPointAt(offset);
-      boundaryPoints.push(pt);
+  for (const child of path.children as paper.Path[]) {
+    const rangeStart = points.length;
+
+    for (const curve of child.curves) {
+      // Always include the anchor point at the start of this curve segment.
+      points.push(curve.point1.clone());
+      // Then add evenly-spaced interior samples along the curve.
+      const curveLen = curve.length;
+      const numInterior = Math.floor(curveLen / step);
+      for (let i = 1; i <= numInterior; i++) {
+        const pt = curve.getPointAt(i * step);
+        if (pt) points.push(pt);
+      }
     }
-  };
 
-  path.children.forEach((c) => sampleItem(c as paper.Path));
+    subPathRanges.push({ start: rangeStart, end: points.length });
+  }
 
-  return boundaryPoints;
+  return { points, subPathRanges };
 }
 
 function getNextHalfedge(e: number): number {

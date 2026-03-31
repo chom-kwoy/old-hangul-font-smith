@@ -11,10 +11,10 @@ import {
   FittedMedialAxisGraph,
   Primitive,
   localPrimitiveFitting,
-} from "@/app/pathUtils/localPrimitiveFitting";
-import { extractMedialAxis } from "@/app/pathUtils/medialAxis";
-import { constructMedialSkeleton } from "@/app/pathUtils/medialSkeleton";
-import { computeMedialSkeletonPoints } from "@/app/pathUtils/medialSkeletonPoints";
+} from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
+import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
+import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 
 // initialize the clipper library
 const clipper = await clipperLib.loadNativeClipperLibInstanceAsync(

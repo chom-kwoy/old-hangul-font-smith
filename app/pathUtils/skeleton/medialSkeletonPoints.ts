@@ -8,7 +8,10 @@ import {
   nearestDistFlatBoundary,
   rayIntersectFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
-import { MedialAxisGraph, sampleBoundary } from "@/app/pathUtils/medialAxis";
+import {
+  MedialAxisGraph,
+  sampleBoundary,
+} from "@/app/pathUtils/skeleton/medialAxis";
 
 /**
  * Computes the Medial Skeletal Diagram (Optimized Skeleton) for a 2D shape.
@@ -39,7 +42,7 @@ export function computeMedialSkeletonPoints(
     );
   }
 
-  const boundarySamples = sampleBoundary(path, 10);
+  const { points: boundarySamples } = sampleBoundary(path, 10);
   const flatBoundary = buildFlatBoundary(path);
   // Reusable buffer for ray-intersection segment tracking
   const tested = new Uint8Array(flatBoundary.count);
