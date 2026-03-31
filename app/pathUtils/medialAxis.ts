@@ -101,13 +101,17 @@ export function extractMedialAxis(
 
       // 4. Filtering Strategy
 
-      // Filter A: Strict Containment
+      // Filter A: Interior Edge Check
+      // Keep a Voronoi edge if its midpoint is inside the shape, OR if both
+      // circumcenter endpoints are inside. The midpoint check handles the common
+      // case. The both-endpoints check handles narrow concavities where the edge
+      // dips slightly outside at its midpoint even though both circumcenters are
+      // genuinely interior — filtering such edges disconnects the medial axis at
+      // thin sections of the stroke.
       const midPoint = vStart.add(vEnd).divide(2);
-
       if (
-        !path.contains(midPoint) ||
-        !path.contains(vStart) ||
-        !path.contains(vEnd)
+        !path.contains(midPoint) &&
+        !(path.contains(vStart) && path.contains(vEnd))
       ) {
         continue;
       }
@@ -127,10 +131,91 @@ export function extractMedialAxis(
     }
   }
 
+  connectIsolatedComponents(uniquePoints, segments);
+
   return {
     points: uniquePoints,
     segments: segments,
   };
+}
+
+/**
+ * Post-processing: connects isolated components to the main (largest) component
+ * by adding an edge from the closest cross-component node pair.
+ *
+ * This handles rare geometry-induced disconnections at narrow or concave path
+ * sections where the Voronoi edge filters incorrectly drop bridge edges.
+ * Mutates `segments` in place.
+ */
+function connectIsolatedComponents(
+  points: Point[],
+  segments: [number, number][],
+): void {
+  if (points.length === 0) return;
+
+  // Build adjacency list
+  const adj: number[][] = Array.from({ length: points.length }, () => []);
+  for (const [u, v] of segments) {
+    adj[u].push(v);
+    adj[v].push(u);
+  }
+
+  // BFS to label connected components
+  const comp = new Int32Array(points.length).fill(-1);
+  let numComps = 0;
+  for (let start = 0; start < points.length; start++) {
+    if (comp[start] !== -1) continue;
+    const queue = [start];
+    comp[start] = numComps;
+    for (let qi = 0; qi < queue.length; qi++) {
+      const node = queue[qi];
+      for (const n of adj[node]) {
+        if (comp[n] === -1) {
+          comp[n] = numComps;
+          queue.push(n);
+        }
+      }
+    }
+    numComps++;
+  }
+
+  if (numComps === 1) return;
+
+  // Find the index of the largest component
+  const compSizes = new Int32Array(numComps);
+  for (const c of comp) compSizes[c]++;
+  let mainComp = 0;
+  for (let i = 1; i < numComps; i++) {
+    if (compSizes[i] > compSizes[mainComp]) mainComp = i;
+  }
+
+  // For each non-main component, add an edge from its closest node to the
+  // closest node in the main component.
+  for (let c = 0; c < numComps; c++) {
+    if (c === mainComp) continue;
+    let bestDist = Infinity;
+    let bestU = -1,
+      bestV = -1;
+    for (let u = 0; u < points.length; u++) {
+      if (comp[u] !== c) continue;
+      const pu = points[u];
+      for (let v = 0; v < points.length; v++) {
+        if (comp[v] !== mainComp) continue;
+        const pv = points[v];
+        const dx = pu.x - pv.x;
+        const dy = pu.y - pv.y;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) {
+          bestDist = d;
+          bestU = u;
+          bestV = v;
+        }
+      }
+    }
+    if (bestU !== -1) {
+      segments.push([bestU, bestV]);
+    }
+  }
 }
 
 export function sampleBoundary(
