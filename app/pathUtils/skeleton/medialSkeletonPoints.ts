@@ -7,11 +7,9 @@ import {
   buildFlatBoundary,
   nearestDistFlatBoundary,
   rayIntersectFlatBoundary,
-} from "@/app/pathUtils/flatBoundary";
-import {
-  MedialAxisGraph,
   sampleBoundary,
-} from "@/app/pathUtils/skeleton/medialAxis";
+} from "@/app/pathUtils/flatBoundary";
+import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 
 /**
  * Computes the Medial Skeletal Diagram (Optimized Skeleton) for a 2D shape.

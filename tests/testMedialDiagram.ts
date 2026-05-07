@@ -6,7 +6,8 @@ import { initDrawContexts } from "@/app/utils/init";
 
 initDrawContexts();
 
-const path = PathData.fromSvg(testPaths.nieun_chieuch);
+const path = PathData.fromSvg(testPaths.yo_ya_v2);
+const sampledBoundary = path.getSampledBoundary();
 
 let startTime = Date.now();
 const medialSkeletons = path.getMedialSkeletonSync(true);

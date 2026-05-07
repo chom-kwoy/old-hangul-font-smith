@@ -11,6 +11,7 @@ import {
   intersectCompoundPath,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
+import { sampleBoundary } from "@/app/pathUtils/flatBoundary";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
   PathScaleOptions,
@@ -46,6 +47,18 @@ export default class PathData {
 
   clone(): PathData {
     return PathData.deserialize(structuredClone(this.serialize()));
+  }
+
+  getSampledBoundary(sampleSpacing: number = 10) {
+    const result: paper.Point[] = [];
+    this.#originalPaths.forEach((path) => {
+      const { points } = sampleBoundary(
+        fabricPathDataToPaper(path),
+        sampleSpacing,
+      );
+      result.push(...points);
+    });
+    return result;
   }
 
   static fromOpentype(

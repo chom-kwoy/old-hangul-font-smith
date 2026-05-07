@@ -5,9 +5,7 @@ import {
   buildFlatBoundary,
   rayIntersectFlatBoundary,
   sampleBoundary,
-} from "../flatBoundary";
-
-export { sampleBoundary };
+} from "@/app/pathUtils/flatBoundary";
 
 export type Point = {
   x: number;
@@ -143,7 +141,6 @@ export function extractMedialAxis(
     segments: segments,
   };
 }
-
 
 function getNextHalfedge(e: number): number {
   // If we are at the end of a triangle triplet (indices 2, 5, 8...), wrap back.
