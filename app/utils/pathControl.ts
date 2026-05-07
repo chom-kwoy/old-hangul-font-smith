@@ -172,6 +172,7 @@ function pathActionHandler(
   x: number,
   y: number,
 ) {
+  if (Date.now() - dragStartTime < DRAG_DELAY_MS) return false;
   const { target } = transform;
   const { commandIndex, pointIndex, linkedControlPoints } = this;
   const actionPerformed = movePathPoint(
@@ -195,8 +196,45 @@ function pathActionHandler(
 const indexFromPrevCommand = (previousCommandType: TSimpleParseCommandType) =>
   previousCommandType === "C" ? 5 : previousCommandType === "Q" ? 3 : 1;
 
+const DRAG_DELAY_MS = 200;
+let dragStartTime = 0;
+
 const selectedControls: PathPointControl[] = [];
 const lastControlPoints: Control[] = [];
+let hoveredControl: PathPointControl | null = null;
+const listenedCanvases = new WeakSet<fabric.StaticCanvas>();
+
+function setupHoverTracking(canvas: fabric.StaticCanvas): void {
+  if (listenedCanvases.has(canvas)) return;
+  listenedCanvases.add(canvas);
+  const iCanvas = canvas as fabric.Canvas;
+  iCanvas.on("mouse:move", (opt: { e: TPointerEvent }) => {
+    const pointer = iCanvas.getViewportPoint(opt.e);
+    let found: PathPointControl | null = null;
+    outer: for (const obj of canvas.getObjects()) {
+      for (const ctrl of Object.values(obj.controls)) {
+        if (!(ctrl instanceof PathPointControl) || !ctrl.visible) continue;
+        const pos = calcPathPointPosition(
+          obj as fabric.Path,
+          ctrl.commandIndex,
+          ctrl.pointIndex,
+        );
+        const halfSize = (ctrl.controlSize || obj.cornerSize) / 2;
+        if (
+          Math.abs(pointer.x - pos.x) <= halfSize &&
+          Math.abs(pointer.y - pos.y) <= halfSize
+        ) {
+          found = ctrl;
+          break outer;
+        }
+      }
+    }
+    if (hoveredControl !== found) {
+      hoveredControl = found;
+      canvas.requestRenderAll();
+    }
+  });
+}
 
 class PathPointControl extends Control {
   declare commandIndex: number;
@@ -226,6 +264,8 @@ class PathPointControl extends Control {
     styleOverride: ControlRenderingStyleOverride | undefined,
     fabricObject: Path,
   ) {
+    if (fabricObject.canvas) setupHoverTracking(fabricObject.canvas);
+
     const overrides: ControlRenderingStyleOverride = {
       ...styleOverride,
       cornerSize: this.controlSize,
@@ -239,7 +279,8 @@ class PathPointControl extends Control {
       cornerCompositeOperation: this.strokeCompositeOperation,
     };
 
-    const parentAnchor = (this as Partial<PathControlPointControl>).parentAnchor;
+    const parentAnchor = (this as Partial<PathControlPointControl>)
+      .parentAnchor;
     const selectedAnchor = selectedControls.includes(this)
       ? this
       : parentAnchor && selectedControls.includes(parentAnchor)
@@ -250,6 +291,8 @@ class PathPointControl extends Control {
       if (selectedAnchor.controlSelectedSize !== undefined) {
         overrides.cornerSize = selectedAnchor.controlSelectedSize;
       }
+    } else if (hoveredControl === this) {
+      overrides.cornerColor = this.controlSelectedFill ?? "cyan";
     }
 
     switch (this.controlStyle || fabricObject.cornerStyle) {
@@ -257,7 +300,14 @@ class PathPointControl extends Control {
         renderCircleControl.call(this, ctx, left, top, overrides, fabricObject);
         break;
       case "diamond":
-        renderDiamondControl.call(this, ctx, left, top, overrides, fabricObject);
+        renderDiamondControl.call(
+          this,
+          ctx,
+          left,
+          top,
+          overrides,
+          fabricObject,
+        );
         break;
       default:
         renderSquareControl.call(this, ctx, left, top, overrides, fabricObject);
@@ -379,6 +429,7 @@ const createControl = (
     positionHandler: pathPositionHandler,
     actionHandler: pathActionHandler,
     mouseDownHandler: (event, transform) => {
+      dragStartTime = Date.now();
       const path = transform.target as Path;
       if (!isControlPoint) {
         if (!event.ctrlKey && !event.shiftKey) {
