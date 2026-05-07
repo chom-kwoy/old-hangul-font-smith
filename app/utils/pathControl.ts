@@ -18,6 +18,7 @@ import {
 import {
   ControlRenderingStyleOverride,
   renderCircleControl,
+  renderDiamondControl,
   renderSquareControl,
 } from "@/app/utils/renderControl";
 
@@ -54,9 +55,14 @@ type TTransformAnchor = Transform;
 
 export type PathPointControlStyle = {
   controlSize?: number;
-  controlStyle?: "rect" | "circle";
+  controlStyle?: "rect" | "circle" | "diamond";
   controlFill?: string;
+  controlSelectedFill?: string;
+  controlSelectedSize?: number;
   controlStroke?: string;
+  controlStrokeWidth?: number;
+  controlDropShadowColor?: string;
+  controlDropShadowSize?: number;
   connectionStroke?: string;
   strokeCompositeOperation?: GlobalCompositeOperation;
   connectionDashArray?: number[];
@@ -200,9 +206,14 @@ class PathPointControl extends Control {
     pointIndex: number;
   }>;
   declare controlFill: string;
+  declare controlSelectedFill: string | undefined;
+  declare controlSelectedSize: number | undefined;
   declare controlStroke: string;
+  declare controlStrokeWidth: number | undefined;
+  declare controlDropShadowColor: string | undefined;
+  declare controlDropShadowSize: number | undefined;
   declare controlSize: number;
-  declare controlStyle: "rect" | "circle" | undefined;
+  declare controlStyle: "rect" | "circle" | "diamond" | undefined;
   declare strokeCompositeOperation?: GlobalCompositeOperation;
   constructor(options?: Partial<PathPointControl>) {
     super(options);
@@ -220,18 +231,33 @@ class PathPointControl extends Control {
       cornerSize: this.controlSize,
       cornerColor: this.controlFill,
       cornerStrokeColor: this.controlStroke,
+      cornerStrokeWidth: this.controlStrokeWidth,
+      cornerDropShadowColor: this.controlDropShadowColor,
+      cornerDropShadowSize: this.controlDropShadowSize,
       cornerStyle: this.controlStyle,
       transparentCorners: !this.controlFill,
       cornerCompositeOperation: this.strokeCompositeOperation,
     };
 
-    if (selectedControls.includes(this)) {
-      overrides.cornerColor = "cyan";
+    const parentAnchor = (this as Partial<PathControlPointControl>).parentAnchor;
+    const selectedAnchor = selectedControls.includes(this)
+      ? this
+      : parentAnchor && selectedControls.includes(parentAnchor)
+        ? parentAnchor
+        : undefined;
+    if (selectedAnchor) {
+      overrides.cornerColor = selectedAnchor.controlSelectedFill ?? "cyan";
+      if (selectedAnchor.controlSelectedSize !== undefined) {
+        overrides.cornerSize = selectedAnchor.controlSelectedSize;
+      }
     }
 
-    switch (overrides.cornerStyle || fabricObject.cornerStyle) {
+    switch (this.controlStyle || fabricObject.cornerStyle) {
       case "circle":
         renderCircleControl.call(this, ctx, left, top, overrides, fabricObject);
+        break;
+      case "diamond":
+        renderDiamondControl.call(this, ctx, left, top, overrides, fabricObject);
         break;
       default:
         renderSquareControl.call(this, ctx, left, top, overrides, fabricObject);
@@ -244,6 +270,7 @@ class PathControlPointControl extends PathPointControl {
   declare connectToCommandIndex: number;
   declare connectToPointIndex: number;
   declare connectionStroke?: string;
+  declare parentAnchor: PathPointControl | undefined;
   constructor(options?: Partial<PathControlPointControl>) {
     super(options);
   }
@@ -265,12 +292,15 @@ class PathControlPointControl extends PathPointControl {
     } = this;
     const [commandType] = path[commandIndex];
 
-    super.render(ctx, left, top, styleOverride, fabricObject);
-
-    const radius =
-      (this.sizeX || this.controlSize || fabricObject.cornerSize) / 2;
-
     ctx.save();
+
+    const anchorKey = `c_${connectToCommandIndex}_${path[connectToCommandIndex][0]}`;
+    const anchorCtrl = fabricObject.controls[anchorKey] as
+      | PathPointControl
+      | undefined;
+    const anchorGap =
+      (anchorCtrl?.controlSize ?? fabricObject.cornerSize) / 2 +
+      (anchorCtrl?.controlStrokeWidth ?? 0) / 2;
 
     function drawLine() {
       ctx.beginPath();
@@ -296,9 +326,11 @@ class PathControlPointControl extends PathPointControl {
       let dx = point.x - left;
       let dy = point.y - top;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      dx *= radius / dist;
-      dy *= radius / dist;
-      ctx.lineTo(point.x - dx, point.y - dy);
+      if (dist > anchorGap) {
+        dx *= anchorGap / dist;
+        dy *= anchorGap / dist;
+        ctx.lineTo(point.x - dx, point.y - dy);
+      }
     }
 
     drawLine();
@@ -318,6 +350,8 @@ class PathControlPointControl extends PathPointControl {
     ctx.stroke();
 
     ctx.restore();
+
+    super.render(ctx, left, top, styleOverride, fabricObject);
   }
 }
 
@@ -481,6 +515,9 @@ export function createPathControls(
         commandIndex: (cp as PathControlPointControl).commandIndex,
         pointIndex: (cp as PathControlPointControl).pointIndex,
       }));
+      cps.forEach(({ control: cp }) => {
+        (cp as PathControlPointControl).parentAnchor = anchorControl;
+      });
     }
   }
 

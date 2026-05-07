@@ -417,17 +417,27 @@ export function FabricGlyphCanvas({
           if (state.editing) {
             state.main.controls = createPathControls(state.main, {
               pointStyle: {
-                controlSize: 10.0,
+                controlSize: 8.0,
                 controlFill: "white",
-                controlStroke: "blue",
-                controlStyle: "rect",
+                controlStroke: "black",
+                controlStyle: "diamond",
+                controlStrokeWidth: 1.5,
+                controlDropShadowColor: "rgba(255,255,255,1.0)",
+                controlDropShadowSize: 4,
+                controlSelectedFill: "#2a7fff",
+                controlSelectedSize: 10.0,
               },
               controlPointStyle: {
-                controlSize: 10.0,
-                controlFill: "transparent",
-                controlStroke: "white",
+                controlSize: 8.0,
+                controlFill: "white",
+                controlStroke: "black",
+                controlStyle: "circle",
+                controlStrokeWidth: 1.5,
+                controlDropShadowColor: "rgba(255,255,255,1.0)",
+                controlDropShadowSize: 4,
+                controlSelectedFill: "#2a7fff",
+                controlSelectedSize: 10.0,
                 connectionStroke: "blue",
-                strokeCompositeOperation: "difference",
               },
             });
             state.main.hasBorders = false;

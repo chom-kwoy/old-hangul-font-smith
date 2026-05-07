@@ -1,17 +1,36 @@
 import { Control, InteractiveFabricObject, TDegree, TRadian } from "fabric";
 
-export type ControlRenderingStyleOverride = Partial<
-  Pick<
-    InteractiveFabricObject,
-    | "cornerStyle"
-    | "cornerSize"
-    | "cornerColor"
-    | "cornerStrokeColor"
-    | "cornerDashArray"
-    | "transparentCorners"
-  >
+export type ControlRenderingStyleOverride = Omit<
+  Partial<
+    Pick<
+      InteractiveFabricObject,
+      | "cornerStyle"
+      | "cornerSize"
+      | "cornerColor"
+      | "cornerStrokeColor"
+      | "cornerDashArray"
+      | "transparentCorners"
+    >
+  >,
+  "cornerStyle"
 > & {
+  cornerStyle?: "circle" | "rect" | "diamond";
+  cornerStrokeWidth?: number;
+  cornerDropShadowColor?: string;
+  cornerDropShadowSize?: number;
   cornerCompositeOperation?: GlobalCompositeOperation;
+};
+
+const applyDropShadow = (
+  ctx: CanvasRenderingContext2D,
+  styleOverride: ControlRenderingStyleOverride,
+) => {
+  if (styleOverride.cornerDropShadowColor !== undefined) {
+    ctx.shadowColor = styleOverride.cornerDropShadowColor;
+    ctx.shadowBlur = styleOverride.cornerDropShadowSize ?? 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  }
 };
 
 /**
@@ -60,6 +79,9 @@ export function renderCircleControl(
   ctx.fillStyle = styleOverride.cornerColor || fabricObject.cornerColor || "";
   ctx.strokeStyle =
     styleOverride.cornerStrokeColor || fabricObject.cornerStrokeColor || "";
+  if (styleOverride.cornerStrokeWidth !== undefined) {
+    ctx.lineWidth = styleOverride.cornerStrokeWidth;
+  }
   // TODO: use proper ellipse code.
   if (xSize > ySize) {
     size = xSize;
@@ -72,6 +94,7 @@ export function renderCircleControl(
   } else {
     size = xSize;
   }
+  applyDropShadow(ctx, styleOverride);
   ctx.beginPath();
   ctx.arc(myLeft, myTop, size / 2, 0, Math.PI * 2, false);
   ctx[methodName]();
@@ -120,6 +143,9 @@ export function renderSquareControl(
   ctx.fillStyle = styleOverride.cornerColor || fabricObject.cornerColor || "";
   ctx.strokeStyle =
     styleOverride.cornerStrokeColor || fabricObject.cornerStrokeColor || "";
+  if (styleOverride.cornerStrokeWidth !== undefined) {
+    ctx.lineWidth = styleOverride.cornerStrokeWidth;
+  }
   ctx.translate(left, top);
   //  angle is relative to canvas plane
   const angle = fabricObject.getTotalAngle();
@@ -128,11 +154,58 @@ export function renderSquareControl(
   // this does not work, and fixed with ( && ) does not make sense.
   // to have real transparent corners we need the controls on upperCanvas
   // transparentCorners || ctx.clearRect(-xSizeBy2, -ySizeBy2, xSize, ySize);
+  applyDropShadow(ctx, styleOverride);
   ctx[`${methodName}Rect`](-xSizeBy2, -ySizeBy2, xSize, ySize);
   if (stroke) {
     ctx.globalCompositeOperation =
       styleOverride.cornerCompositeOperation || "source-over";
     ctx.strokeRect(-xSizeBy2, -ySizeBy2, xSize, ySize);
+  }
+  ctx.restore();
+}
+
+export function renderDiamondControl(
+  this: Control,
+  ctx: CanvasRenderingContext2D,
+  left: number,
+  top: number,
+  styleOverride: ControlRenderingStyleOverride,
+  fabricObject: InteractiveFabricObject,
+) {
+  styleOverride = styleOverride || {};
+  const size =
+      this.sizeX || styleOverride.cornerSize || fabricObject.cornerSize,
+    transparentCorners =
+      typeof styleOverride.transparentCorners !== "undefined"
+        ? styleOverride.transparentCorners
+        : fabricObject.transparentCorners,
+    methodName = transparentCorners ? "stroke" : "fill",
+    stroke =
+      !transparentCorners &&
+      (styleOverride.cornerStrokeColor || fabricObject.cornerStrokeColor),
+    half = size / 2;
+  ctx.save();
+  ctx.fillStyle = styleOverride.cornerColor || fabricObject.cornerColor || "";
+  ctx.strokeStyle =
+    styleOverride.cornerStrokeColor || fabricObject.cornerStrokeColor || "";
+  if (styleOverride.cornerStrokeWidth !== undefined) {
+    ctx.lineWidth = styleOverride.cornerStrokeWidth;
+  }
+  ctx.translate(left, top);
+  const angle = fabricObject.getTotalAngle();
+  ctx.rotate(degreesToRadians(angle + 45));
+  applyDropShadow(ctx, styleOverride);
+  ctx.beginPath();
+  ctx.rect(-half, -half, size, size);
+  if (methodName === "fill") {
+    ctx[methodName]();
+  } else {
+    ctx.stroke();
+  }
+  if (stroke) {
+    ctx.globalCompositeOperation =
+      styleOverride.cornerCompositeOperation || "source-over";
+    ctx.strokeRect(-half, -half, size, size);
   }
   ctx.restore();
 }
