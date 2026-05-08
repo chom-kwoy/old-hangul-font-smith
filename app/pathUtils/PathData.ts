@@ -5,6 +5,7 @@ import opentype from "opentype.js";
 import paper from "paper";
 
 import { pathWorkerPool } from "@/app/pathUtils/PathWorkerPool";
+import { splitPaths } from "@/app/pathUtils/SplitPaths";
 import {
   fabricPathDataToPaper,
   fabricPathDataToSVG,
@@ -12,13 +13,14 @@ import {
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
 import { sampleBoundary } from "@/app/pathUtils/flatBoundary";
+import { extractKeypointDescriptors } from "@/app/pathUtils/keypoints";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
   PathScaleOptions,
   scalePath,
   skeletonize,
 } from "@/app/pathUtils/skeleton/skeleton";
-import { Bounds } from "@/app/utils/types";
+import { Bounds, Vec2D } from "@/app/utils/types";
 
 export type SerializedPathData = {
   readonly _paths_serialized: TSimplePathData[];
@@ -52,13 +54,33 @@ export default class PathData {
   getSampledBoundary(sampleSpacing: number = 10) {
     const result: paper.Point[] = [];
     this.#originalPaths.forEach((path) => {
-      const { points } = sampleBoundary(
-        fabricPathDataToPaper(path),
-        sampleSpacing,
-      );
+      const { points } = sampleBoundary(fabricPathDataToPaper(path), {
+        step: sampleSpacing,
+      });
       result.push(...points);
     });
     return result;
+  }
+
+  transform(callback: (p: Vec2D) => Vec2D): void {
+    this.#originalPaths.forEach((path) => {
+      path.forEach((cmd) => {
+        for (let i = 1; i < cmd.length; i += 2) {
+          const p = callback({
+            x: cmd[i] as number,
+            y: cmd[i + 1] as number,
+          });
+          cmd[i] = p.x;
+          cmd[i + 1] = p.y;
+        }
+      });
+    });
+  }
+
+  getKeypointDescriptors() {
+    return this.#originalPaths.map((path) => {
+      return extractKeypointDescriptors(path);
+    });
   }
 
   static fromOpentype(
@@ -314,71 +336,4 @@ export default class PathData {
       return pathWorkerPool.scalePath(path, skeleton, options);
     }
   }
-}
-
-// splits a single compound path into multiple paths, preserving holes
-// assumes there is no overlap between subpaths
-export function splitPaths(path: TSimplePathData): TSimplePathData[] {
-  // 0. Split path into each subpath
-  const subpaths: TSimplePathData[] = [];
-  let currentSubpath: TSimplePathData = [];
-  for (const cmd of path) {
-    if (cmd[0] === "M" && currentSubpath.length > 0) {
-      subpaths.push(currentSubpath);
-      currentSubpath = [];
-    }
-    currentSubpath.push(cmd);
-  }
-  if (currentSubpath.length > 0) {
-    subpaths.push(currentSubpath);
-  }
-
-  // 1. Build adjacency list of subpaths based on containment
-  const paperSubpaths = subpaths.map((sp) => fabricPathDataToPaper(sp));
-  const tree = new Map<number, number[]>();
-  tree.set(-1, []); // root
-  for (let i = 0; i < subpaths.length; i++) {
-    const pathI = paperSubpaths[i];
-    let parentIndex = -1;
-    for (let j = 0; j < subpaths.length; j++) {
-      if (i === j) continue;
-      const pathJ = paperSubpaths[j];
-      if (pathJ.contains(pathI.firstSegment.point)) {
-        // found a parent
-        if (
-          parentIndex === -1 ||
-          paperSubpaths[parentIndex].contains(pathJ.firstSegment.point)
-        ) {
-          parentIndex = j;
-        }
-      }
-    }
-    if (!tree.has(parentIndex)) {
-      tree.set(parentIndex, []);
-    }
-    tree.get(parentIndex)!.push(i);
-  }
-
-  // 2. Traverse tree to build compound paths
-  const result: TSimplePathData[] = [];
-  function traverse(nodeIndex: number, compoundPath: TSimplePathData) {
-    compoundPath.push(...subpaths[nodeIndex]);
-    const children = tree.get(nodeIndex);
-    if (!children) return;
-    for (const childIndex of children) {
-      // recurse to add grandchildren
-      traverse(childIndex, compoundPath);
-    }
-  }
-  const rootChildren = tree.get(-1);
-  if (rootChildren) {
-    for (const childIndex of rootChildren) {
-      const compoundPath: TSimplePathData = [];
-      traverse(childIndex, compoundPath);
-      if (compoundPath.length > 0) {
-        result.push(compoundPath);
-      }
-    }
-  }
-  return result;
 }

@@ -19,13 +19,18 @@ const GRID_DIM = 20;
 
 export function sampleBoundary(
   path: paper.CompoundPath,
-  step: number,
+  options: {
+    step?: number;
+    samplesPerCurve?: number;
+  },
 ): {
   points: paper.Point[];
   subPathRanges: Array<{ start: number; end: number }>;
+  origCurveIdx: Array<{ subPathIdx: number; curveIdx: number }>;
 } {
   const points: paper.Point[] = [];
   const subPathRanges: Array<{ start: number; end: number }> = [];
+  const origCurveIdx: Array<{ subPathIdx: number; curveIdx: number }> = [];
 
   for (const child of path.children as paper.Path[]) {
     const rangeStart = points.length;
@@ -33,26 +38,31 @@ export function sampleBoundary(
     for (const curve of child.curves) {
       // Always include the anchor point at the start of this curve segment.
       points.push(curve.point1.clone());
+      origCurveIdx.push({ subPathIdx: child.index, curveIdx: curve.index });
       // Then add evenly-spaced interior samples along the curve.
-      const curveLen = curve.length;
-      const numInterior = Math.floor(curveLen / step);
+      const step = options.step ?? curve.length / options.samplesPerCurve!;
+      const numInterior =
+        options.samplesPerCurve ?? Math.floor(curve.length / step);
       for (let i = 1; i <= numInterior; i++) {
         const pt = curve.getPointAt(i * step);
-        if (pt) points.push(pt);
+        points.push(pt);
+        origCurveIdx.push({ subPathIdx: child.index, curveIdx: curve.index });
       }
     }
 
     subPathRanges.push({ start: rangeStart, end: points.length });
   }
 
-  return { points, subPathRanges };
+  return { points, subPathRanges, origCurveIdx };
 }
 
 export function buildFlatBoundary(
   path: paper.CompoundPath,
   sampleSpacing: number = 5,
 ): FlatBoundary {
-  const { points, subPathRanges } = sampleBoundary(path, sampleSpacing);
+  const { points, subPathRanges } = sampleBoundary(path, {
+    step: sampleSpacing,
+  });
 
   const x0List: number[] = [],
     y0List: number[] = [];
@@ -63,7 +73,7 @@ export function buildFlatBoundary(
     const len = end - start;
     for (let i = 0; i < len; i++) {
       const p0 = points[start + i];
-      const p1 = points[start + (i + 1) % len];
+      const p1 = points[start + ((i + 1) % len)];
       x0List.push(p0.x);
       y0List.push(p0.y);
       x1List.push(p1.x);

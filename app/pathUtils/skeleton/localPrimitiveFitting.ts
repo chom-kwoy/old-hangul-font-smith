@@ -5,7 +5,8 @@ import {
   buildFlatBoundary,
   rayIntersectFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
-import { MedialAxisGraph, Point } from "@/app/pathUtils/skeleton/medialAxis";
+import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
+import { Vec2D } from "@/app/utils/types";
 
 // --- Interfaces ---
 
@@ -20,8 +21,8 @@ export interface Primitive {
   // Geometric definition of the fitted primitive
   // For "point": origin is the center.
   // For "edge": origins trace the medial segment (the "bone").
-  origins: Point[];
-  directions: Point[];
+  origins: Vec2D[];
+  directions: Vec2D[];
   radii: number[];
 }
 

@@ -10,6 +10,7 @@ import {
   sampleBoundary,
 } from "@/app/pathUtils/flatBoundary";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
+import { Vec2D } from "@/app/utils/types";
 
 /**
  * Computes the Medial Skeletal Diagram (Optimized Skeleton) for a 2D shape.
@@ -40,7 +41,7 @@ export function computeMedialSkeletonPoints(
     );
   }
 
-  const { points: boundarySamples } = sampleBoundary(path, 10);
+  const { points: boundarySamples } = sampleBoundary(path, { step: 10 });
   const flatBoundary = buildFlatBoundary(path);
   // Reusable buffer for ray-intersection segment tracking
   const tested = new Uint8Array(flatBoundary.count);
@@ -269,7 +270,7 @@ function projectToMedialAxisFast(
   px: number,
   py: number,
   medialAxis: MedialAxisGraph,
-): { x: number; y: number } {
+): Vec2D {
   let bestX = medialAxis.points[0].x;
   let bestY = medialAxis.points[0].y;
   let minDist = Infinity;

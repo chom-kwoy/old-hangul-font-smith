@@ -6,15 +6,11 @@ import {
   rayIntersectFlatBoundary,
   sampleBoundary,
 } from "@/app/pathUtils/flatBoundary";
-
-export type Point = {
-  x: number;
-  y: number;
-};
+import { Vec2D } from "@/app/utils/types";
 
 // Define the new return type
 export interface MedialAxisGraph {
-  points: Point[];
+  points: Vec2D[];
   segments: [number, number][]; // pairs of indices into `points`
 }
 
@@ -27,10 +23,9 @@ export function extractMedialAxis(
   sampleSpacing: number = 10,
 ): MedialAxisGraph {
   // 1. Sampling: Use the helper function
-  const { points: boundaryPoints, subPathRanges } = sampleBoundary(
-    path,
-    sampleSpacing,
-  );
+  const { points: boundaryPoints, subPathRanges } = sampleBoundary(path, {
+    step: sampleSpacing,
+  });
 
   function isAdjacentOnPath(a: number, b: number): boolean {
     for (const { start, end } of subPathRanges) {
@@ -62,7 +57,7 @@ export function extractMedialAxis(
   ]);
 
   // Output structures
-  const uniquePoints: Point[] = [];
+  const uniquePoints: Vec2D[] = [];
   const segments: [number, number][] = [];
 
   // Map from Delaunay Triangle Index -> Index in uniquePoints array

@@ -1,7 +1,8 @@
 import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import paper from "paper";
 
-import { MedialAxisGraph, Point } from "@/app/pathUtils/skeleton/medialAxis";
+import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
+import { Vec2D } from "@/app/utils/types";
 
 /**
  * Constructs the Medial Skeleton (M_S) from selected vertices (V) and the Raw Medial Axis (M).
@@ -187,7 +188,7 @@ function buildAdjacencyList(graph: MedialAxisGraph): number[][] {
   return adj;
 }
 
-function getNearestNodeIndex(pt: paper.Point, nodes: Point[]): number {
+function getNearestNodeIndex(pt: paper.Point, nodes: Vec2D[]): number {
   let minDst = Infinity;
   let idx = -1;
   for (let i = 0; i < nodes.length; i++) {

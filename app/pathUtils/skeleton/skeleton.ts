@@ -15,6 +15,7 @@ import {
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+import { Vec2D } from "@/app/utils/types";
 
 // initialize the clipper library
 const clipper = await clipperLib.loadNativeClipperLibInstanceAsync(
@@ -123,7 +124,7 @@ function scalePathImpl(
   strokeWidth: number,
   verbose: boolean = false,
 ): paper.Point[] {
-  function pr(pt: { x: number; y: number }, xoffset = 0, yoffset = 0) {
+  function pr(pt: Vec2D, xoffset = 0, yoffset = 0) {
     return `(${(xoffset + pt.x).toFixed(1)},${(yoffset + 1000 - pt.y).toFixed(1)})`;
   }
 

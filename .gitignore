@@ -45,3 +45,4 @@ uv.lock
 pyproject.toml
 
 .claude/*
+/test_outputs/

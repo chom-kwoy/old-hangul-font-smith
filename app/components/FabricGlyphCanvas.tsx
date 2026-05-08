@@ -10,6 +10,7 @@ import {
   createPathControls,
   deselectPathControls,
 } from "@/app/utils/pathControl";
+import { Vec2D } from "@/app/utils/types";
 
 type PathObjects = {
   main: fabric.Path;
@@ -18,7 +19,7 @@ type PathObjects = {
   baseScaleY: number;
   boundOffsetX: number;
   boundOffsetY: number;
-  origCenter: { x: number; y: number };
+  origCenter: Vec2D;
   editing: boolean;
 };
 
@@ -425,7 +426,7 @@ export function FabricGlyphCanvas({
                 controlDropShadowColor: "rgba(255,255,255,1.0)",
                 controlDropShadowSize: 4,
                 controlSelectedFill: "#2a7fff",
-                controlSelectedSize: 10.0,
+                controlSelectedSize: 11.0,
               },
               controlPointStyle: {
                 controlSize: 8.0,
@@ -436,7 +437,7 @@ export function FabricGlyphCanvas({
                 controlDropShadowColor: "rgba(255,255,255,1.0)",
                 controlDropShadowSize: 4,
                 controlSelectedFill: "#2a7fff",
-                controlSelectedSize: 10.0,
+                controlSelectedSize: 11.0,
                 connectionStroke: "blue",
               },
             });

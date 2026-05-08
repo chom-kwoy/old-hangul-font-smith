@@ -88,3 +88,8 @@ export type GenerateOptions = {
   includePrecomposed: boolean;
   isVerticalFont: boolean;
 };
+
+export type Vec2D = {
+  x: number;
+  y: number;
+};
