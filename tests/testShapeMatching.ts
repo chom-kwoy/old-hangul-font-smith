@@ -100,7 +100,7 @@ function visualizeAlignment(
   filename: string,
 ) {
   // Initialize a canvas
-  const canvas = new StaticCanvas(null, {
+  const canvas = new StaticCanvas("null", {
     width: 1000,
     height: 1000,
     backgroundColor: "white",
