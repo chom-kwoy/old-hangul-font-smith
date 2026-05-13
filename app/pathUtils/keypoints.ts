@@ -1,7 +1,10 @@
 import { TSimplePathData } from "fabric";
 
 import { fabricPathDataToPaper } from "@/app/pathUtils/convert";
-import { sampleBoundary } from "@/app/pathUtils/flatBoundary";
+import {
+  SampleBoundaryOptions,
+  sampleBoundary,
+} from "@/app/pathUtils/flatBoundary";
 import { Vec2D } from "@/app/utils/types";
 
 // Neighbor offsets (in sampled-point indices) at which Menger curvature is computed.
@@ -36,10 +39,14 @@ function mengerCurvature(
   return (denom > 1e-10 ? (2 * cross) / denom : 0) * 1000;
 }
 
-export function extractKeypointDescriptors(path: TSimplePathData): Keypoint[] {
-  const { points, origCurveIdx } = sampleBoundary(fabricPathDataToPaper(path), {
-    samplesPerCurve: 10,
-  });
+export function extractKeypointDescriptors(
+  path: TSimplePathData,
+  options: SampleBoundaryOptions,
+): Keypoint[] {
+  const { points, origCurveIdx } = sampleBoundary(
+    fabricPathDataToPaper(path),
+    options,
+  );
 
   const n = points.length;
   const keypoints: Keypoint[] = [];
@@ -98,170 +105,228 @@ export function keypointSimilarity(kp1: Keypoint, kp2: Keypoint) {
   return sim;
 }
 
+// Pre-allocated DP workspace — reused across rotation candidates to avoid GC pressure.
+type Workspace = {
+  dp: Float64Array[];
+  bkState: Int32Array[];
+  bkI: Int32Array[];
+  bkJ: Int32Array[];
+};
+
+function makeWorkspace(size: number): Workspace {
+  return {
+    dp: Array.from({ length: 5 }, () => new Float64Array(size)),
+    bkState: Array.from({ length: 5 }, () => new Int32Array(size)),
+    bkI: Array.from({ length: 5 }, () => new Int32Array(size)),
+    bkJ: Array.from({ length: 5 }, () => new Int32Array(size)),
+  };
+}
+
 export function matchKeypointsImpl(
   N: Keypoint[],
   H: Keypoint[],
+  ws?: Workspace,
+  // Sakoe-Chiba half-band: only fill cells where |i - j| <= band.
+  // Infinity = full DP. After correct rotation the path stays near the diagonal,
+  // so a band of ~n/3 captures practical deformations while reducing work ~3x.
+  band: number = Infinity,
 ): { score: number; alignment: Map<number, number[]> } {
-  // Dynamic time warping with skipping to match keypoints
-  // M (i, j):   step (1, 1) into (i, j)  — diagonal match         gains Sim(N[i], H[j])
-  // Mₕ(i, j):   step (0, 1) into (i, j)  — H-stretch (free ride)  gains nothing
-  // Mₙ(i, j):   step (1, 0) into (i, j)  — N-stretch (free ride)  gains nothing
-  // X (i, j):   step (0, 1) into (i, j)  — H-side gap (no correspondence)
-  // Y (i, j):   step (1, 0) into (i, j)  — N-side gap (no correspondence)
-  // M(i,j) = Sim(Ni,Hj) + max(M(i−1,j−1), Mh(i−1,j−1), Mn(i−1,j−1), X(i−1,j−1), Y(i−1,j−1))
-  // Mh(i,j) =              max( M(i,j−1),  Mh(i,j−1) )
-  // Mn(i,j) =              max( M(i−1,j),  Mn(i−1,j) )
-  // X(i,j) = max( M(i,j−1)−ghopen, Mh(i,j−1)−ghopen, Mn(i,j−1)−ghopen, X(i,j−1)−ghext )
-  // Y(i,j) = max( M(i−1,j)−gnopen, Mh(i−1,j)−gnopen, Mn(i−1,j)−gnopen, Y(i−1,j)−gnext )
-  // Mh/Mn carry the score forward without adding to it, so the diagonal (all-M) path
-  // strictly dominates any L-shaped path on featureless segments.
-  // Boundary (semi-global with free start on H, as before)
-  // M(0,0)=0, X(0,j)=0 ∀j, all other (0,∗) entries=−∞
-  // Final score (free end on H)
-  // score = max_j max( M(M_N,j), Mh(M_N,j), Mn(M_N,j), Y(M_N,j) )
-  const ghopen = 1.0; // H gap open penalty
-  const ghext = 0.0; // H gap extension penalty
-  const gnopen = 10.0; // N gap open penalty
-  const gnext = 5.0; // N gap extension penalty
+  // States: 0=M, 1=Mh, 2=Mn, 3=X, 4=Y
+  // M(i,j) = Sim(Ni,Hj) + max(M(i-1,j-1), Mh(i-1,j-1), Mn(i-1,j-1), X(i-1,j-1), Y(i-1,j-1))
+  // Mh(i,j) =              max( M(i,j-1),  Mh(i,j-1) )          [free ride, no +Sim]
+  // Mn(i,j) =              max( M(i-1,j),  Mn(i-1,j) )          [free ride, no +Sim]
+  // X(i,j) = max( M(i,j-1)-ghopen, Mh(i,j-1)-ghopen, Mn(i,j-1)-ghopen, X(i,j-1)-ghext )
+  // Y(i,j) = max( M(i-1,j)-gnopen, Mh(i-1,j)-gnopen, Mn(i-1,j)-gnopen, Y(i-1,j)-gnext )
+  // Boundary: M(0,0)=0, X(0,j)=0 for j in [0,band], all other (0,*) = -inf
+  // Final: max_j max( M(M_N,j), Mh(M_N,j), Mn(M_N,j), Y(M_N,j) )
+  const ghopen = 1.0;
+  const ghext = 0.0;
+  const gnopen = 10.0;
+  const gnext = 5.0;
 
   const M_N = N.length;
   const M_H = H.length;
   const NEG_INF = -1e18;
   const W = M_H + 1;
+  const size = (M_N + 1) * W;
 
-  // States: 0=M, 1=Mh, 2=Mn, 3=X, 4=Y
-  const dp = Array.from({ length: 5 }, () =>
-    new Float64Array((M_N + 1) * W).fill(NEG_INF),
-  );
-  const bkState = Array.from({ length: 5 }, () =>
-    new Int8Array((M_N + 1) * W).fill(-1),
-  );
-  const bkI = Array.from({ length: 5 }, () =>
-    new Int32Array((M_N + 1) * W).fill(-1),
-  );
-  const bkJ = Array.from({ length: 5 }, () =>
-    new Int32Array((M_N + 1) * W).fill(-1),
-  );
+  let dp: Float64Array[];
+  let bkState: Int32Array[];
+  let bkI: Int32Array[];
+  let bkJ: Int32Array[];
+
+  if (ws && ws.dp[0].length >= size) {
+    ({ dp, bkState, bkI, bkJ } = ws);
+    for (let s = 0; s < 5; s++) {
+      dp[s].fill(NEG_INF, 0, size);
+      bkState[s].fill(-1, 0, size);
+      bkI[s].fill(-1, 0, size);
+      bkJ[s].fill(-1, 0, size);
+    }
+  } else {
+    dp = Array.from({ length: 5 }, () => new Float64Array(size).fill(NEG_INF));
+    bkState = Array.from({ length: 5 }, () => new Int32Array(size).fill(-1));
+    bkI = Array.from({ length: 5 }, () => new Int32Array(size).fill(-1));
+    bkJ = Array.from({ length: 5 }, () => new Int32Array(size).fill(-1));
+  }
 
   const at = (i: number, j: number) => i * W + j;
 
-  // Boundary: M(0,0)=0, X(0,j)=0 for all j
+  // Boundary: M(0,0)=0, X(0,j)=0 for j in [0, min(M_H, band)]
   dp[0][at(0, 0)] = 0;
-  for (let j = 0; j <= M_H; j++) dp[3][at(0, j)] = 0;
+  const initJMax = band === Infinity ? M_H : Math.min(M_H, band);
+  for (let j = 0; j <= initJMax; j++) dp[3][at(0, j)] = 0;
 
   for (let i = 0; i <= M_N; i++) {
-    for (let j = 0; j <= M_H; j++) {
+    const jExp = M_N > 0 ? Math.round((i * M_H) / M_N) : 0;
+    const jLo = band === Infinity ? 0 : Math.max(0, jExp - band);
+    const jHi = band === Infinity ? M_H : Math.min(M_H, jExp + band);
+
+    for (let j = jLo; j <= jHi; j++) {
       if (i === 0 && j === 0) continue;
 
       if (i >= 1 && j >= 1) {
         const sc = keypointSimilarity(N[i - 1], H[j - 1]);
+        let v: number;
 
-        // M(i,j) — diagonal from (i-1, j-1), all 5 predecessors
+        // M(i,j) — diagonal, all 5 predecessors
         {
+          const p = at(i - 1, j - 1);
           let best = NEG_INF,
             bs = -1;
-          for (let s = 0; s < 5; s++) {
-            const v = dp[s][at(i - 1, j - 1)];
-            if (v > best) {
-              best = v;
-              bs = s;
-            }
+          if ((v = dp[0][p]) > best) {
+            best = v;
+            bs = 0;
+          }
+          if ((v = dp[1][p]) > best) {
+            best = v;
+            bs = 1;
+          }
+          if ((v = dp[2][p]) > best) {
+            best = v;
+            bs = 2;
+          }
+          if ((v = dp[3][p]) > best) {
+            best = v;
+            bs = 3;
+          }
+          if ((v = dp[4][p]) > best) {
+            best = v;
+            bs = 4;
           }
           if (best > NEG_INF) {
-            dp[0][at(i, j)] = sc + best;
-            bkState[0][at(i, j)] = bs;
-            bkI[0][at(i, j)] = i - 1;
-            bkJ[0][at(i, j)] = j - 1;
+            const c = at(i, j);
+            dp[0][c] = sc + best;
+            bkState[0][c] = bs;
+            bkI[0][c] = i - 1;
+            bkJ[0][c] = j - 1;
           }
         }
 
-        // Mh(i,j) — H-step from (i, j-1), predecessors M and Mh; no +sc
+        // Mh(i,j) — H-step, free ride, predecessors M and Mh
         {
+          const p = at(i, j - 1);
           let best = NEG_INF,
             bs = -1;
-          for (const s of [0, 1]) {
-            const v = dp[s][at(i, j - 1)];
-            if (v > best) {
-              best = v;
-              bs = s;
-            }
+          if ((v = dp[0][p]) > best) {
+            best = v;
+            bs = 0;
+          }
+          if ((v = dp[1][p]) > best) {
+            best = v;
+            bs = 1;
           }
           if (best > NEG_INF) {
-            dp[1][at(i, j)] = best;
-            bkState[1][at(i, j)] = bs;
-            bkI[1][at(i, j)] = i;
-            bkJ[1][at(i, j)] = j - 1;
+            const c = at(i, j);
+            dp[1][c] = best;
+            bkState[1][c] = bs;
+            bkI[1][c] = i;
+            bkJ[1][c] = j - 1;
           }
         }
 
-        // Mn(i,j) — N-step from (i-1, j), predecessors M and Mn; no +sc
+        // Mn(i,j) — N-step, free ride, predecessors M and Mn
         {
+          const p = at(i - 1, j);
           let best = NEG_INF,
             bs = -1;
-          for (const s of [0, 2]) {
-            const v = dp[s][at(i - 1, j)];
-            if (v > best) {
-              best = v;
-              bs = s;
-            }
+          if ((v = dp[0][p]) > best) {
+            best = v;
+            bs = 0;
+          }
+          if ((v = dp[2][p]) > best) {
+            best = v;
+            bs = 2;
           }
           if (best > NEG_INF) {
-            dp[2][at(i, j)] = best;
-            bkState[2][at(i, j)] = bs;
-            bkI[2][at(i, j)] = i - 1;
-            bkJ[2][at(i, j)] = j;
+            const c = at(i, j);
+            dp[2][c] = best;
+            bkState[2][c] = bs;
+            bkI[2][c] = i - 1;
+            bkJ[2][c] = j;
           }
         }
       }
 
-      // X(i,j) — H-gap step from (i, j-1)
+      // X(i,j) — H-gap
       if (j >= 1) {
+        const p = at(i, j - 1);
         let best = NEG_INF,
-          bs = -1;
-        const pens: [number, number][] = [
-          [0, ghopen],
-          [1, ghopen],
-          [2, ghopen],
-          [3, ghext],
-        ];
-        for (const [s, pen] of pens) {
-          const v = dp[s][at(i, j - 1)] - pen;
-          if (v > best) {
-            best = v;
-            bs = s;
-          }
+          bs = -1,
+          v: number;
+        if ((v = dp[0][p] - ghopen) > best) {
+          best = v;
+          bs = 0;
         }
-        // don't overwrite the free-start boundary X(0,j)=0
-        if (best > NEG_INF && best > dp[3][at(i, j)]) {
-          dp[3][at(i, j)] = best;
-          bkState[3][at(i, j)] = bs;
-          bkI[3][at(i, j)] = i;
-          bkJ[3][at(i, j)] = j - 1;
+        if ((v = dp[1][p] - ghopen) > best) {
+          best = v;
+          bs = 1;
+        }
+        if ((v = dp[2][p] - ghopen) > best) {
+          best = v;
+          bs = 2;
+        }
+        if ((v = dp[3][p] - ghext) > best) {
+          best = v;
+          bs = 3;
+        }
+        const c = at(i, j);
+        if (best > NEG_INF && best > dp[3][c]) {
+          dp[3][c] = best;
+          bkState[3][c] = bs;
+          bkI[3][c] = i;
+          bkJ[3][c] = j - 1;
         }
       }
 
-      // Y(i,j) — N-gap step from (i-1, j)
+      // Y(i,j) — N-gap
       if (i >= 1) {
+        const p = at(i - 1, j);
         let best = NEG_INF,
-          bs = -1;
-        const pens: [number, number][] = [
-          [0, gnopen],
-          [1, gnopen],
-          [2, gnopen],
-          [4, gnext],
-        ];
-        for (const [s, pen] of pens) {
-          const v = dp[s][at(i - 1, j)] - pen;
-          if (v > best) {
-            best = v;
-            bs = s;
-          }
+          bs = -1,
+          v: number;
+        if ((v = dp[0][p] - gnopen) > best) {
+          best = v;
+          bs = 0;
+        }
+        if ((v = dp[1][p] - gnopen) > best) {
+          best = v;
+          bs = 1;
+        }
+        if ((v = dp[2][p] - gnopen) > best) {
+          best = v;
+          bs = 2;
+        }
+        if ((v = dp[4][p] - gnext) > best) {
+          best = v;
+          bs = 4;
         }
         if (best > NEG_INF) {
-          dp[4][at(i, j)] = best;
-          bkState[4][at(i, j)] = bs;
-          bkI[4][at(i, j)] = i - 1;
-          bkJ[4][at(i, j)] = j;
+          const c = at(i, j);
+          dp[4][c] = best;
+          bkState[4][c] = bs;
+          bkI[4][c] = i - 1;
+          bkJ[4][c] = j;
         }
       }
     }
@@ -271,24 +336,39 @@ export function matchKeypointsImpl(
   let bestScore = NEG_INF,
     bestJ = -1,
     bestS = -1;
-  for (let j = 0; j <= M_H; j++) {
-    for (const s of [0, 1, 2, 4]) {
-      const v = dp[s][at(M_N, j)];
-      if (v > bestScore) {
-        bestScore = v;
-        bestJ = j;
-        bestS = s;
-      }
+  // j_exp(M_N) = round(M_N * M_H / M_N) = M_H, so the final range is always [M_H-band, M_H]
+  const finalLo = band === Infinity ? 0 : Math.max(0, M_H - band);
+  const finalHi = M_H;
+  for (let j = finalLo; j <= finalHi; j++) {
+    let v: number;
+    if ((v = dp[0][at(M_N, j)]) > bestScore) {
+      bestScore = v;
+      bestJ = j;
+      bestS = 0;
+    }
+    if ((v = dp[1][at(M_N, j)]) > bestScore) {
+      bestScore = v;
+      bestJ = j;
+      bestS = 1;
+    }
+    if ((v = dp[2][at(M_N, j)]) > bestScore) {
+      bestScore = v;
+      bestJ = j;
+      bestS = 2;
+    }
+    if ((v = dp[4][at(M_N, j)]) > bestScore) {
+      bestScore = v;
+      bestJ = j;
+      bestS = 4;
     }
   }
 
-  // Backtrack to build alignment (N-index → H-index[])
+  // Backtrack
   const alignment = new Map<number, number[]>();
   let ci = M_N,
     cj = bestJ,
     cs = bestS;
   while (ci > 0 || cj > 0) {
-    // Match states record a correspondence for the current cell
     if ((cs === 0 || cs === 1 || cs === 2) && ci > 0 && cj > 0) {
       const ni = ci - 1,
         hj = cj - 1;
@@ -304,7 +384,6 @@ export function matchKeypointsImpl(
     cs = ps;
   }
 
-  // normalize score by the max number of possible matches
   bestScore = bestScore / Math.max(M_H, M_N);
   return { score: bestScore, alignment };
 }
@@ -312,32 +391,62 @@ export function matchKeypointsImpl(
 export function matchKeypoints(
   N: Keypoint[],
   H: Keypoint[],
-  rotateSteps: number = 10,
+  beamSize: number = 3,
+  band?: number,
 ): { score: number; alignment: Map<number, number[]> } {
-  let bestScore = -Infinity;
-  let bestAlignment = new Map<number, number[]>();
+  const n = N.length;
+  const effectiveBand = band ?? Math.ceil(Math.max(n, H.length) / 3);
 
-  const rotated = [...N];
+  // Pre-allocate workspace once; reused for every rotation candidate to avoid GC.
+  const ws = makeWorkspace((n + 2) * (H.length + 1));
 
-  for (let k = 0; k < N.length; k += rotateSteps) {
-    const augmented = [...rotated, rotated[0]];
-    const { score, alignment } = matchKeypointsImpl(augmented, H);
+  // NN.slice(k, k+n+1) = N rotated left by k, with N[k] appended for wrap-around
+  const NN = [...N, ...N, N[0]];
 
-    if (score > bestScore) {
-      bestScore = score;
-      bestAlignment = new Map();
-      for (const [ri, hjs] of alignment) {
-        const origIdx = (ri + k) % N.length;
-        if (!bestAlignment.has(origIdx)) bestAlignment.set(origIdx, []);
-        bestAlignment.get(origIdx)!.push(...hjs);
-      }
+  type Result = { score: number; alignment: Map<number, number[]> };
+  const cache = new Map<number, Result>();
+
+  function evaluate(k: number): Result {
+    if (cache.has(k)) return cache.get(k)!;
+    const { score, alignment } = matchKeypointsImpl(
+      NN.slice(k, k + n + 1),
+      H,
+      ws,
+      effectiveBand,
+    );
+    const remapped = new Map<number, number[]>();
+    for (const [ri, hjs] of alignment) {
+      const origIdx = (ri + k) % n;
+      if (!remapped.has(origIdx)) remapped.set(origIdx, []);
+      remapped.get(origIdx)!.push(...hjs);
     }
-
-    // rotate left by rotateSteps for the next iteration
-    for (let r = 0; r < rotateSteps; r++) {
-      rotated.push(rotated.shift()!);
-    }
+    const result: Result = { score, alignment: remapped };
+    cache.set(k, result);
+    return result;
   }
 
-  return { score: bestScore, alignment: bestAlignment };
+  function topBeam(): number[] {
+    return [...cache.entries()]
+      .sort((a, b) => b[1].score - a[1].score)
+      .slice(0, beamSize)
+      .map(([k]) => k);
+  }
+
+  // Coarse pass: evenly spaced at ~sqrt(n) intervals
+  let step = Math.max(1, Math.floor(Math.sqrt(n)));
+  for (let k = 0; k < n; k += step) evaluate(k);
+
+  let beam = topBeam();
+
+  // Refine: halve step, search +-step around beam candidates, repeat until step=1
+  while (step > 1) {
+    step = Math.max(1, Math.floor(step / 2));
+    for (const k of beam) {
+      evaluate((((k - step) % n) + n) % n);
+      evaluate((k + step) % n);
+    }
+    beam = topBeam();
+  }
+
+  return cache.get(beam[0])!;
 }

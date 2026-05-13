@@ -12,7 +12,10 @@ import {
   intersectCompoundPath,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
-import { sampleBoundary } from "@/app/pathUtils/flatBoundary";
+import {
+  SampleBoundaryOptions,
+  sampleBoundary,
+} from "@/app/pathUtils/flatBoundary";
 import { extractKeypointDescriptors } from "@/app/pathUtils/keypoints";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
@@ -77,9 +80,9 @@ export default class PathData {
     });
   }
 
-  getKeypointDescriptors() {
+  getKeypointDescriptors(options: SampleBoundaryOptions) {
     return this.#originalPaths.map((path) => {
-      return extractKeypointDescriptors(path);
+      return extractKeypointDescriptors(path, options);
     });
   }
 

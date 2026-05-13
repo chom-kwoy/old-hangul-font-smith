@@ -17,12 +17,14 @@ export interface FlatBoundary {
 
 const GRID_DIM = 20;
 
+export type SampleBoundaryOptions = {
+  step?: number;
+  samplesPerCurve?: number;
+};
+
 export function sampleBoundary(
   path: paper.CompoundPath,
-  options: {
-    step?: number;
-    samplesPerCurve?: number;
-  },
+  options: SampleBoundaryOptions,
 ): {
   points: paper.Point[];
   subPathRanges: Array<{ start: number; end: number }>;

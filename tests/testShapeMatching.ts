@@ -51,19 +51,26 @@ path2.transform(({ x, y }) => ({ x: x * 1.4, y: y * 0.7 }));
 const path3 = paths.get("6")!.gt;
 const path4 = paths.get("7")!.gt;
 
-const keypoints1 = path1.getKeypointDescriptors();
-const keypoints2 = path2.getKeypointDescriptors();
-const keypoints3 = path3.getKeypointDescriptors();
-const keypoints4 = path4.getKeypointDescriptors();
+const path_A3 = paths.get("3")!.A;
+const path_B3 = paths.get("3")!.B;
+const path_B3gt = paths.get("3")!.gt;
 
-console.log(
-  keypoints1[0].length,
-  keypoints2[0].length,
-  keypoints3.length,
-  keypoints3[0].length,
-  keypoints4.length,
-  keypoints4[0].length,
-);
+const step = 40;
+const keypoints1 = path1.getKeypointDescriptors({ step });
+console.log("Keypoints1 length:", keypoints1[0].length);
+const keypoints2 = path2.getKeypointDescriptors({ step });
+console.log("Keypoints2 length:", keypoints2[0].length);
+const keypoints3 = path3.getKeypointDescriptors({ step });
+console.log("Keypoints3 length:", keypoints3[0].length);
+const keypoints4 = path4.getKeypointDescriptors({ step });
+console.log("Keypoints4 length:", keypoints4[0].length);
+
+const keypoints_A3 = path_A3.getKeypointDescriptors({ step })[1];
+console.log("Keypoints_A3 length:", keypoints_A3.length);
+const keypoints_B3 = path_B3.getKeypointDescriptors({ step })[0];
+console.log("Keypoints_B3 length:", keypoints_B3.length);
+const keypoints_B3gt = path_B3gt.getKeypointDescriptors({ step })[0];
+console.log("Keypoints_B3gt length:", keypoints_B3gt.length);
 
 function keypointDistanceSum(a: Keypoint[], b: Keypoint[]) {
   let sumTanSim = 0;
@@ -175,16 +182,31 @@ visualizeAlignment(
   "test_outputs/output_neg.png",
 );
 
+const beginTime = performance.now();
 const { score: score3, alignment: alignment3 } = matchKeypoints(
   keypoints1[0],
   keypoints4[0],
 );
+const endTime = performance.now();
+console.log(`time: ${(endTime - beginTime).toFixed(3)}ms`);
 console.log(`score (gt example): ${score3.toFixed(3)}`);
 visualizeAlignment(
   keypoints1[0],
   keypoints4[0],
   alignment3,
   "test_outputs/output_gt.png",
+);
+
+const { score: score_A3, alignment: alignment_A3 } = matchKeypoints(
+  keypoints_A3,
+  keypoints_B3,
+);
+console.log(`score (A3 vs B3): ${score_A3.toFixed(3)}`);
+visualizeAlignment(
+  keypoints_A3,
+  keypoints_B3,
+  alignment_A3,
+  "test_outputs/output_A3_B3gt.png",
 );
 
 // const t = JSON.parse(JSON.stringify(keypoints1[0]));
