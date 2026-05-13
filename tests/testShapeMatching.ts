@@ -72,7 +72,10 @@ function keypointDistanceSum(a: Keypoint[], b: Keypoint[]) {
     const kp1 = a[i];
     const kp2 = b[i];
     const tangentCosineSim = cosineSimilarity(kp1.tangent, kp2.tangent);
-    const curvatureSim = curvatureSimilarity(kp1.curvature, kp2.curvature);
+    const curvatureSim = curvatureSimilarity(
+      kp1.curvatures[0],
+      kp2.curvatures[0],
+    );
     // console.log(
     //   `${i}: tan=${tangentCosineSim.toFixed(3)} curv=${curvatureSim.toFixed(3)}`,
     // );

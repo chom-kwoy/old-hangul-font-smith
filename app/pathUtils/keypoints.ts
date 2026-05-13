@@ -4,25 +4,50 @@ import { fabricPathDataToPaper } from "@/app/pathUtils/convert";
 import { sampleBoundary } from "@/app/pathUtils/flatBoundary";
 import { Vec2D } from "@/app/utils/types";
 
+// Neighbor offsets (in sampled-point indices) at which Menger curvature is computed.
+// Small scales capture sharp local corners; large scales capture context farther away,
+// giving featureless straight-line points a non-degenerate descriptor.
+const CURVATURE_SCALES = [1, 5, 20];
+
 export type Keypoint = {
   pos: Vec2D;
   origIdx: { subPathIdx: number; curveIdx: number };
   tangent: Vec2D;
-  curvature: number;
+  curvatures: number[]; // one entry per scale in CURVATURE_SCALES
 };
+
+function mengerCurvature(
+  px: number,
+  py: number,
+  cx: number,
+  cy: number,
+  nx: number,
+  ny: number,
+): number {
+  const ax = px - cx,
+    ay = py - cy;
+  const bx = nx - cx,
+    by = ny - cy;
+  const cross = ax * by - ay * bx;
+  const la = Math.hypot(ax, ay);
+  const lb = Math.hypot(bx, by);
+  const lab = Math.hypot(nx - px, ny - py);
+  const denom = la * lb * lab;
+  return (denom > 1e-10 ? (2 * cross) / denom : 0) * 1000;
+}
 
 export function extractKeypointDescriptors(path: TSimplePathData): Keypoint[] {
   const { points, origCurveIdx } = sampleBoundary(fabricPathDataToPaper(path), {
     samplesPerCurve: 10,
   });
 
+  const n = points.length;
   const keypoints: Keypoint[] = [];
 
-  for (let i = 0; i < points.length; ++i) {
-    const prev = points[(i - 1 + points.length) % points.length];
-    const next = points[(i + 1) % points.length];
+  for (let i = 0; i < n; ++i) {
     const cur = points[i];
-    const origIdx = origCurveIdx[i];
+    const prev = points[(i - 1 + n) % n];
+    const next = points[(i + 1) % n];
 
     const dx = next.x - prev.x;
     const dy = next.y - prev.y;
@@ -30,23 +55,17 @@ export function extractKeypointDescriptors(path: TSimplePathData): Keypoint[] {
     const tangent: Vec2D =
       len > 1e-10 ? { x: dx / len, y: dy / len } : { x: 1, y: 0 };
 
-    // Menger (circumscribed-circle) curvature, signed via cross product
-    const ax = prev.x - cur.x,
-      ay = prev.y - cur.y;
-    const bx = next.x - cur.x,
-      by = next.y - cur.y;
-    const cross = ax * by - ay * bx;
-    const la = Math.hypot(ax, ay);
-    const lb = Math.hypot(bx, by);
-    const lab = Math.hypot(next.x - prev.x, next.y - prev.y);
-    const denom = la * lb * lab;
-    const curvature = (denom > 1e-10 ? (2 * cross) / denom : 0) * 1000;
+    const curvatures = CURVATURE_SCALES.map((r) => {
+      const p = points[(i - r + n) % n];
+      const q = points[(i + r) % n];
+      return mengerCurvature(p.x, p.y, cur.x, cur.y, q.x, q.y);
+    });
 
     keypoints.push({
       pos: { x: cur.x, y: cur.y },
-      origIdx,
+      origIdx: origCurveIdx[i],
       tangent,
-      curvature,
+      curvatures,
     });
   }
 
@@ -54,20 +73,29 @@ export function extractKeypointDescriptors(path: TSimplePathData): Keypoint[] {
 }
 
 export function cosineSimilarity(a: Vec2D, b: Vec2D) {
-  return (
-    (a.x * b.x + a.y * b.y) / (Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y))
-  );
+  const value =
+    1 + (a.x * b.x + a.y * b.y) / (Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y));
+  if (value < 0) {
+    throw new Error("cosineSimilarity: value < 0");
+  }
+  return value;
 }
 
 export function curvatureSimilarity(a: number, b: number) {
   const maxDiff = 10.0;
-  return Math.max(maxDiff - Math.abs(a - b), 0.0) / maxDiff;
+  const value = Math.max(maxDiff - Math.abs(a - b), 0.0) / maxDiff;
+  if (value < 0) {
+    throw new Error("curvatureSimilarity: value < 0");
+  }
+  return value;
 }
 
 export function keypointSimilarity(kp1: Keypoint, kp2: Keypoint) {
-  const tangentCosineSim = cosineSimilarity(kp1.tangent, kp2.tangent);
-  const curvatureSim = curvatureSimilarity(kp1.curvature, kp2.curvature);
-  return tangentCosineSim + curvatureSim;
+  let sim = cosineSimilarity(kp1.tangent, kp2.tangent);
+  for (let s = 0; s < kp1.curvatures.length; s++) {
+    sim += curvatureSimilarity(kp1.curvatures[s], kp2.curvatures[s]);
+  }
+  return sim;
 }
 
 export function matchKeypointsImpl(
@@ -75,16 +103,18 @@ export function matchKeypointsImpl(
   H: Keypoint[],
 ): { score: number; alignment: Map<number, number[]> } {
   // Dynamic time warping with skipping to match keypoints
-  // M (i, j):   step (1, 1) into (i, j)  — diagonal match            gains Sim(N[i], H[j])
-  // Mₕ(i, j):   step (0, 1) into (i, j)  — H-stretch within match    gains Sim(N[i], H[j])
-  // Mₙ(i, j):   step (1, 0) into (i, j)  — N-stretch within match    gains Sim(N[i], H[j])
+  // M (i, j):   step (1, 1) into (i, j)  — diagonal match         gains Sim(N[i], H[j])
+  // Mₕ(i, j):   step (0, 1) into (i, j)  — H-stretch (free ride)  gains nothing
+  // Mₙ(i, j):   step (1, 0) into (i, j)  — N-stretch (free ride)  gains nothing
   // X (i, j):   step (0, 1) into (i, j)  — H-side gap (no correspondence)
   // Y (i, j):   step (1, 0) into (i, j)  — N-side gap (no correspondence)
   // M(i,j) = Sim(Ni,Hj) + max(M(i−1,j−1), Mh(i−1,j−1), Mn(i−1,j−1), X(i−1,j−1), Y(i−1,j−1))
-  // Mh(i,j) = Sim(Ni,Hj) + max( M(i,j−1), Mh(i,j−1) )
-  // Mn(i,j) = Sim(Ni,Hj) + max( M(i−1,j), Mn(i−1,j) )
+  // Mh(i,j) =              max( M(i,j−1),  Mh(i,j−1) )
+  // Mn(i,j) =              max( M(i−1,j),  Mn(i−1,j) )
   // X(i,j) = max( M(i,j−1)−ghopen, Mh(i,j−1)−ghopen, Mn(i,j−1)−ghopen, X(i,j−1)−ghext )
   // Y(i,j) = max( M(i−1,j)−gnopen, Mh(i−1,j)−gnopen, Mn(i−1,j)−gnopen, Y(i−1,j)−gnext )
+  // Mh/Mn carry the score forward without adding to it, so the diagonal (all-M) path
+  // strictly dominates any L-shaped path on featureless segments.
   // Boundary (semi-global with free start on H, as before)
   // M(0,0)=0, X(0,j)=0 ∀j, all other (0,∗) entries=−∞
   // Final score (free end on H)
@@ -145,7 +175,7 @@ export function matchKeypointsImpl(
           }
         }
 
-        // Mh(i,j) — H-step from (i, j-1), predecessors M and Mh
+        // Mh(i,j) — H-step from (i, j-1), predecessors M and Mh; no +sc
         {
           let best = NEG_INF,
             bs = -1;
@@ -157,14 +187,14 @@ export function matchKeypointsImpl(
             }
           }
           if (best > NEG_INF) {
-            dp[1][at(i, j)] = sc + best;
+            dp[1][at(i, j)] = best;
             bkState[1][at(i, j)] = bs;
             bkI[1][at(i, j)] = i;
             bkJ[1][at(i, j)] = j - 1;
           }
         }
 
-        // Mn(i,j) — N-step from (i-1, j), predecessors M and Mn
+        // Mn(i,j) — N-step from (i-1, j), predecessors M and Mn; no +sc
         {
           let best = NEG_INF,
             bs = -1;
@@ -176,7 +206,7 @@ export function matchKeypointsImpl(
             }
           }
           if (best > NEG_INF) {
-            dp[2][at(i, j)] = sc + best;
+            dp[2][at(i, j)] = best;
             bkState[2][at(i, j)] = bs;
             bkI[2][at(i, j)] = i - 1;
             bkJ[2][at(i, j)] = j;
