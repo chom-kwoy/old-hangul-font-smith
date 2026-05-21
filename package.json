@@ -7,7 +7,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:1": "tsx tests/test1_medialAxis.ts",
+    "test:2": "tsx tests/test2_medialSkeletonPoints.ts",
+    "test:3": "tsx tests/test3_medialSkeleton.ts",
+    "test:4": "tsx tests/test4_localPrimitiveFitting.ts",
+    "test:5": "tsx tests/test5_skeletonize.ts"
   },
   "dependencies": {
     "@datastructures-js/priority-queue": "^6.3.5",
@@ -56,6 +61,7 @@
     "prettier": "^3.6.2",
     "raw-loader": "^4.0.2",
     "tailwindcss": "^4",
+    "tsx": "^4.22.3",
     "typescript": "^5"
   }
 }

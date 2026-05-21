@@ -3,6 +3,7 @@ import paper from "paper";
 import {
   FlatBoundary,
   buildFlatBoundary,
+  nearestDistFlatBoundary,
   rayIntersectFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
@@ -50,7 +51,7 @@ export function localPrimitiveFitting(
 ): FittedMedialAxisGraph {
   const opts = {
     num_directions: options.num_directions ?? 128,
-    w_expansion: options.w_expansion ?? 0.008,
+    w_expansion: options.w_expansion ?? 10,
     w_penalty: options.w_penalty ?? 10000,
     max_progressions: options.max_progressions ?? 25,
     expansion_rate: options.expansion_rate ?? 1.1,
@@ -94,27 +95,25 @@ export function localPrimitiveFitting(
   const circleDirections = generateUniformDirections(opts.num_directions);
 
   for (let i = 0; i < skeleton.points.length; i++) {
-    if (degree[i] === 0) {
-      const center = skeleton.points[i];
-      // For a vertex, all rays originate from the center
-      const origins = Array(opts.num_directions).fill(center);
+    const center = skeleton.points[i];
+    // For a vertex, all rays originate from the center
+    const origins = Array(opts.num_directions).fill(center);
 
-      const fitted = fitSinglePrimitive(
-        origins,
-        circleDirections,
-        flatBoundary,
-        opts,
-        scratch,
-      );
+    const fitted = fitSinglePrimitive(
+      origins,
+      circleDirections,
+      flatBoundary,
+      opts,
+      scratch,
+    );
 
-      skeleton.primitives.push({
-        type: "point",
-        elementIdx: i,
-        origins: fitted.origins,
-        directions: fitted.directions,
-        radii: fitted.radii,
-      });
-    }
+    skeleton.primitives.push({
+      type: "point",
+      elementIdx: i,
+      origins: fitted.origins,
+      directions: fitted.directions,
+      radii: fitted.radii,
+    });
   }
 
   // --- Process 2: Medial Edges (Generalized Capsules/Slabs) ---
@@ -253,22 +252,27 @@ function fitSinglePrimitive(
   let curDirections = directions;
   let r_max = computeMaxExtents(curOrigins, curDirections, boundary, tested);
 
-  // 2. Initialize Radii
-  const minMax = Math.min(...r_max);
-  const initialRadius = minMax > 1e-4 ? minMax * 0.99 : 1e-3;
-
-  const r = new Float64Array(opts.num_directions).fill(initialRadius);
+  // 2. Initialize Radii — per-ray inscribed radius from each origin to S
+  const r = new Float64Array(opts.num_directions);
+  for (let i = 0; i < opts.num_directions; i++) {
+    const inscribed = nearestDistFlatBoundary(
+      curOrigins[i].x,
+      curOrigins[i].y,
+      boundary,
+    );
+    r[i] = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
+  }
   const r_tgt = new Float64Array(r);
+  const r_init = new Float64Array(r); // store initial radii for additive growth
 
   // 3. Progressive Expansion
   for (let prog = 0; prog < opts.max_progressions; prog++) {
-    // Increase target
+    // Increase target additively by 10% of initial radius (paper Sec. 5.2)
     for (let k = 0; k < opts.num_directions; k++) {
-      const multiplicativeGrowth = r_tgt[k] * opts.expansion_rate;
-      const additiveGrowth = r_tgt[k] + opts.min_absolute_growth;
-
-      // Take whichever results in a larger target radius
-      r_tgt[k] = Math.max(multiplicativeGrowth, additiveGrowth);
+      r_tgt[k] = Math.max(
+        r_tgt[k] + 0.1 * r_init[k],
+        r_tgt[k] + opts.min_absolute_growth, // floor for near-zero initial radii
+      );
     }
 
     // Solver Loop
