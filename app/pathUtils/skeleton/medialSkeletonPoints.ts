@@ -8,11 +8,24 @@ import {
   sampleBoundary,
 } from "@/app/pathUtils/flatBoundary";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
+import {
+  Primitive,
+  localPrimitiveFitting,
+} from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
 import { Vec2D } from "@/app/utils/types";
 
 // Energy weights (paper Sec. 5.3)
-const C1 = 1;    // centrality
-const C2 = 1e-3; // count
+const C1 = 1;     // centrality
+const C2 = 1e-3;  // count — penalises excess vertices (paper value)
+
+export type SkeletonIterCallback = (
+  iter: number,    // iteration index; MAX_OUTER = final state after loop
+  V: paper.Point[],
+  cov: number,     // true primitive coverage fraction (paper's E_coverage metric)
+  covGain: number, // improvement over previous iteration
+  adding: number,  // how many new seeds are about to be added (0 = stopping)
+) => void;
 
 /**
  * Computes the Medial Skeletal Diagram (Optimized Skeleton) for a 2D shape.
@@ -23,26 +36,33 @@ export function computeMedialSkeletonPoints(
   medialAxis: MedialAxisGraph,
   _tolerance: number = 3.0, // eslint-disable-line @typescript-eslint/no-unused-vars
   verbose: boolean = false,
+  onIteration?: SkeletonIterCallback,
 ): paper.Point[] {
   const { points: boundarySamples } = sampleBoundary(path, { step: 10 });
   const flatBoundary = buildFlatBoundary(path);
 
-  // Step 8: Farthest-point initial seeds on M (default |V⁰| = 10)
-  let V = farthestPointSeeds(medialAxis, 10);
+  // Normalization factor: paper uses [0,1] space; we use ~1000-unit em space.
+  // Divide E_centrality by maxDim² so the weight c1=1 has the intended effect.
+  const bb = path.bounds;
+  const normSq = Math.max(bb.width, bb.height, 1) ** 2;
+
+  // Step 8: Farthest-point initial seeds on M (default |V⁰| = 5)
+  let V = farthestPointSeeds(medialAxis, 5);
 
   if (verbose) {
     console.info("Initial seeds:", V.length, V.map(fmt).join(", "));
   }
 
   // Incremental outer loop
-  const MAX_OUTER = 20;    // max outer iterations
+  const MAX_OUTER = 12;    // max outer iterations
   const NM_ITERS = 200;    // NM iterations per inner call
-  const GROWTH_START = 50; // start adding n=5 vertices after this many NM evals
-  const N_NEW = 3;         // base vertices to add per growth step
-  const STAGNATION = 5;    // break if energy flat this many outer iters
+  const GROWTH_START = 50; // start adding n>1 vertices after this many NM evals
+  const N_NEW = 1;         // base vertices to add per growth step
+  const STAGNATION = 3;    // break if coverage gain < threshold this many outer iters
+  const COV_GAIN_THRESHOLD = 0.02; // stop growing when each new seed improves coverage < 2%
 
   let nmEvalCount = 0;
-  let lastEnergy = Infinity;
+  let lastCovFraction = 0;
   let stagnantIters = 0;
 
   // Frozen vertices from previous NM runs; only V_new is optimized each round
@@ -59,7 +79,7 @@ export function computeMedialSkeletonPoints(
         nmEvalCount++;
         const currentFree = flatToPoints(x);
         const allV = [...frozenV, ...currentFree];
-        return computeEnergy(allV, medialAxis, boundarySamples, flatBoundary);
+        return computeEnergy(allV, medialAxis, boundarySamples, flatBoundary, normSq);
       },
       x0,
       { maxIterations: NM_ITERS },
@@ -69,34 +89,45 @@ export function computeMedialSkeletonPoints(
     V = V.map((p) => projectToMedialAxis(p, medialAxis));
     V = deduplicateSeeds(V, 10); // remove seeds within 10 em-units of each other
 
-    const energy = computeEnergy(V, medialAxis, boundarySamples, flatBoundary);
+    // Evaluate true coverage using fitted primitives (paper's E_coverage metric).
+    // Called once per outer iteration — not inside NM where it would be too slow.
+    const skeleton = constructMedialSkeleton(V, medialAxis, path);
+    const fitted = localPrimitiveFitting(path, skeleton);
+    const trueCov = primitiveCoverage(boundarySamples, fitted.primitives);
 
     if (verbose) {
-      console.info(`Outer iter ${outerIter}: energy=${energy.toFixed(4)}, |V|=${V.length}`);
+      console.info(`Outer iter ${outerIter}: cov=${(trueCov*100).toFixed(1)}%, |V|=${V.length}`);
     }
 
-    // Step 11: Stagnation check (relative: < 0.01% improvement)
-    if (energy >= lastEnergy * (1 - 1e-4)) {
+    // Coverage stagnation: stop growing when primitives no longer meaningfully improve coverage
+    const covGain = trueCov - lastCovFraction;
+    if (covGain < COV_GAIN_THRESHOLD) {
       stagnantIters++;
-      if (stagnantIters >= STAGNATION) break;
     } else {
       stagnantIters = 0;
     }
-    lastEnergy = energy;
+    lastCovFraction = trueCov;
 
-    // Check full coverage
-    const uncovered = getUncoveredArcs(V, boundarySamples, flatBoundary);
-    if (uncovered.length === 0) break;
+    // Uncovered samples — defined by primitive coverage, not inscribed-radius heuristic
+    const uncovered = stagnantIters >= STAGNATION
+      ? []
+      : boundarySamples.filter((s) => !primCovers(s.x, s.y, fitted.primitives));
+
+    const willStop = trueCov >= 0.98 || stagnantIters >= STAGNATION || uncovered.length === 0;
+
+    // Growth schedule: add vertices starting at GROWTH_START NM evals
+    const nNew = willStop ? 0 :
+      nmEvalCount >= GROWTH_START
+        ? N_NEW + (outerIter % 3 === 0 ? 1 : 0)
+        : 1;
+
+    // Callback called exactly once per iteration with full context
+    onIteration?.(outerIter, V.slice(), trueCov, covGain, nNew);
+
+    if (willStop) break;
 
     // Step 11: Freeze current V; add N_NEW new vertices in uncovered regions
     frozenV = V.slice();
-
-    // Growth schedule: add vertices starting at GROWTH_START NM evals
-    const nNew =
-      nmEvalCount >= GROWTH_START
-        ? N_NEW + (outerIter % 2 === 0 ? 2 : 0) // alternates 3 and 5
-        : 1;
-
     const newSeeds = pickNewSeeds(uncovered, V, medialAxis, nNew);
     V = [...frozenV, ...newSeeds];
   }
@@ -114,6 +145,7 @@ function computeEnergy(
   medialAxis: MedialAxisGraph,
   boundarySamples: paper.Point[],
   flatBoundary: FlatBoundary,
+  normSq: number,
 ): number {
   if (V.length === 0) return 0;
 
@@ -123,26 +155,26 @@ function computeEnergy(
   );
   const delaunay = Delaunay.from(projV.map((p) => [p.x, p.y] as [number, number]));
 
-  // Accumulate coverage + Voronoi centroids in one pass over boundary samples
+  // E_coverage: fraction of boundary samples inside inscribed medial ball of nearest seed
   let covered = 0;
+  for (const s of boundarySamples) {
+    const idx = delaunay.find(s.x, s.y);
+    const dist = Math.hypot(s.x - projV[idx].x, s.y - projV[idx].y);
+    if (dist <= inscribed[idx]) covered++;
+  }
+  const eCoverage = -(covered / boundarySamples.length);
+
+  // E_centrality (paper Sec. 5.3): squared distance from each seed to the centroid
+  // of its Restricted Voronoi Cell on M (medial axis nodes), normalized to [0,1] space.
   const sumX = new Float64Array(projV.length);
   const sumY = new Float64Array(projV.length);
   const counts = new Int32Array(projV.length);
-
-  for (const s of boundarySamples) {
-    const idx = delaunay.find(s.x, s.y);
-    const v = projV[idx];
-    const dist = Math.hypot(s.x - v.x, s.y - v.y);
-    if (dist <= inscribed[idx]) covered++;
-    sumX[idx] += s.x;
-    sumY[idx] += s.y;
+  for (const mp of medialAxis.points) {
+    const idx = delaunay.find(mp.x, mp.y);
+    sumX[idx] += mp.x;
+    sumY[idx] += mp.y;
     counts[idx]++;
   }
-
-  // E_coverage: fraction of boundary samples inside their nearest medial ball
-  const eCoverage = -(covered / boundarySamples.length);
-
-  // E_centrality: squared distance from each V to its Voronoi centroid
   let eCentrality = 0;
   for (let i = 0; i < projV.length; i++) {
     if (counts[i] > 0) {
@@ -151,6 +183,7 @@ function computeEnergy(
       eCentrality += (projV[i].x - cx) ** 2 + (projV[i].y - cy) ** 2;
     }
   }
+  eCentrality /= normSq;
 
   return eCoverage + C1 * eCentrality + C2 * projV.length;
 }
@@ -194,31 +227,56 @@ function farthestPointSeeds(
 }
 
 // ---------------------------------------------------------------------------
-// Step 11: Uncovered arc detection and new seed placement
+// Step 11: Primitive coverage — paper's true E_coverage metric
 // ---------------------------------------------------------------------------
 
-function getUncoveredArcs(
-  V: paper.Point[],
-  boundarySamples: paper.Point[],
-  flatBoundary: FlatBoundary,
-): paper.Point[] {
-  // Check coverage using inscribed radius heuristic (fast — avoids re-fitting)
-  const inscribed = V.map((v) =>
-    nearestDistFlatBoundary(v.x, v.y, flatBoundary),
-  );
-  const pointsArray = V.map((p) => [p.x, p.y] as [number, number]);
-  const delaunay = Delaunay.from(pointsArray);
-
-  const uncovered: paper.Point[] = [];
-  for (const sample of boundarySamples) {
-    const idx = delaunay.find(sample.x, sample.y);
-    const v = V[idx];
-    const dist = Math.hypot(sample.x - v.x, sample.y - v.y);
-    if (dist > inscribed[idx] * 1.5) {
-      uncovered.push(sample);
+// Returns true if (px,py) is inside or within `delta` of any primitive's boundary polygon.
+function primCovers(
+  px: number,
+  py: number,
+  primitives: Primitive[],
+  delta = 5.0,
+): boolean {
+  for (const prim of primitives) {
+    const N = prim.origins.length;
+    const vx = new Float64Array(N);
+    const vy = new Float64Array(N);
+    for (let i = 0; i < N; i++) {
+      vx[i] = prim.origins[i].x + prim.directions[i].x * prim.radii[i];
+      vy[i] = prim.origins[i].y + prim.directions[i].y * prim.radii[i];
+    }
+    // Point-in-polygon
+    let inside = false;
+    for (let i = 0, j = N - 1; i < N; j = i++) {
+      if (vy[i] > py !== vy[j] > py &&
+          px < ((vx[j] - vx[i]) * (py - vy[i])) / (vy[j] - vy[i]) + vx[i])
+        inside = !inside;
+    }
+    if (inside) return true;
+    // Proximity to polygon edges
+    for (let i = 0, j = N - 1; i < N; j = i++) {
+      const ax = vx[j], ay = vy[j], bx = vx[i], by = vy[i];
+      const ddx = bx - ax, ddy = by - ay;
+      const lenSq = ddx * ddx + ddy * ddy;
+      let t = lenSq > 1e-10 ? ((px - ax) * ddx + (py - ay) * ddy) / lenSq : 0;
+      t = Math.max(0, Math.min(1, t));
+      if (Math.hypot(px - (ax + t * ddx), py - (ay + t * ddy)) < delta) return true;
     }
   }
-  return uncovered;
+  return false;
+}
+
+function primitiveCoverage(
+  samples: paper.Point[],
+  primitives: Primitive[],
+  delta = 5.0,
+): number {
+  if (samples.length === 0) return 1;
+  let covered = 0;
+  for (const s of samples) {
+    if (primCovers(s.x, s.y, primitives, delta)) covered++;
+  }
+  return covered / samples.length;
 }
 
 function pickNewSeeds(

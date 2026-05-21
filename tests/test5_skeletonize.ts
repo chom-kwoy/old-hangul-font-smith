@@ -18,20 +18,32 @@ import {
   Polygon as FabricPolygon,
   Polyline as FabricPolyline,
   StaticCanvas,
+  Text as FabricText,
 } from "fabric/node";
 import paper from "paper";
 
 import {
+  FlatBoundary,
+  nearestDistFlatBoundary,
+} from "@/app/pathUtils/flatBoundary";
+import {
   FittedMedialAxisGraph,
   localPrimitiveFitting,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
-import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
+import {
+  MedialAxisGraph,
+  extractMedialAxis,
+} from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
-import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+import {
+  SkeletonIterCallback,
+  computeMedialSkeletonPoints,
+} from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import {
   check,
   coverageFraction,
   finish,
+  getFlatBoundary,
   getBoundarySamples,
   suite,
   svgToCompoundPaths,
@@ -144,8 +156,8 @@ function renderSkeletonization(
   for (const pt of fitted.points) {
     canvas.add(
       new FabricCircle({
-        left: tx(pt.x) - 3,
-        top: ty(pt.y) - 3,
+        left: tx(pt.x),
+        top: ty(pt.y),
         radius: 3,
         fill: "rgba(30,30,30,0.85)",
         selectable: false,
@@ -166,6 +178,137 @@ function renderSkeletonization(
 }
 
 // ---------------------------------------------------------------------------
+// Per-iteration visualiser
+// ---------------------------------------------------------------------------
+
+function renderIteration(
+  path: paper.CompoundPath,
+  medialAxis: MedialAxisGraph,
+  flatBoundary: FlatBoundary,
+  V: paper.Point[],
+  cov: number,
+  covGain: number,
+  adding: number,
+  iter: number,
+  label: string,
+): void {
+  const SIZE = 1000;
+  const PAD = 55; // extra top padding for text
+
+  const bb = path.bounds;
+  const scl = Math.min(
+    (SIZE - PAD - 20) / bb.width,
+    (SIZE - PAD - 20) / bb.height,
+  );
+  const ox = 10 + (SIZE - 20 - bb.width * scl) / 2 - bb.x * scl;
+  const oy = PAD + (SIZE - PAD - 20 - bb.height * scl) / 2 - bb.y * scl;
+  const tx = (x: number) => x * scl + ox;
+  const ty = (y: number) => y * scl + oy;
+  const ts = (s: number) => s * scl;
+
+  const canvas = new StaticCanvas("null", {
+    width: SIZE,
+    height: SIZE,
+    backgroundColor: "white",
+  });
+
+  // --- Text banner ---
+  const iterLabel = iter === 12 /* MAX_OUTER */ ? "final" : `iter ${iter}`;
+  const gainStr = iter === 0 ? "" : `  gain ${covGain >= 0 ? "+" : ""}${(covGain * 100).toFixed(1)}%`;
+  const actionStr = adding > 0 ? `  → adding ${adding} seed(s)` : `  → stopping`;
+  const banner = `${iterLabel}  |  seeds=${V.length}  |  cov=${(cov * 100).toFixed(1)}%${gainStr}${actionStr}`;
+  canvas.add(
+    new FabricText(banner, {
+      left: 8,
+      top: 8,
+      fontSize: 14,
+      fontFamily: "monospace",
+      fill: "rgba(20,20,20,0.92)",
+      selectable: false,
+    }),
+  );
+
+  // --- Path outline ---
+  for (const child of path.children as paper.Path[]) {
+    const step = Math.max(2, child.length / 300);
+    const pts: { x: number; y: number }[] = [];
+    for (let d = 0; d <= child.length; d += step) {
+      const pt = child.getPointAt(Math.min(d, child.length));
+      if (pt) pts.push({ x: tx(pt.x), y: ty(pt.y) });
+    }
+    if (pts.length > 1) {
+      canvas.add(
+        new FabricPolyline(pts, {
+          fill: "none",
+          stroke: "rgba(0,0,0,0.55)",
+          strokeWidth: 1.5,
+          selectable: false,
+        }),
+      );
+    }
+  }
+
+  // --- Medial axis (thin grey) ---
+  for (const [i1, i2] of medialAxis.segments) {
+    const p1 = medialAxis.points[i1];
+    const p2 = medialAxis.points[i2];
+    canvas.add(
+      new FabricLine([tx(p1.x), ty(p1.y), tx(p2.x), ty(p2.y)], {
+        stroke: "rgba(160,160,160,0.35)",
+        strokeWidth: 0.5,
+        selectable: false,
+      }),
+    );
+  }
+
+  // --- Inscribed-radius balls for each seed ---
+  const nSeeds = Math.max(1, V.length);
+  for (let i = 0; i < V.length; i++) {
+    const p = V[i];
+    const r = nearestDistFlatBoundary(p.x, p.y, flatBoundary);
+    const hue = Math.round((i * 360) / nSeeds);
+    const sr = ts(r);
+    canvas.add(
+      new FabricCircle({
+        left: tx(p.x),
+        top: ty(p.y),
+        radius: sr,
+        fill: `hsla(${hue},70%,60%,0.12)`,
+        stroke: `hsl(${hue},70%,40%)`,
+        strokeWidth: 0.8,
+        selectable: false,
+      }),
+    );
+  }
+
+  // --- Seed centre dots ---
+  for (let i = 0; i < V.length; i++) {
+    const p = V[i];
+    const hue = Math.round((i * 360) / nSeeds);
+    canvas.add(
+      new FabricCircle({
+        left: tx(p.x),
+        top: ty(p.y),
+        radius: 4,
+        fill: `hsl(${hue},70%,28%)`,
+        selectable: false,
+      }),
+    );
+  }
+
+  canvas.renderAll();
+
+  const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
+  const iterStr = String(iter).padStart(2, "0");
+  const outPath = `test_outputs/skeletonize_${safeName}_iter${iterStr}.png`;
+  type NodeCanvas = { toBuffer(type: string): Buffer };
+  const buf = (canvas as unknown as { getNodeCanvas(): NodeCanvas })
+    .getNodeCanvas()
+    .toBuffer("image/png");
+  fs.writeFileSync(outPath, buf);
+}
+
+// ---------------------------------------------------------------------------
 // Test loop
 // ---------------------------------------------------------------------------
 
@@ -178,13 +321,18 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     suite(`full pipeline — ${label}`);
 
     const axis = extractMedialAxis(path);
+    const flatBoundary = getFlatBoundary(path);
     const samples = getBoundarySamples(path);
+
+    const iterCallback: SkeletonIterCallback = (iter, V, cov, covGain, adding) => {
+      renderIteration(path, axis, flatBoundary, V, cov, covGain, adding, iter, label);
+    };
 
     let fitted: FittedMedialAxisGraph | null = null;
     let error: unknown = null;
     const t0 = Date.now();
     try {
-      const seeds = computeMedialSkeletonPoints(path, axis);
+      const seeds = computeMedialSkeletonPoints(path, axis, 3.0, false, iterCallback);
       const skeleton = constructMedialSkeleton(seeds, axis, path);
       fitted = localPrimitiveFitting(path, skeleton);
     } catch (e) {
@@ -197,8 +345,12 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     check("completes in < 20000ms", ms < 20000, `${ms}ms`);
 
     if (fitted) {
+      const nVerts = fitted.points.length;
+      const nEdges = fitted.segments.length;
       const cov = coverageFraction(samples, fitted.primitives);
-      check("final coverage ≥ 50%", cov >= 0.5, `${(cov * 100).toFixed(1)}%`);
+      console.log(`  📐 ${nVerts} vertices, ${nEdges} edges`);
+      check("final coverage ≥ 98%", cov >= 0.98, `${(cov * 100).toFixed(1)}%`);
+      check("vertex count ≤ 25", nVerts <= 25, `${nVerts} vertices`);
       check(
         "has primitives",
         fitted.primitives.length > 0,
