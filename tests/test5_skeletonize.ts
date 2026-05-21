@@ -356,6 +356,52 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         fitted.primitives.length > 0,
         `${fitted.primitives.length} prims`,
       );
+
+      // Worst centrality ratio: min over all edges of
+      //   (closest boundary distance from any point on the edge segment)
+      //   / (mean r of that edge's fitted primitive)
+      // Ratio = 1 means perfectly centered; lower = closer to boundary.
+      let worstRatio = Infinity;
+      let worstEdgeIdx = -1;
+      for (let i = 0; i < fitted.segments.length; i++) {
+        const [u, v] = fitted.segments[i];
+        const pu = fitted.points[u];
+        const pv = fitted.points[v];
+        const prim = fitted.primitives.find(
+          (p) => p.type === "edge" && p.elementIdx === i,
+        );
+        if (!prim || prim.radii.length === 0) continue;
+        const meanR =
+          prim.radii.reduce((a, b) => a + b, 0) / prim.radii.length;
+        if (meanR <= 0) continue;
+        let minBoundaryDist = Infinity;
+        const N_SAMP = 20;
+        for (let k = 0; k <= N_SAMP; k++) {
+          const t = k / N_SAMP;
+          const x = pu.x + t * (pv.x - pu.x);
+          const y = pu.y + t * (pv.y - pu.y);
+          minBoundaryDist = Math.min(
+            minBoundaryDist,
+            nearestDistFlatBoundary(x, y, flatBoundary),
+          );
+        }
+        const ratio = minBoundaryDist / meanR;
+        if (ratio < worstRatio) {
+          worstRatio = ratio;
+          worstEdgeIdx = i;
+        }
+      }
+      if (worstEdgeIdx >= 0) {
+        console.log(
+          `  🎯 worst centrality ratio: ${worstRatio.toFixed(3)} (edge ${worstEdgeIdx})`,
+        );
+        check(
+          "worst centrality ratio ≥ 0.2",
+          worstRatio >= 0.2,
+          `${worstRatio.toFixed(3)}`,
+        );
+      }
+
       renderSkeletonization(path, fitted, label);
     }
   }
