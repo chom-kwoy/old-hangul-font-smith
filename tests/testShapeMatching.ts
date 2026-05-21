@@ -1,4 +1,4 @@
-import { Circle, Line, StaticCanvas } from "fabric/node";
+import { Circle, FabricText, Line, StaticCanvas } from "fabric/node";
 import * as fs from "node:fs";
 
 import PathData from "@/app/pathUtils/PathData";
@@ -110,21 +110,36 @@ function visualizeAlignment(
   filename: string,
 ) {
   // Initialize a canvas
+  const dpi = 2.5;
   const canvas = new StaticCanvas("null", {
-    width: 1000,
-    height: 1000,
+    width: 1000 * dpi,
+    height: 1000 * dpi,
     backgroundColor: "white",
   });
+  canvas.setZoom(dpi);
 
   const scale = 0.5;
 
   function addKeypoints(kps: Keypoint[], xOffset: number, color: string) {
-    for (const kp of kps) {
+    for (let idx = 0; idx < kps.length; idx++) {
+      const kp = kps[idx];
+      const x = kp.pos.x * scale + xOffset;
+      const y = kp.pos.y * scale;
+      const r = 2;
       canvas.add(
         new Circle({
-          left: kp.pos.x * scale + xOffset - 3,
-          top: kp.pos.y * scale - 3,
-          radius: 3,
+          left: x,
+          top: y,
+          radius: r,
+          fill: color,
+          selectable: false,
+        }),
+      );
+      canvas.add(
+        new FabricText(String(idx), {
+          left: x + 4,
+          top: y - 5,
+          fontSize: 5,
           fill: color,
           selectable: false,
         }),
@@ -137,7 +152,7 @@ function visualizeAlignment(
 
   for (const [ni, hjs] of alignment) {
     const from = keypoints1[ni];
-    const color = `hsl(${(ni * 360) / keypoints1.length}, 100%, 50%)`;
+    const color = `hsla(${(ni * 360) / keypoints1.length}, 100%, 50%, 0.2)`;
     for (const hj of hjs) {
       const to = keypoints2[hj];
       canvas.add(
@@ -206,7 +221,23 @@ visualizeAlignment(
   keypoints_A3,
   keypoints_B3,
   alignment_A3,
-  "test_outputs/output_A3_B3gt.png",
+  "test_outputs/output_A3_B3.png",
+);
+
+const keypoints_B3_sliced = [
+  ...keypoints_B3.slice(0, 49),
+  ...keypoints_B3.slice(112),
+];
+const { score: score_A3_2, alignment: alignment_A3_2 } = matchKeypoints(
+  keypoints_A3,
+  keypoints_B3_sliced,
+);
+console.log(`score (A3 vs B3_sliced): ${score_A3_2.toFixed(3)}`);
+visualizeAlignment(
+  keypoints_A3,
+  keypoints_B3_sliced,
+  alignment_A3_2,
+  "test_outputs/output_A3_B3_2.png",
 );
 
 // const t = JSON.parse(JSON.stringify(keypoints1[0]));
