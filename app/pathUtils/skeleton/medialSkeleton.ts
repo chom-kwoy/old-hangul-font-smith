@@ -330,11 +330,16 @@ export function constructMedialSkeleton(
     rawTips.sort((a, b) => b.score - a.score); // most-aligned first
 
     // Process each tip: direct snap for the first that passes, then append the rest.
+    // Don't direct-snap if the tip's inscribed radius is much smaller than the original
+    // seed's inscribed radius — that would move the seed away from the wide coverage area.
+    const origR = rawNodeR[seedIndices[si]];
     let directSnapped = false;
     for (const { rn } of rawTips) {
       if (finalPoints.length >= MAX_TOTAL_VERTICES) break;
       const tipPt = new paper.Point(rawPoints[rn]);
-      if (!directSnapped && isEdgeCentred(tipPt, nbPt, flatBoundary)) {
+      const tipR = rawNodeR[rn];
+      const canDirectSnap = tipR >= origR * 0.65;
+      if (!directSnapped && canDirectSnap && isEdgeCentred(tipPt, nbPt, flatBoundary)) {
         finalPoints[si] = tipPt;
         directSnapped = true;
       } else if (isEdgeCentred(tipPt, finalPoints[si], flatBoundary)) {
