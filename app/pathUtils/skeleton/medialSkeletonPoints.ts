@@ -41,10 +41,22 @@ export function computeMedialSkeletonPoints(
   const { points: boundarySamples } = sampleBoundary(path, { step: 10 });
   const flatBoundary = buildFlatBoundary(path);
 
-  // Normalization factor: paper uses [0,1] space; we use ~1000-unit em space.
-  // Divide E_centrality by maxDim² so the weight c1=1 has the intended effect.
-  const bb = path.bounds;
-  const normSq = Math.max(bb.width, bb.height, 1) ** 2;
+  // Precompute inscribed radius at each medial axis node (for E_centrality)
+  const medialAxisR = new Float64Array(medialAxis.points.length);
+  for (let i = 0; i < medialAxis.points.length; i++) {
+    const p = medialAxis.points[i];
+    medialAxisR[i] = nearestDistFlatBoundary(p.x, p.y, flatBoundary);
+  }
+
+  // Precompute maxDim² for E_centrality normalization (paper normalizes to [0,1])
+  let axisMinX = Infinity, axisMaxX = -Infinity, axisMinY = Infinity, axisMaxY = -Infinity;
+  for (const p of medialAxis.points) {
+    if (p.x < axisMinX) axisMinX = p.x;
+    if (p.x > axisMaxX) axisMaxX = p.x;
+    if (p.y < axisMinY) axisMinY = p.y;
+    if (p.y > axisMaxY) axisMaxY = p.y;
+  }
+  const normSq = Math.max((axisMaxX - axisMinX) ** 2, (axisMaxY - axisMinY) ** 2, 1);
 
   // Step 8: Farthest-point initial seeds on M (default |V⁰| = 5)
   let V = farthestPointSeeds(medialAxis, 5);
@@ -58,12 +70,8 @@ export function computeMedialSkeletonPoints(
   const NM_ITERS = 200;    // NM iterations per inner call
   const GROWTH_START = 50; // start adding n>1 vertices after this many NM evals
   const N_NEW = 1;         // base vertices to add per growth step
-  const STAGNATION = 3;    // break if coverage gain < threshold this many outer iters
-  const COV_GAIN_THRESHOLD = 0.02; // stop growing when each new seed improves coverage < 2%
-
   let nmEvalCount = 0;
   let lastCovFraction = 0;
-  let stagnantIters = 0;
 
   // Frozen vertices from previous NM runs; only V_new is optimized each round
   let frozenV: paper.Point[] = [];
@@ -79,7 +87,7 @@ export function computeMedialSkeletonPoints(
         nmEvalCount++;
         const currentFree = flatToPoints(x);
         const allV = [...frozenV, ...currentFree];
-        return computeEnergy(allV, medialAxis, boundarySamples, flatBoundary, normSq);
+        return computeEnergy(allV, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq);
       },
       x0,
       { maxIterations: NM_ITERS },
@@ -99,37 +107,26 @@ export function computeMedialSkeletonPoints(
       console.info(`Outer iter ${outerIter}: cov=${(trueCov*100).toFixed(1)}%, |V|=${V.length}`);
     }
 
-    // Coverage stagnation: stop growing when primitives no longer meaningfully improve coverage
     const covGain = trueCov - lastCovFraction;
-    if (covGain < COV_GAIN_THRESHOLD) {
-      stagnantIters++;
-    } else {
-      stagnantIters = 0;
-    }
     lastCovFraction = trueCov;
 
-    // Uncovered samples — defined by primitive coverage, not inscribed-radius heuristic
-    const uncovered = stagnantIters >= STAGNATION
-      ? []
-      : boundarySamples.filter((s) => !primCovers(s.x, s.y, fitted.primitives));
+    const uncovered = boundarySamples.filter((s) => !primCovers(s.x, s.y, fitted.primitives));
 
-    const willStop = trueCov >= 0.98 || stagnantIters >= STAGNATION || uncovered.length === 0;
+    // Stop when coverage is achieved or no samples remain uncovered.
+    // Bad-centrality edges are fixed structurally by Steiner points in constructMedialSkeleton.
+    const willStop = trueCov >= 0.98 || uncovered.length === 0;
 
-    // Growth schedule: add vertices starting at GROWTH_START NM evals
     const nNew = willStop ? 0 :
       nmEvalCount >= GROWTH_START
         ? N_NEW + (outerIter % 3 === 0 ? 1 : 0)
         : 1;
 
-    // Callback called exactly once per iteration with full context
     onIteration?.(outerIter, V.slice(), trueCov, covGain, nNew);
 
     if (willStop) break;
 
-    // Step 11: Freeze current V; add N_NEW new vertices in uncovered regions
     frozenV = V.slice();
-    const newSeeds = pickNewSeeds(uncovered, V, medialAxis, nNew);
-    V = [...frozenV, ...newSeeds];
+    V = [...frozenV, ...pickNewSeeds(uncovered, V, medialAxis, nNew)];
   }
 
   return V;
@@ -144,15 +141,14 @@ function computeEnergy(
   V: paper.Point[],
   medialAxis: MedialAxisGraph,
   boundarySamples: paper.Point[],
+  medialAxisR: Float64Array,
   flatBoundary: FlatBoundary,
   normSq: number,
 ): number {
   if (V.length === 0) return 0;
 
   const projV = V.map((p) => projectToMedialAxis(p, medialAxis));
-  const inscribed = projV.map((p) =>
-    nearestDistFlatBoundary(p.x, p.y, flatBoundary),
-  );
+  const inscribed = projV.map((p) => nearestDistFlatBoundary(p.x, p.y, flatBoundary));
   const delaunay = Delaunay.from(projV.map((p) => [p.x, p.y] as [number, number]));
 
   // E_coverage: fraction of boundary samples inside inscribed medial ball of nearest seed
@@ -164,26 +160,28 @@ function computeEnergy(
   }
   const eCoverage = -(covered / boundarySamples.length);
 
-  // E_centrality (paper Sec. 5.3): squared distance from each seed to the centroid
-  // of its Restricted Voronoi Cell on M (medial axis nodes), normalized to [0,1] space.
-  const sumX = new Float64Array(projV.length);
-  const sumY = new Float64Array(projV.length);
-  const counts = new Int32Array(projV.length);
-  for (const mp of medialAxis.points) {
-    const idx = delaunay.find(mp.x, mp.y);
-    sumX[idx] += mp.x;
-    sumY[idx] += mp.y;
-    counts[idx]++;
+  // E_centrality: radius-weighted centroid of each seed's Voronoi cell on M.
+  // Pulls each seed toward the thick-axis center of its region (away from thin junctions).
+  // Normalized by maxDim² so c1=1 balances correctly (paper normalizes to [0,1]).
+  const cellWX = new Float64Array(V.length);
+  const cellWY = new Float64Array(V.length);
+  const cellW = new Float64Array(V.length);
+  for (let mu = 0; mu < medialAxis.points.length; mu++) {
+    const pu = medialAxis.points[mu];
+    const rmu = medialAxisR[mu];
+    const idx = delaunay.find(pu.x, pu.y);
+    cellWX[idx] += pu.x * rmu;
+    cellWY[idx] += pu.y * rmu;
+    cellW[idx] += rmu;
   }
   let eCentrality = 0;
   for (let i = 0; i < projV.length; i++) {
-    if (counts[i] > 0) {
-      const cx = sumX[i] / counts[i];
-      const cy = sumY[i] / counts[i];
-      eCentrality += (projV[i].x - cx) ** 2 + (projV[i].y - cy) ** 2;
+    if (cellW[i] > 0) {
+      const cx = cellWX[i] / cellW[i];
+      const cy = cellWY[i] / cellW[i];
+      eCentrality += ((projV[i].x - cx) ** 2 + (projV[i].y - cy) ** 2) / normSq;
     }
   }
-  eCentrality /= normSq;
 
   return eCoverage + C1 * eCentrality + C2 * projV.length;
 }

@@ -1,6 +1,11 @@
 import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import paper from "paper";
 
+import {
+  FlatBoundary,
+  buildFlatBoundary,
+  nearestDistFlatBoundary,
+} from "@/app/pathUtils/flatBoundary";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { Vec2D } from "@/app/utils/types";
 
@@ -150,6 +155,15 @@ export function constructMedialSkeleton(
     }
   }
 
+  // Build flat boundary for centrality checks on emitted edges.
+  const flatBoundary = buildFlatBoundary(originalPath);
+
+  // Precompute inscribed radius at each raw medial axis node for max-r Steiner selection.
+  const rawNodeR = new Float64Array(numNodes);
+  for (let i = 0; i < numNodes; i++) {
+    rawNodeR[i] = nearestDistFlatBoundary(rawPoints[i].x, rawPoints[i].y, flatBoundary);
+  }
+
   // ---------------------------------------------------------
   // Step 2: Computing the Restricted Delaunay Triangulation (RDT)
   // ---------------------------------------------------------
@@ -159,6 +173,8 @@ export function constructMedialSkeleton(
 
   const newSegments: [number, number][] = [];
   const finalPoints = [...selectedPoints];
+  // Parallel to finalPoints: raw medial axis node index for each output point (-1 if not snapped to a raw node).
+  const finalPointRawNode: number[] = selectedPoints.map((_, i) => seedIndices[i]);
   const seedToOutputIndex = selectedPoints.map((_, i) => i);
 
   // Map from undirected edge key → list of interface midpoints
@@ -178,54 +194,153 @@ export function constructMedialSkeleton(
     interfaceMap.get(key)!.push(interfacePt);
   }
 
-  // Emit skeleton edges — one per interface, with iterative pierce-S subdivision
+  // Budget for Steiner insertions — tied to the vertex-count limit so the check is always coherent.
+  // MAX_BISECT_DEPTH bounds recursion depth; vertex count is the hard cap.
+  const MAX_TOTAL_VERTICES = 25;
+  const MAX_BISECT_DEPTH = 4;
+
+  // Recursive Steiner insertion for a single bad skeleton edge.
+  // Tries branch (T-junction) node first, then max-r node, using finalPointRawNode to
+  // look up raw axis indices even for Steiner-inserted points (depth > 0).
+  // Falls back to interface midpoint (depth=0) or projected midpoint (depth>0).
+  const emitEdge = (
+    idxA: number, idxB: number,
+    interfacePt: paper.Point | null,
+    depth: number,
+  ): void => {
+    if (finalPoints.length >= MAX_TOTAL_VERTICES || depth >= MAX_BISECT_DEPTH) {
+      newSegments.push([idxA, idxB]);
+      return;
+    }
+    const pA = finalPoints[idxA];
+    const pB = finalPoints[idxB];
+    if (isEdgeCentred(pA, pB, flatBoundary)) {
+      newSegments.push([idxA, idxB]);
+      return;
+    }
+
+    // Try structural raw-axis nodes as Steiner: branch (T-junction) first, then max-r.
+    // Uses finalPointRawNode to resolve raw axis indices at any depth, not just depth=0.
+    const nA = finalPointRawNode[idxA];
+    const nB = finalPointRawNode[idxB];
+    if (nA >= 0 && nB >= 0) {
+      const branchId = findBranchSteinerId(nA, nB, rawAdj);
+      const maxRId = findMaxRSteinerId(nA, nB, rawAdj, rawNodeR);
+
+      for (const candId of [branchId, maxRId]) {
+        if (candId < 0) continue;
+        const candPt = new paper.Point(rawPoints[candId]);
+        if (isEdgeCentred(pA, candPt, flatBoundary, CENTRE_THRESHOLD_VALID) &&
+            isEdgeCentred(candPt, pB, flatBoundary, CENTRE_THRESHOLD_VALID)) {
+          const sPtIdx = finalPoints.length;
+          finalPoints.push(candPt);
+          finalPointRawNode.push(candId);
+                    emitEdge(idxA, sPtIdx, null, depth + 1);
+          emitEdge(sPtIdx, idxB, null, depth + 1);
+          return;
+        }
+      }
+    }
+
+    // Fall back: interface midpoint (depth=0 only) or projected midpoint.
+    let steinPt: paper.Point;
+    let steinRawNode: number;
+    if (depth === 0 && interfacePt !== null) {
+      steinPt = interfacePt;
+      steinRawNode = -1;
+    } else {
+      const midX = (pA.x + pB.x) / 2, midY = (pA.y + pB.y) / 2;
+      const ni = getNearestNodeIndex(new paper.Point(midX, midY), rawPoints);
+      steinPt = new paper.Point(rawPoints[ni]);
+      steinRawNode = ni;
+    }
+
+    // Guard against degenerate near-zero-length sub-edges.
+    if (Math.hypot(steinPt.x - pA.x, steinPt.y - pA.y) < 1 ||
+        Math.hypot(steinPt.x - pB.x, steinPt.y - pB.y) < 1) {
+      newSegments.push([idxA, idxB]);
+      return;
+    }
+
+    const sPtIdx = finalPoints.length;
+    finalPoints.push(steinPt);
+    finalPointRawNode.push(steinRawNode);
+        emitEdge(idxA, sPtIdx, null, depth + 1);
+    emitEdge(sPtIdx, idxB, null, depth + 1);
+  };
+
   for (const [key, interfaces] of interfaceMap) {
     const [aStr, bStr] = key.split("-");
     const idxA = parseInt(aStr);
     const idxB = parseInt(bStr);
-    const pA = finalPoints[idxA];
-    const pB = finalPoints[idxB];
 
     if (interfaces.length === 1) {
-      // Single interface: direct edge if valid, else iteratively subdivided path
-      addSkeletonChain(
-        pA,
-        idxA,
-        pB,
-        idxB,
-        rawPoints,
-        rawMedialAxis.segments,
-        originalPath,
-        finalPoints,
-        newSegments,
-      );
+      emitEdge(idxA, idxB, interfaces[0], 0);
     } else {
-      // Multiple interfaces (k > 1): one subdivided path per interface via its Steiner point
       for (const interfacePt of interfaces) {
         const sPtIdx = finalPoints.length;
         finalPoints.push(interfacePt);
-        addSkeletonChain(
-          pA,
-          idxA,
-          interfacePt,
-          sPtIdx,
-          rawPoints,
-          rawMedialAxis.segments,
-          originalPath,
-          finalPoints,
-          newSegments,
-        );
-        addSkeletonChain(
-          interfacePt,
-          sPtIdx,
-          pB,
-          idxB,
-          rawPoints,
-          rawMedialAxis.segments,
-          originalPath,
-          finalPoints,
-          newSegments,
-        );
+        finalPointRawNode.push(-1); // interface midpoint — not snapped to a raw axis node
+                // Also check centrality of the two sub-edges created by the interface Steiner.
+        emitEdge(idxA, sPtIdx, null, 1);
+        emitEdge(sPtIdx, idxB, null, 1);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------
+  // Post-processing: snap leaf seeds to raw medial axis tips
+  // ---------------------------------------------------------
+  // The seed positions were snapped to the *nearest* raw axis node, which may not be
+  // the degree-1 (tip) node at the actual stroke end. This causes the capsule cap and
+  // vertex disk to originate a few units short of the stroke cap, leaving it uncovered.
+  // Fix: for each leaf seed (degree-1 in the output skeleton), find the raw degree-1 node
+  // in its Voronoi region that lies farthest from its output neighbor, and move the seed there.
+
+  const outDegree = new Int32Array(finalPoints.length);
+  for (const [u, v] of newSegments) { outDegree[u]++; outDegree[v]++; }
+
+  for (let si = 0; si < selectedPoints.length; si++) {
+    if (outDegree[si] !== 1) continue; // only leaf seeds
+
+    // Find the single output neighbor of this leaf.
+    let nbIdx = -1;
+    for (const [u, v] of newSegments) {
+      if (u === si) { nbIdx = v; break; }
+      if (v === si) { nbIdx = u; break; }
+    }
+    if (nbIdx < 0) continue;
+    const nbPt = finalPoints[nbIdx];
+
+    // Collect ALL degree-1 raw nodes in this seed's Voronoi region, sorted by
+    // alignment with the outward branch direction (most aligned = most likely main tip).
+    const siPt = finalPoints[si];
+    const brDx = siPt.x - nbPt.x, brDy = siPt.y - nbPt.y;
+    const brLen = Math.hypot(brDx, brDy);
+    const outX = brLen > 1e-6 ? brDx / brLen : 1;
+    const outY = brLen > 1e-6 ? brDy / brLen : 0;
+    const rawTips: Array<{ rn: number; score: number }> = [];
+    for (let rn = 0; rn < numNodes; rn++) {
+      if (nodeOwner[rn] !== si || rawAdj[rn].length !== 1) continue;
+      // Ignore tips too close to the current position (degenerate edges).
+      if (Math.hypot(rawPoints[rn].x - siPt.x, rawPoints[rn].y - siPt.y) < 2) continue;
+      const score = (rawPoints[rn].x - siPt.x) * outX + (rawPoints[rn].y - siPt.y) * outY;
+      rawTips.push({ rn, score });
+    }
+    rawTips.sort((a, b) => b.score - a.score); // most-aligned first
+
+    // Process each tip: direct snap for the first that passes, then append the rest.
+    let directSnapped = false;
+    for (const { rn } of rawTips) {
+      if (finalPoints.length >= MAX_TOTAL_VERTICES) break;
+      const tipPt = new paper.Point(rawPoints[rn]);
+      if (!directSnapped && isEdgeCentred(tipPt, nbPt, flatBoundary)) {
+        finalPoints[si] = tipPt;
+        directSnapped = true;
+      } else if (isEdgeCentred(tipPt, finalPoints[si], flatBoundary)) {
+        const tipIdx = finalPoints.length;
+        finalPoints.push(tipPt);
+        newSegments.push([si, tipIdx]);
       }
     }
   }
@@ -239,6 +354,97 @@ export function constructMedialSkeleton(
 // ---------------------------------------------------------
 // Helper Functions
 // ---------------------------------------------------------
+
+// Finds the node with maximum inscribed radius strictly between nodeA and nodeB on the
+// BFS shortest path. Returns -1 if A and B are directly adjacent (no internal nodes).
+function findMaxRSteinerId(
+  nodeA: number, nodeB: number,
+  adj: number[][],
+  nodeR: Float64Array,
+): number {
+  if (nodeA === nodeB) return -1;
+  const n = adj.length;
+  const parent = new Int32Array(n).fill(-2); // -2 = unvisited
+  parent[nodeA] = -1; // A is BFS root
+  const queue = [nodeA];
+  let found = false;
+  outer: while (queue.length > 0) {
+    const curr = queue.shift()!;
+    for (const nb of adj[curr]) {
+      if (parent[nb] === -2) {
+        parent[nb] = curr;
+        if (nb === nodeB) { found = true; break outer; }
+        queue.push(nb);
+      }
+    }
+  }
+  if (!found) return -1;
+  // Walk from parent(B) back to A; collect internal nodes (excluding A and B).
+  let maxR = -1, bestNode = -1;
+  let curr = parent[nodeB];
+  while (curr !== nodeA && curr !== -1) {
+    if (nodeR[curr] > maxR) { maxR = nodeR[curr]; bestNode = curr; }
+    curr = parent[curr];
+  }
+  return bestNode;
+}
+
+// Finds the first degree-3+ (T-junction) node on the BFS shortest path from nodeA to nodeB.
+// Returns -1 if no such node exists (path is entirely degree-1/2 nodes, excluding A and B themselves).
+function findBranchSteinerId(
+  nodeA: number, nodeB: number,
+  adj: number[][],
+): number {
+  if (nodeA === nodeB) return -1;
+  const n = adj.length;
+  const parent = new Int32Array(n).fill(-2);
+  parent[nodeA] = -1;
+  const queue = [nodeA];
+  let found = false;
+  outer: while (queue.length > 0) {
+    const curr = queue.shift()!;
+    for (const nb of adj[curr]) {
+      if (parent[nb] === -2) {
+        parent[nb] = curr;
+        if (nb === nodeB) { found = true; break outer; }
+        queue.push(nb);
+      }
+    }
+  }
+  if (!found) return -1;
+  // Walk from parent(B) back to A; find first degree-3+ node (T-junction).
+  let curr = parent[nodeB];
+  while (curr !== nodeA && curr !== -1) {
+    if (adj[curr].length >= 3) return curr;
+    curr = parent[curr];
+  }
+  if (nodeA !== nodeB && adj[nodeA].length >= 3) return nodeA;
+  return -1;
+}
+
+// Returns true if the straight-line edge from pA to pB has acceptable centrality.
+// Uses min(boundary_dist) / max(boundary_dist) along the line. This approximates
+// minDist/prim.meanR better than min/mean because primMeanR scales with maxDist
+// (the primitive expands to fill the widest cross-section it can reach).
+// Threshold 0.35 catches edges that exit thin junctions relative to wide stroke
+// areas while allowing naturally tapered or uniformly thin strokes.
+const CENTRE_THRESHOLD = 0.35;
+const CENTRE_THRESHOLD_VALID = 0.25;
+const CENTRE_N_SAMP = 12;
+
+function isEdgeCentred(pA: Vec2D, pB: Vec2D, fb: FlatBoundary, threshold = CENTRE_THRESHOLD): boolean {
+  let minDist = Infinity, maxDist = 0;
+  for (let k = 0; k <= CENTRE_N_SAMP; k++) {
+    const t = k / CENTRE_N_SAMP;
+    const x = pA.x + t * (pB.x - pA.x);
+    const y = pA.y + t * (pB.y - pA.y);
+    const d = nearestDistFlatBoundary(x, y, fb);
+    if (d < minDist) minDist = d;
+    if (d > maxDist) maxDist = d;
+  }
+  if (maxDist <= 0) return true;
+  return minDist / maxDist >= threshold;
+}
 
 function isGraphConnected(adj: number[][]): boolean {
   const numNodes = adj.length;
@@ -280,119 +486,4 @@ function getNearestNodeIndex(pt: paper.Point, nodes: Vec2D[]): number {
     }
   }
   return idx;
-}
-
-/**
- * Projects a point onto the nearest location on any medial axis segment.
- */
-function projectToMedialAxisOnGraph(
-  pt: paper.Point,
-  rawPoints: Vec2D[],
-  segments: [number, number][],
-): paper.Point {
-  let bestX = rawPoints[0].x;
-  let bestY = rawPoints[0].y;
-  let minDist = Infinity;
-  for (const [i1, i2] of segments) {
-    const ax = rawPoints[i1].x,
-      ay = rawPoints[i1].y;
-    const dx = rawPoints[i2].x - ax,
-      dy = rawPoints[i2].y - ay;
-    const lenSq = dx * dx + dy * dy;
-    let t = lenSq > 1e-10 ? ((pt.x - ax) * dx + (pt.y - ay) * dy) / lenSq : 0;
-    t = Math.max(0, Math.min(1, t));
-    const cx = ax + t * dx,
-      cy = ay + t * dy;
-    const dist = Math.hypot(pt.x - cx, pt.y - cy);
-    if (dist < minDist) {
-      minDist = dist;
-      bestX = cx;
-      bestY = cy;
-    }
-  }
-  return new paper.Point(bestX, bestY);
-}
-
-/**
- * Recursively bisects segment [pA, pB] until each sub-segment passes
- * isSegmentValid, projecting each midpoint onto the medial axis.
- * Returns intermediate points (excluding pA and pB themselves).
- */
-function subdivideSegment(
-  pA: paper.Point,
-  pB: paper.Point,
-  rawPoints: Vec2D[],
-  segments: [number, number][],
-  originalPath: paper.CompoundPath,
-  maxDepth: number,
-): paper.Point[] {
-  if (maxDepth <= 0 || isSegmentValid(pA, pB, originalPath)) return [];
-  const midRaw = pA.add(pB).divide(2);
-  const mid = projectToMedialAxisOnGraph(midRaw, rawPoints, segments);
-  return [
-    ...subdivideSegment(pA, mid, rawPoints, segments, originalPath, maxDepth - 1),
-    mid,
-    ...subdivideSegment(mid, pB, rawPoints, segments, originalPath, maxDepth - 1),
-  ];
-}
-
-/**
- * Adds a chain of skeleton edges from idxA to idxB, inserting subdivided
- * intermediate points onto finalPoints/newSegments as needed.
- */
-function addSkeletonChain(
-  pA: paper.Point,
-  idxA: number,
-  pB: paper.Point,
-  idxB: number,
-  rawPoints: Vec2D[],
-  segments: [number, number][],
-  originalPath: paper.CompoundPath,
-  finalPoints: paper.Point[],
-  newSegments: [number, number][],
-): void {
-  if (isSegmentValid(pA, pB, originalPath)) {
-    newSegments.push([idxA, idxB]);
-    return;
-  }
-  const intermediates = subdivideSegment(pA, pB, rawPoints, segments, originalPath, 8);
-  let prevIdx = idxA;
-  for (const mid of intermediates) {
-    const newIdx = finalPoints.length;
-    finalPoints.push(mid);
-    newSegments.push([prevIdx, newIdx]);
-    prevIdx = newIdx;
-  }
-  newSegments.push([prevIdx, idxB]);
-}
-
-/**
- * Checks if a straight line segment stays strictly inside the shape.
- * Used for the Geometry Fix.
- */
-function isSegmentValid(
-  p1: paper.Point,
-  p2: paper.Point,
-  path: paper.CompoundPath,
-): boolean {
-  // 1. Midpoint Check (Fast fail)
-  const mid = p1.add(p2).divide(2);
-  if (!path.contains(mid)) return false;
-
-  // 2. Ray Intersections (Robust check)
-  // Ensure the line segment doesn't intersect boundaries (except maybe at ends)
-  const line = new paper.Path.Line({ from: p1, to: p2 });
-  const intersections = line.getIntersections(path);
-
-  // If we intersect "walls" (excluding the start/end proximity), it's invalid.
-  for (const hit of intersections) {
-    const d1 = hit.point.getDistance(p1);
-    const d2 = hit.point.getDistance(p2);
-    // Tolerance of 1.0 to ignore intersections at the vertices themselves
-    if (d1 > 1.0 && d2 > 1.0) {
-      return false;
-    }
-  }
-
-  return true;
 }

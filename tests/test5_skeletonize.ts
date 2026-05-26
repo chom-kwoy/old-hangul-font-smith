@@ -58,8 +58,10 @@ fs.mkdirSync("test_outputs", { recursive: true });
 
 function renderSkeletonization(
   path: paper.CompoundPath,
+  rawAxis: MedialAxisGraph,
   fitted: FittedMedialAxisGraph,
   label: string,
+  boundarySamples?: paper.Point[],
 ): void {
   const SIZE = 1000;
   const PAD = 40;
@@ -138,7 +140,20 @@ function renderSkeletonization(
     }
   }
 
-  // --- 3. Skeleton edges (on top of primitives) ---
+  // --- 3. Raw medial axis (white, on top of primitive fills so it's visible) ---
+  for (const [i1, i2] of rawAxis.segments) {
+    const p1 = rawAxis.points[i1];
+    const p2 = rawAxis.points[i2];
+    canvas.add(
+      new FabricLine([tx(p1.x), ty(p1.y), tx(p2.x), ty(p2.y)], {
+        stroke: "rgba(255,255,255,0.85)",
+        strokeWidth: 2.5,
+        selectable: false,
+      }),
+    );
+  }
+
+  // --- 4. Skeleton edges (on top of raw axis) ---
   for (let i = 0; i < fitted.segments.length; i++) {
     const [u, v] = fitted.segments[i];
     const pu = fitted.points[u];
@@ -148,6 +163,28 @@ function renderSkeletonization(
         stroke: strokeColor(i),
         strokeWidth: 2.5,
         selectable: false,
+      }),
+    );
+  }
+
+  // Edge index labels at midpoint of each skeleton edge
+  for (let i = 0; i < fitted.segments.length; i++) {
+    const [u, v] = fitted.segments[i];
+    const pu = fitted.points[u];
+    const pv = fitted.points[v];
+    canvas.add(
+      new FabricText(String(i), {
+        left: tx((pu.x + pv.x) / 2),
+        top: ty((pu.y + pv.y) / 2),
+        fontSize: 13,
+        fontFamily: "monospace",
+        fill: strokeColor(i),
+        stroke: "white",
+        strokeWidth: 3,
+        paintFirst: "stroke",
+        selectable: false,
+        originX: "center",
+        originY: "center",
       }),
     );
   }
@@ -163,6 +200,41 @@ function renderSkeletonization(
         selectable: false,
       }),
     );
+  }
+
+  // --- Uncovered boundary samples (red dots) ---
+  if (boundarySamples) {
+    for (const s of boundarySamples) {
+      const covered = fitted.primitives.some(prim => {
+        const pts = prim.origins.map((o, i) => ({
+          x: o.x + prim.directions[i].x * prim.radii[i],
+          y: o.y + prim.directions[i].y * prim.radii[i],
+        }));
+        const N = pts.length;
+        let inside = false;
+        for (let i = 0, j = N - 1; i < N; j = i++) {
+          if (pts[i].y > s.y !== pts[j].y > s.y &&
+              s.x < ((pts[j].x - pts[i].x) * (s.y - pts[i].y)) / (pts[j].y - pts[i].y) + pts[i].x)
+            inside = !inside;
+        }
+        if (inside) return true;
+        for (let i = 0, j = N - 1; i < N; j = i++) {
+          const ax = pts[j].x, ay = pts[j].y, bx = pts[i].x, by = pts[i].y;
+          const ddx = bx - ax, ddy = by - ay;
+          const lenSq = ddx * ddx + ddy * ddy;
+          let t = lenSq > 1e-10 ? ((s.x - ax) * ddx + (s.y - ay) * ddy) / lenSq : 0;
+          t = Math.max(0, Math.min(1, t));
+          if (Math.hypot(s.x - (ax + t * ddx), s.y - (ay + t * ddy)) < 5.0) return true;
+        }
+        return false;
+      });
+      if (!covered) {
+        canvas.add(new FabricCircle({
+          left: tx(s.x), top: ty(s.y),
+          radius: 5, fill: "red", selectable: false,
+        }));
+      }
+    }
   }
 
   canvas.renderAll();
@@ -349,7 +421,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       const nEdges = fitted.segments.length;
       const cov = coverageFraction(samples, fitted.primitives);
       console.log(`  📐 ${nVerts} vertices, ${nEdges} edges`);
-      check("final coverage ≥ 98%", cov >= 0.98, `${(cov * 100).toFixed(1)}%`);
+      check("final coverage ≥ 99.5%", cov >= 0.995, `${(cov * 100).toFixed(1)}%`);
       check("vertex count ≤ 25", nVerts <= 25, `${nVerts} vertices`);
       check(
         "has primitives",
@@ -392,9 +464,6 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         }
       }
       if (worstEdgeIdx >= 0) {
-        console.log(
-          `  🎯 worst centrality ratio: ${worstRatio.toFixed(3)} (edge ${worstEdgeIdx})`,
-        );
         check(
           "worst centrality ratio ≥ 0.2",
           worstRatio >= 0.2,
@@ -402,7 +471,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         );
       }
 
-      renderSkeletonization(path, fitted, label);
+      renderSkeletonization(path, axis, fitted, label, samples);
     }
   }
 }
