@@ -217,7 +217,7 @@ export function constructMedialSkeleton(
   // Steiner candidates are picked from rawPath itself (not from a fresh BFS),
   // so ring shapes whose two pair-paths share the same endpoints still produce
   // distinct Steiner nodes (one from each half of the raw ring).
-  function emitEdge(rawPath: number[], depth: number): void {
+  function emitEdge(rawPath: number[], depth: number, maxDepth = MAX_BISECT_DEPTH): void {
     if (rawPath.length < 2) return;
     const rawA = rawPath[0];
     const rawB = rawPath[rawPath.length - 1];
@@ -226,7 +226,7 @@ export function constructMedialSkeleton(
     const idxB = rawToOut.get(rawB)!;
     if (idxA === idxB) return;
 
-    if (depth >= MAX_BISECT_DEPTH || finalPoints.length >= MAX_TOTAL_VERTICES) {
+    if (depth >= maxDepth || finalPoints.length >= MAX_TOTAL_VERTICES) {
       addSegment(idxA, idxB);
       return;
     }
@@ -255,8 +255,8 @@ export function constructMedialSkeleton(
       if (isEdgeCentred(pA, candPt, flatBoundary, CENTRE_THRESHOLD_VALID) &&
           isEdgeCentred(candPt, pB, flatBoundary, CENTRE_THRESHOLD_VALID)) {
         getOrAddVertex(candRaw);
-        emitEdge(rawPath.slice(0, ci + 1), depth + 1);
-        emitEdge(rawPath.slice(ci), depth + 1);
+        emitEdge(rawPath.slice(0, ci + 1), depth + 1, maxDepth);
+        emitEdge(rawPath.slice(ci), depth + 1, maxDepth);
         return;
       }
     }
@@ -349,7 +349,9 @@ export function constructMedialSkeleton(
         getOrAddVertex(tipRn);
         const inSeed = (n: number) => nodeOwner[n] === si;
         const stubPath = bfsPathFiltered(seedIndices[si], tipRn, rawAdj, inSeed);
-        if (stubPath) emitEdge(stubPath, 0);
+        // Limit stub to 1 bisection: deeper recursion can't help since the
+        // tip-side sub-segment always fails isEdgeCentred (r→0 at the tip).
+        if (stubPath) emitEdge(stubPath, 0, 1);
       }
     }
   }
