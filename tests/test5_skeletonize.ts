@@ -471,6 +471,65 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         );
       }
 
+      // Junction collinearity metric: for every degree-≥3 vertex P, for each
+      // arm PA, compute min over all other arms PB of
+      //   perp_dist(A, line_through_PB) / |PA|
+      // then take the min over arms. Report the min over all such junctions.
+      // Low value = two arms nearly collinear → potentially redundant edge.
+      {
+        // Build adjacency: vertex → list of neighbour indices
+        const nbrs: number[][] = Array.from({ length: fitted.points.length }, () => []);
+        for (const [u, v] of fitted.segments) {
+          nbrs[u].push(v);
+          nbrs[v].push(u);
+        }
+
+        let worstJunctionRatio = Infinity;
+        let worstJunctionVertex = -1;
+
+        for (let p = 0; p < fitted.points.length; p++) {
+          if (nbrs[p].length < 3) continue; // only junctions
+
+          const pp = fitted.points[p];
+          let junctionMin = Infinity;
+
+          for (const a of nbrs[p]) {
+            const pa = fitted.points[a];
+            const ax = pa.x - pp.x, ay = pa.y - pp.y;
+            const armLen = Math.hypot(ax, ay);
+            if (armLen < 1e-6) continue;
+
+            // min perpendicular distance from A to any other arm's line through P
+            let minPerpDist = Infinity;
+            for (const b of nbrs[p]) {
+              if (b === a) continue;
+              const pb = fitted.points[b];
+              const bx = pb.x - pp.x, by = pb.y - pp.y;
+              const bLen = Math.hypot(bx, by);
+              if (bLen < 1e-6) continue;
+              // perp dist = |cross(A-P, B-P_dir)| = |(ax*by - ay*bx)| / bLen
+              const perp = Math.abs(ax * by - ay * bx) / bLen;
+              if (perp < minPerpDist) minPerpDist = perp;
+            }
+
+            const ratio = minPerpDist / armLen;
+            if (ratio < junctionMin) junctionMin = ratio;
+          }
+
+          if (junctionMin < worstJunctionRatio) {
+            worstJunctionRatio = junctionMin;
+            worstJunctionVertex = p;
+          }
+        }
+
+        if (worstJunctionVertex >= 0) {
+          console.log(`  junction collinearity: ${worstJunctionRatio.toFixed(3)}  (vertex ${worstJunctionVertex})`);
+          if (worstJunctionRatio < 0.01) {
+            console.log(`  segments: ${fitted.segments.map(([u,v],i)=>`${i}:[${u}->${v} (${fitted.points[u].x.toFixed(0)},${fitted.points[u].y.toFixed(0)})→(${fitted.points[v].x.toFixed(0)},${fitted.points[v].y.toFixed(0)})]`).join('  ')}`);
+          }
+        }
+      }
+
       renderSkeletonization(path, axis, fitted, label, samples);
     }
   }
