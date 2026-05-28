@@ -61,6 +61,7 @@ export function skeletonize(
     medialSkeletonPoints,
     medialAxis,
     paperPath,
+    true,
   );
 
   // Fit primitives (expandable circles) to each skeleton component

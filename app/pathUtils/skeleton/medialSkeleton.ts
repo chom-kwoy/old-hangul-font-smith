@@ -22,6 +22,7 @@ export function constructMedialSkeleton(
   selectedPoints: paper.Point[],
   rawMedialAxis: MedialAxisGraph,
   originalPath: paper.CompoundPath,
+  enforceInsideEdges: boolean = false,
 ): MedialAxisGraph {
   // ---------------------------------------------------------
   // Pre-processing
@@ -177,13 +178,15 @@ export function constructMedialSkeleton(
   const rawToOut = new Map<number, number>();
   const finalPoints: paper.Point[] = [];
 
-  // Seeds first — preserves indices 0..nSeeds-1 for the leaf-snap loop,
-  // and stores the MSD-optimized position rather than the raw-node position.
+  // Seeds first — preserves indices 0..nSeeds-1 for the leaf-snap loop.
+  // T-junction seeds (raw node degree >= 3) snap to the raw axis position so
+  // that multi-branch junctions land exactly on the topological branch point.
   for (let si = 0; si < selectedPoints.length; si++) {
     const rn = seedIndices[si];
     if (!rawToOut.has(rn)) {
       rawToOut.set(rn, finalPoints.length);
-      finalPoints.push(new paper.Point(selectedPoints[si]));
+      const useRawPos = rawAdj[rn].length >= 3;
+      finalPoints.push(useRawPos ? new paper.Point(rawPoints[rn]) : new paper.Point(selectedPoints[si]));
     }
   }
 
@@ -216,18 +219,21 @@ export function constructMedialSkeleton(
     finalControlPoints.push([cp1, cp2]);
   }
 
-  // Compute cubic Bezier interior control points for the edge pA→pB, using the
-  // raw-path end tangents scaled to 1/3 of the chord (Hermite→Bezier conversion).
+  // Compute cubic Bezier interior control points for the edge pA→pB.
+  // Tangents are measured FROM the output vertices pA/pB toward the raw-path interior,
+  // so snapped or NM-displaced vertices get the correct departure/arrival directions.
   function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
     const chord = Math.hypot(pB.x - pA.x, pB.y - pA.y);
     let txA = 0, tyA = 0, txB = 0, tyB = 0;
     if (rawPath.length >= 2) {
-      const p0 = rawPoints[rawPath[0]], p1 = rawPoints[rawPath[1]];
-      const la = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-      if (la > 1e-6) { txA = (p1.x - p0.x) / la; tyA = (p1.y - p0.y) / la; }
-      const pL = rawPoints[rawPath[rawPath.length - 1]], pK = rawPoints[rawPath[rawPath.length - 2]];
-      const lb = Math.hypot(pL.x - pK.x, pL.y - pK.y);
-      if (lb > 1e-6) { txB = (pL.x - pK.x) / lb; tyB = (pL.y - pK.y) / lb; }
+      // Departure at pA: direction from pA toward the second raw node.
+      const p1 = rawPoints[rawPath[1]];
+      const la = Math.hypot(p1.x - pA.x, p1.y - pA.y);
+      if (la > 1e-6) { txA = (p1.x - pA.x) / la; tyA = (p1.y - pA.y) / la; }
+      // Arrival at pB: direction from second-to-last raw node toward pB.
+      const pK = rawPoints[rawPath[rawPath.length - 2]];
+      const lb = Math.hypot(pB.x - pK.x, pB.y - pK.y);
+      if (lb > 1e-6) { txB = (pB.x - pK.x) / lb; tyB = (pB.y - pK.y) / lb; }
     } else if (chord > 1e-6) {
       txA = (pB.x - pA.x) / chord; tyA = (pB.y - pA.y) / chord;
       txB = txA; tyB = tyA;
@@ -237,6 +243,15 @@ export function constructMedialSkeleton(
       { x: pA.x + txA * s, y: pA.y + tyA * s },
       { x: pB.x - txB * s, y: pB.y - tyB * s },
     ];
+  }
+
+  // Returns true if the bone curve from pA to pB (Bezier if cp given) stays inside the path.
+  function isEdgeInside(pA: Vec2D, pB: Vec2D, cp1?: Vec2D, cp2?: Vec2D): boolean {
+    for (let k = 1; k < CENTRE_N_SAMP; k++) {
+      const { x, y } = evalBone(pA, pB, cp1, cp2, k / CENTRE_N_SAMP);
+      if (!originalPath.contains(new paper.Point(x, y))) return false;
+    }
+    return true;
   }
 
   // Emit a skeleton edge along a specific raw-axis sub-path.
@@ -261,13 +276,18 @@ export function constructMedialSkeleton(
       return;
     }
 
-    if (isEdgeCentred(pA, pB, flatBoundary)) {
+    const centred = isEdgeCentred(pA, pB, flatBoundary, CENTRE_THRESHOLD, cp1, cp2);
+    const inside = !enforceInsideEdges || isEdgeInside(pA, pB, cp1, cp2);
+
+    if (centred && inside) {
       addSegment(idxA, idxB, cp1, cp2);
       return;
     }
 
     // Find Steiner candidates within rawPath (interior nodes only).
     // Priority: T-junction, then max-R, then path midpoint.
+    // Sub-segment control points are not pre-computed here; sub-segments use straight-line
+    // checks (no cp) since their bezierCPs will be recomputed when emitEdge recurses.
     let branchCandIdx = -1, maxRCandIdx = -1, maxR = -1;
     for (let i = 1; i < rawPath.length - 1; i++) {
       const n = rawPath[i];
@@ -280,8 +300,11 @@ export function constructMedialSkeleton(
       if (ci <= 0 || ci >= rawPath.length - 1) continue;
       const candRaw = rawPath[ci];
       const candPt = new paper.Point(rawPoints[candRaw]);
-      if (isEdgeCentred(pA, candPt, flatBoundary, CENTRE_THRESHOLD_VALID) &&
-          isEdgeCentred(candPt, pB, flatBoundary, CENTRE_THRESHOLD_VALID)) {
+      const subCentred = isEdgeCentred(pA, candPt, flatBoundary, CENTRE_THRESHOLD_VALID) &&
+                         isEdgeCentred(candPt, pB, flatBoundary, CENTRE_THRESHOLD_VALID);
+      // Bisect if sub-segments are centrally valid, OR if the current edge exits the shape
+      // (in which case any bisection is better than accepting an outside edge).
+      if (subCentred || !inside) {
         getOrAddVertex(candRaw);
         emitEdge(rawPath.slice(0, ci + 1), depth + 1, maxDepth);
         emitEdge(rawPath.slice(ci), depth + 1, maxDepth);
@@ -360,7 +383,9 @@ export function constructMedialSkeleton(
     for (const { rn } of rawTips) {
       if (finalPoints.length >= MAX_TOTAL_VERTICES) break;
       const tipR = rawNodeR[rn];
-      if (tipR >= origR * 0.65 && isEdgeCentred(rawPoints[rn], nbPt, flatBoundary)) {
+      if (tipR >= origR * 0.65 &&
+          isEdgeCentred(rawPoints[rn], nbPt, flatBoundary) &&
+          (!enforceInsideEdges || isEdgeInside(rawPoints[rn], nbPt))) {
         finalPoints[seedOutIdx] = new paper.Point(rawPoints[rn]);
         directSnapRn = rn;
         break;
@@ -520,12 +545,28 @@ const CENTRE_THRESHOLD = 0.35;
 const CENTRE_THRESHOLD_VALID = 0.25;
 const CENTRE_N_SAMP = 12;
 
-function isEdgeCentred(pA: Vec2D, pB: Vec2D, fb: FlatBoundary, threshold = CENTRE_THRESHOLD): boolean {
+// Evaluate a point on the bone curve at t ∈ [0,1].
+// Uses the cubic Bezier when cp1/cp2 are given, otherwise linear interpolation.
+function evalBone(
+  pA: Vec2D, pB: Vec2D,
+  cp1: Vec2D | undefined, cp2: Vec2D | undefined,
+  t: number,
+): { x: number; y: number } {
+  if (!cp1 || !cp2) return { x: pA.x + t * (pB.x - pA.x), y: pA.y + t * (pB.y - pA.y) };
+  const u = 1 - t;
+  return {
+    x: u*u*u*pA.x + 3*u*u*t*cp1.x + 3*u*t*t*cp2.x + t*t*t*pB.x,
+    y: u*u*u*pA.y + 3*u*u*t*cp1.y + 3*u*t*t*cp2.y + t*t*t*pB.y,
+  };
+}
+
+function isEdgeCentred(
+  pA: Vec2D, pB: Vec2D, fb: FlatBoundary, threshold = CENTRE_THRESHOLD,
+  cp1?: Vec2D, cp2?: Vec2D,
+): boolean {
   let minDist = Infinity, maxDist = 0;
   for (let k = 0; k <= CENTRE_N_SAMP; k++) {
-    const t = k / CENTRE_N_SAMP;
-    const x = pA.x + t * (pB.x - pA.x);
-    const y = pA.y + t * (pB.y - pA.y);
+    const { x, y } = evalBone(pA, pB, cp1, cp2, k / CENTRE_N_SAMP);
     const d = nearestDistFlatBoundary(x, y, fb);
     if (d < minDist) minDist = d;
     if (d > maxDist) maxDist = d;

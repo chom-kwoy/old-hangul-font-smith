@@ -434,7 +434,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     const t0 = Date.now();
     try {
       const seeds = computeMedialSkeletonPoints(path, axis, 3.0, false, iterCallback);
-      const skeleton = constructMedialSkeleton(seeds, axis, path);
+      const skeleton = constructMedialSkeleton(seeds, axis, path, true);
       fitted = localPrimitiveFitting(path, skeleton);
     } catch (e) {
       error = e;
@@ -458,16 +458,39 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         `${fitted.primitives.length} prims`,
       );
 
+      // Evaluate a point on a skeleton edge at parameter t ∈ [0,1].
+      // Uses the cubic Bezier if control points are present, otherwise linear.
+      function evalEdgeCurve(
+        pu: { x: number; y: number }, pv: { x: number; y: number },
+        cp: [{ x: number; y: number }, { x: number; y: number }] | undefined,
+        t: number,
+      ): { x: number; y: number } {
+        if (!cp) return { x: pu.x + t * (pv.x - pu.x), y: pu.y + t * (pv.y - pu.y) };
+        const u = 1 - t;
+        return {
+          x: u*u*u*pu.x + 3*u*u*t*cp[0].x + 3*u*t*t*cp[1].x + t*t*t*pv.x,
+          y: u*u*u*pu.y + 3*u*u*t*cp[0].y + 3*u*t*t*cp[1].y + t*t*t*pv.y,
+        };
+      }
+
       // Worst centrality ratio: min over all edges of
-      //   (closest boundary distance from any point on the edge segment)
+      //   (closest boundary distance from any point on the edge bone)
       //   / (mean r of that edge's fitted primitive)
       // Ratio = 1 means perfectly centered; lower = closer to boundary.
+      // Uses the actual Bezier bone (if control points present), not the chord.
+      // Tip edges (one endpoint has degree 1) are excluded: stroke tips taper to zero
+      // by design, so their cap circles expand backward into the stroke body, inflating
+      // meanR well above the actual boundary distances along the bezier.
+      const vertexDegree = new Int32Array(fitted.points.length);
+      for (const [u, v] of fitted.segments) { vertexDegree[u]++; vertexDegree[v]++; }
       let worstRatio = Infinity;
       let worstEdgeIdx = -1;
       for (let i = 0; i < fitted.segments.length; i++) {
         const [u, v] = fitted.segments[i];
+        if (vertexDegree[u] === 1 || vertexDegree[v] === 1) continue; // skip tip edges
         const pu = fitted.points[u];
         const pv = fitted.points[v];
+        const cp = fitted.controlPoints?.[i];
         const prim = fitted.primitives.find(
           (p) => p.type === "edge" && p.elementIdx === i,
         );
@@ -478,9 +501,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         let minBoundaryDist = Infinity;
         const N_SAMP = 20;
         for (let k = 0; k <= N_SAMP; k++) {
-          const t = k / N_SAMP;
-          const x = pu.x + t * (pv.x - pu.x);
-          const y = pu.y + t * (pv.y - pu.y);
+          const { x, y } = evalEdgeCurve(pu, pv, cp, k / N_SAMP);
           minBoundaryDist = Math.min(
             minBoundaryDist,
             nearestDistFlatBoundary(x, y, flatBoundary),
@@ -497,6 +518,44 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           "worst centrality ratio ≥ 0.2",
           worstRatio >= 0.2,
           `${worstRatio.toFixed(3)}`,
+        );
+      }
+
+      // Check that no skeleton edge bone passes outside the shape boundary.
+      // Uses the Bezier bone (if control points present), not the chord.
+      {
+        const N_SAMP = 20;
+        let outsideEdge = -1;
+        let outsideT = -1;
+        for (let i = 0; i < fitted.segments.length; i++) {
+          const [u, v] = fitted.segments[i];
+          const pu = fitted.points[u];
+          const pv = fitted.points[v];
+          const cp = fitted.controlPoints?.[i];
+          for (let k = 1; k < N_SAMP; k++) {
+            const t = k / N_SAMP;
+            const { x, y } = evalEdgeCurve(pu, pv, cp, t);
+            if (!path.contains(new paper.Point(x, y))) {
+              outsideEdge = i;
+              outsideT = t;
+              break;
+            }
+          }
+          if (outsideEdge >= 0) break;
+        }
+        if (outsideEdge >= 0) {
+          const [u, v] = fitted.segments[outsideEdge];
+          const pu = fitted.points[u];
+          const pv = fitted.points[v];
+          console.log(
+            `  ⚠  skeleton edge ${outsideEdge} exits shape at t=${outsideT.toFixed(2)}: ` +
+            `(${pu.x.toFixed(1)},${pu.y.toFixed(1)}) → (${pv.x.toFixed(1)},${pv.y.toFixed(1)})`,
+          );
+        }
+        check(
+          "all skeleton edges inside shape",
+          outsideEdge < 0,
+          outsideEdge >= 0 ? `edge ${outsideEdge} exits at t=${outsideT.toFixed(2)}` : "",
         );
       }
 

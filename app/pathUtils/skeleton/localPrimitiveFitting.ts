@@ -226,50 +226,34 @@ function resamplePoints(N: number, scratch: ScratchBuffers): void {
   r_tgt.set(newRTgt);
 }
 
-function fitSinglePrimitive(
-  N: number,
-  boundary: FlatBoundary,
+// Number of fine-phase progressions after upsample from coarse.
+const FINE_PROGS = 10;
+
+// Expand balloon for `n` active directions, up to maxProgs progressions, with early
+// termination when growth stagnates. When doResample is true, redistributes origins
+// every 3 progressions; set false for the fine phase where origins are already placed.
+function runProgressions(
+  n: number,
+  maxProgs: number,
   opts: PrimitiveFittingOptions,
   scratch: ScratchBuffers,
-): { origins: Vec2D[]; directions: Vec2D[]; radii: number[] } {
-  const { origX, origY, r, r_tgt, r_init, r_max } = scratch;
-
-  // 1. Compute max extents
-  computeMaxExtents(N, scratch, boundary);
-
-  // 2. Initialize radii from inscribed distance at each origin.
-  // Fast-path: vertex primitives have all origins at the same point — call once.
-  if (origX[0] === origX[N >> 1] && origY[0] === origY[N >> 1]) {
-    const inscribed = nearestDistFlatBoundary(origX[0], origY[0], boundary);
-    r.fill(inscribed > 1e-4 ? inscribed * 0.99 : 1e-3);
-  } else {
-    for (let i = 0; i < N; i++) {
-      const inscribed = nearestDistFlatBoundary(origX[i], origY[i], boundary);
-      r[i] = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
-    }
-  }
-  r_tgt.set(r);
-  r_init.set(r);
-
-  // 3. Progressive Expansion
+  boundary: FlatBoundary,
+  doResample = true,
+): void {
+  const { r, r_tgt, r_init, r_max } = scratch;
   let prevRSum = 0;
-  for (let k = 0; k < N; k++) prevRSum += r[k];
+  for (let k = 0; k < n; k++) prevRSum += r[k];
   let stagnantCount = 0;
 
-  for (let prog = 0; prog < opts.max_progressions; prog++) {
-    for (let k = 0; k < N; k++) {
-      r_tgt[k] = Math.max(
-        r_tgt[k] + 0.1 * r_init[k],
-        r_tgt[k] + opts.min_absolute_growth,
-      );
+  for (let prog = 0; prog < maxProgs; prog++) {
+    for (let k = 0; k < n; k++) {
+      r_tgt[k] = Math.max(r_tgt[k] + 0.1 * r_init[k], r_tgt[k] + opts.min_absolute_growth);
     }
 
-    // Solver loop
     for (let iter = 0; iter < opts.max_alternating_iters; iter++) {
-      scratch.d.fill(2 + opts.w_expansion);
+      for (let j = 0; j < n; j++) scratch.d[j] = 2 + opts.w_expansion;
       let constraintsActive = false;
-
-      for (let j = 0; j < N; j++) {
+      for (let j = 0; j < n; j++) {
         scratch.rhs[j] = opts.w_expansion * r_tgt[j];
         if (r[j] > r_max[j]) {
           constraintsActive = true;
@@ -277,33 +261,117 @@ function fitSinglePrimitive(
           scratch.rhs[j] += opts.w_penalty * r_max[j];
         }
       }
-
-      solveCyclicTridiagonal(scratch.d, -1, -1, scratch.rhs, r, scratch);
+      solveCyclicTridiagonal(
+        scratch.d.subarray(0, n), -1, -1,
+        scratch.rhs.subarray(0, n), r.subarray(0, n), scratch,
+      );
       if (!constraintsActive) break;
     }
 
-    // Early termination: if total radius sum grew less than 0.1 per ray for two
-    // consecutive progressions, the balloon has hit the wall everywhere and stopped.
     let rSum = 0;
-    for (let k = 0; k < N; k++) rSum += r[k];
-    if (rSum - prevRSum < N * 0.1) {
+    for (let k = 0; k < n; k++) rSum += r[k];
+    if (rSum - prevRSum < n * 0.1) {
       if (++stagnantCount >= 2) break;
     } else {
       stagnantCount = 0;
     }
     prevRSum = rSum;
 
-    if (prog % 3 === 0 && prog < opts.max_progressions - 1) {
-      resamplePoints(N, scratch);
-      computeMaxExtents(N, scratch, boundary);
-      // Reset after resample: origins and r_max changed, give it a fresh start.
+    if (doResample && prog % 3 === 0 && prog < maxProgs - 1) {
+      resamplePoints(n, scratch);
+      computeMaxExtents(n, scratch, boundary);
       prevRSum = 0;
-      for (let k = 0; k < N; k++) prevRSum += r[k];
+      for (let k = 0; k < n; k++) prevRSum += r[k];
       stagnantCount = 0;
     }
   }
+}
 
-  // Copy flat buffers into Vec2D[] for the public Primitive interface
+// Resample the coarse balloon (Nc points) uniformly to N points by arc-length along
+// the inflated contour. Writes new origins, directions, and r into scratch[0..N-1].
+function upsampleBalloon(Nc: number, N: number, scratch: ScratchBuffers): void {
+  const { origX, origY, dirX, dirY, r, inflX, inflY, arcLen, tmpX, tmpY, newR } = scratch;
+
+  for (let i = 0; i < Nc; i++) {
+    inflX[i] = origX[i] + dirX[i] * r[i];
+    inflY[i] = origY[i] + dirY[i] * r[i];
+  }
+  arcLen[0] = 0;
+  for (let i = 0; i < Nc; i++) {
+    const ni = (i + 1) % Nc;
+    const dx = inflX[ni] - inflX[i], dy = inflY[ni] - inflY[i];
+    arcLen[i + 1] = arcLen[i] + Math.sqrt(dx * dx + dy * dy);
+  }
+  const spacing = arcLen[Nc] / N;
+  let segIdx = 0;
+  for (let k = 0; k < N; k++) {
+    const targetLen = k * spacing;
+    while (segIdx < Nc && arcLen[segIdx + 1] <= targetLen) segIdx++;
+    const next = (segIdx + 1) % Nc;
+    const segLen = arcLen[segIdx + 1] - arcLen[segIdx];
+    const t = segLen > 1e-10 ? (targetLen - arcLen[segIdx]) / segLen : 0;
+    const s = 1 - t;
+    tmpX[k] = origX[segIdx] * s + origX[next] * t;
+    tmpY[k] = origY[segIdx] * s + origY[next] * t;
+    const npX = inflX[segIdx] * s + inflX[next] * t;
+    const npY = inflY[segIdx] * s + inflY[next] * t;
+    const dX = npX - tmpX[k], dY = npY - tmpY[k];
+    const dLen = Math.sqrt(dX * dX + dY * dY);
+    newR[k] = dLen;
+    dirX[k] = dLen > 1e-10 ? dX / dLen : 1;
+    dirY[k] = dLen > 1e-10 ? dY / dLen : 0;
+  }
+  origX.set(tmpX.subarray(0, N));
+  origY.set(tmpY.subarray(0, N));
+  r.set(newR.subarray(0, N));
+}
+
+function fitSinglePrimitive(
+  N: number,
+  boundary: FlatBoundary,
+  opts: PrimitiveFittingOptions,
+  scratch: ScratchBuffers,
+): { origins: Vec2D[]; directions: Vec2D[]; radii: number[] } {
+  const { origX, origY, r, r_tgt, r_init } = scratch;
+  const Nc = N >> 2; // coarse resolution: N/4
+
+  // Subsample the N-element initial setup to Nc by striding every (N/Nc) elements.
+  // Safe: reads from higher indices before overwriting lower ones (stride >= 1).
+  const stride = N / Nc;
+  for (let i = 1; i < Nc; i++) {
+    origX[i] = origX[i * stride];
+    origY[i] = origY[i * stride];
+    scratch.dirX[i] = scratch.dirX[i * stride];
+    scratch.dirY[i] = scratch.dirY[i * stride];
+  }
+
+  // === COARSE PHASE (Nc directions) ===
+  computeMaxExtents(Nc, scratch, boundary);
+
+  // Initialize radii. Vertex fast-path: all Nc origins are the same point, call once.
+  if (origX[0] === origX[Nc >> 1] && origY[0] === origY[Nc >> 1]) {
+    const inscribed = nearestDistFlatBoundary(origX[0], origY[0], boundary);
+    const rval = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
+    for (let k = 0; k < Nc; k++) { r[k] = rval; r_tgt[k] = rval; r_init[k] = rval; }
+  } else {
+    for (let i = 0; i < Nc; i++) {
+      const inscribed = nearestDistFlatBoundary(origX[i], origY[i], boundary);
+      r[i] = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
+      r_tgt[i] = r[i]; r_init[i] = r[i];
+    }
+  }
+
+  runProgressions(Nc, opts.max_progressions, opts, scratch, boundary);
+
+  // === UPSAMPLE Nc → N ===
+  upsampleBalloon(Nc, N, scratch);
+
+  // === FINE PHASE (N directions, a few more progressions) ===
+  computeMaxExtents(N, scratch, boundary);
+  for (let k = 0; k < N; k++) { r_tgt[k] = r[k]; r_init[k] = r[k]; }
+  runProgressions(N, FINE_PROGS, opts, scratch, boundary, false);
+
+  // Copy flat buffers into Vec2D[] for the public Primitive interface.
   const origins: Vec2D[] = new Array(N);
   const directions: Vec2D[] = new Array(N);
   for (let i = 0; i < N; i++) {
@@ -488,12 +556,13 @@ function solveCyclicTridiagonal(
   scratch.T_diag_adj.set(d);
   scratch.T_diag_adj[0] -= f;
   scratch.T_diag_adj[n - 1] -= f;
-  scratch.u_vec.fill(0);
+  scratch.u_vec.fill(0, 0, n);
   scratch.u_vec[0] = 1.0;
   scratch.u_vec[n - 1] = 1.0;
 
-  solveTridiagonal(scratch.T_diag_adj, e, b, scratch.y, scratch);
-  solveTridiagonal(scratch.T_diag_adj, e, scratch.u_vec, scratch.z, scratch);
+  // Use subarray views so solveTridiagonal uses n, not the full scratch array length N.
+  solveTridiagonal(scratch.T_diag_adj.subarray(0, n), e, b, scratch.y.subarray(0, n), scratch);
+  solveTridiagonal(scratch.T_diag_adj.subarray(0, n), e, scratch.u_vec.subarray(0, n), scratch.z.subarray(0, n), scratch);
 
   const v_dot_y = f * (scratch.y[0] + scratch.y[n - 1]);
   const v_dot_z = f * (scratch.z[0] + scratch.z[n - 1]);
