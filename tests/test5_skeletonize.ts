@@ -216,8 +216,9 @@ function renderSkeletonization(
     );
   }
 
-  // Skeleton vertices
-  for (const pt of fitted.points) {
+  // Skeleton vertices + index labels
+  for (let i = 0; i < fitted.points.length; i++) {
+    const pt = fitted.points[i];
     canvas.add(
       new FabricCircle({
         left: tx(pt.x),
@@ -225,6 +226,21 @@ function renderSkeletonization(
         radius: 3,
         fill: "rgba(30,30,30,0.85)",
         selectable: false,
+      }),
+    );
+    canvas.add(
+      new FabricText(String(i), {
+        left: tx(pt.x) + 6,
+        top: ty(pt.y) - 6,
+        fontSize: 11,
+        fontFamily: "monospace",
+        fill: "rgba(30,30,30,0.9)",
+        stroke: "white",
+        strokeWidth: 3,
+        paintFirst: "stroke",
+        selectable: false,
+        originX: "left",
+        originY: "bottom",
       }),
     );
   }
