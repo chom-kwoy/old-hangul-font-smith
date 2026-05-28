@@ -441,6 +441,20 @@ export function constructMedialSkeleton(
           (!enforceInsideEdges || isEdgeInside(rawPoints[rn], nbPt))) {
         finalPoints[seedOutIdx] = new paper.Point(rawPoints[rn]);
         directSnapRn = rn;
+        // The vertex moved: recompute CPs for all its incident edges using chord
+        // direction, since the previously-computed CPs were anchored at the old position.
+        for (let segI = 0; segI < newSegments.length; segI++) {
+          const [su, sv] = newSegments[segI];
+          if (su !== seedOutIdx && sv !== seedOutIdx) continue;
+          const pA2 = finalPoints[su], pB2 = finalPoints[sv];
+          const chd = Math.hypot(pB2.x - pA2.x, pB2.y - pA2.y);
+          if (chd < 1e-6) continue;
+          const s2 = chd / 3, dx2 = (pB2.x - pA2.x) / chd, dy2 = (pB2.y - pA2.y) / chd;
+          finalControlPoints[segI] = [
+            { x: pA2.x + dx2 * s2, y: pA2.y + dy2 * s2 },
+            { x: pB2.x - dx2 * s2, y: pB2.y - dy2 * s2 },
+          ];
+        }
         break;
       }
     }
