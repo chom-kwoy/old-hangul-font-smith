@@ -111,7 +111,7 @@ export function computeMedialSkeletonPoints(
     // Called once per outer iteration — not inside NM where it would be too slow.
     const skeleton = constructMedialSkeleton(V, medialAxis, path);
     const fitted = localPrimitiveFitting(path, skeleton, {}, flatBoundary);
-    const trueCov = primitiveCoverage(boundarySamples, fitted.primitives);
+    const { coverage: trueCov, uncovered } = coverageAndUncovered(boundarySamples, fitted.primitives);
 
     if (verbose) {
       console.info(`Outer iter ${outerIter}: cov=${(trueCov*100).toFixed(1)}%, |V|=${V.length}`);
@@ -119,10 +119,6 @@ export function computeMedialSkeletonPoints(
 
     const covGain = trueCov - lastCovFraction;
     lastCovFraction = trueCov;
-
-    const maxN2 = fitted.primitives.reduce((m, p) => Math.max(m, p.origins.length), 0);
-    const _vx2 = new Float64Array(maxN2), _vy2 = new Float64Array(maxN2);
-    const uncovered = boundarySamples.filter((s) => !primCovers(s.x, s.y, fitted.primitives, 5.0, _vx2, _vy2));
 
     // Stop when coverage is achieved or no samples remain uncovered.
     // Bad-centrality edges are fixed structurally by Steiner points in constructMedialSkeleton.
@@ -259,58 +255,69 @@ function farthestPointSeeds(
 // Step 11: Primitive coverage — paper's true E_coverage metric
 // ---------------------------------------------------------------------------
 
-// Returns true if (px,py) is inside or within `delta` of any primitive's boundary polygon.
-function primCovers(
-  px: number,
-  py: number,
-  primitives: Primitive[],
-  delta = 5.0,
-  vx?: Float64Array,
-  vy?: Float64Array,
-): boolean {
-  for (const prim of primitives) {
+type PrimPolygon = {
+  vx: Float64Array; vy: Float64Array;
+  minX: number; maxX: number; minY: number; maxY: number;
+};
+
+function buildPrimPolygons(primitives: Primitive[], delta: number): PrimPolygon[] {
+  return primitives.map((prim) => {
     const N = prim.origins.length;
-    const _vx = vx && vx.length >= N ? vx : new Float64Array(N);
-    const _vy = vy && vy.length >= N ? vy : new Float64Array(N);
+    const vx = new Float64Array(N);
+    const vy = new Float64Array(N);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < N; i++) {
-      _vx[i] = prim.origins[i].x + prim.directions[i].x * prim.radii[i];
-      _vy[i] = prim.origins[i].y + prim.directions[i].y * prim.radii[i];
+      vx[i] = prim.origins[i].x + prim.directions[i].x * prim.radii[i];
+      vy[i] = prim.origins[i].y + prim.directions[i].y * prim.radii[i];
+      if (vx[i] < minX) minX = vx[i];
+      if (vx[i] > maxX) maxX = vx[i];
+      if (vy[i] < minY) minY = vy[i];
+      if (vy[i] > maxY) maxY = vy[i];
     }
-    // Point-in-polygon
-    let inside = false;
-    for (let i = 0, j = N - 1; i < N; j = i++) {
-      if (_vy[i] > py !== _vy[j] > py &&
-          px < ((_vx[j] - _vx[i]) * (py - _vy[i])) / (_vy[j] - _vy[i]) + _vx[i])
-        inside = !inside;
-    }
-    if (inside) return true;
-    // Proximity to polygon edges
-    for (let i = 0, j = N - 1; i < N; j = i++) {
-      const ax = _vx[j], ay = _vy[j], bx = _vx[i], by = _vy[i];
-      const ddx = bx - ax, ddy = by - ay;
-      const lenSq = ddx * ddx + ddy * ddy;
-      let t = lenSq > 1e-10 ? ((px - ax) * ddx + (py - ay) * ddy) / lenSq : 0;
-      t = Math.max(0, Math.min(1, t));
-      if (Math.hypot(px - (ax + t * ddx), py - (ay + t * ddy)) < delta) return true;
-    }
+    return { vx, vy, minX: minX - delta, maxX: maxX + delta, minY: minY - delta, maxY: maxY + delta };
+  });
+}
+
+function polyCovers(px: number, py: number, poly: PrimPolygon, delta: number): boolean {
+  if (px < poly.minX || px > poly.maxX || py < poly.minY || py > poly.maxY) return false;
+  const { vx, vy } = poly;
+  const N = vx.length;
+  let inside = false;
+  for (let i = 0, j = N - 1; i < N; j = i++) {
+    if (vy[i] > py !== vy[j] > py &&
+        px < ((vx[j] - vx[i]) * (py - vy[i])) / (vy[j] - vy[i]) + vx[i])
+      inside = !inside;
+  }
+  if (inside) return true;
+  for (let i = 0, j = N - 1; i < N; j = i++) {
+    const ax = vx[j], ay = vy[j], bx = vx[i], by = vy[i];
+    const ddx = bx - ax, ddy = by - ay;
+    const lenSq = ddx * ddx + ddy * ddy;
+    let t = lenSq > 1e-10 ? ((px - ax) * ddx + (py - ay) * ddy) / lenSq : 0;
+    t = Math.max(0, Math.min(1, t));
+    if (Math.hypot(px - (ax + t * ddx), py - (ay + t * ddy)) < delta) return true;
   }
   return false;
 }
 
-function primitiveCoverage(
+function coverageAndUncovered(
   samples: paper.Point[],
   primitives: Primitive[],
   delta = 5.0,
-): number {
-  if (samples.length === 0) return 1;
-  const maxN = primitives.reduce((m, p) => Math.max(m, p.origins.length), 0);
-  const vx = new Float64Array(maxN);
-  const vy = new Float64Array(maxN);
+): { coverage: number; uncovered: paper.Point[] } {
+  if (samples.length === 0) return { coverage: 1, uncovered: [] };
+  const polys = buildPrimPolygons(primitives, delta);
   let covered = 0;
+  const uncovered: paper.Point[] = [];
   for (const s of samples) {
-    if (primCovers(s.x, s.y, primitives, delta, vx, vy)) covered++;
+    let hit = false;
+    for (const poly of polys) {
+      if (polyCovers(s.x, s.y, poly, delta)) { hit = true; break; }
+    }
+    if (hit) covered++;
+    else uncovered.push(s);
   }
-  return covered / samples.length;
+  return { coverage: covered / samples.length, uncovered };
 }
 
 function pickNewSeeds(
