@@ -110,7 +110,7 @@ export function computeMedialSkeletonPoints(
     // Evaluate true coverage using fitted primitives (paper's E_coverage metric).
     // Called once per outer iteration — not inside NM where it would be too slow.
     const skeleton = constructMedialSkeleton(V, medialAxis, path);
-    const fitted = localPrimitiveFitting(path, skeleton);
+    const fitted = localPrimitiveFitting(path, skeleton, {}, flatBoundary);
     const trueCov = primitiveCoverage(boundarySamples, fitted.primitives);
 
     if (verbose) {

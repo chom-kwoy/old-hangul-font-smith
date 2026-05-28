@@ -44,10 +44,35 @@ type PrimitiveFittingOptions = {
   min_absolute_growth: number;
 };
 
+// All pre-allocated work buffers shared across every fitSinglePrimitive call.
+type ScratchBuffers = {
+  // Solver
+  cp: Float64Array; dp: Float64Array;
+  y: Float64Array; z: Float64Array;
+  u_vec: Float64Array; T_diag_adj: Float64Array;
+  d: Float64Array; rhs: Float64Array;
+  // Ray tests
+  tested: Uint32Array; genBox: { gen: number };
+  // Current origins/directions (size N)
+  origX: Float64Array; origY: Float64Array;
+  dirX: Float64Array; dirY: Float64Array;
+  // Ray-extent output (size N)
+  r_max: Float64Array;
+  // resamplePoints intermediate buffers
+  inflX: Float64Array; inflY: Float64Array;
+  tgtInflX: Float64Array; tgtInflY: Float64Array;
+  arcLen: Float64Array; // size N+1
+  tmpX: Float64Array; tmpY: Float64Array; // safe write targets for new origins
+  // Radii (avoids per-call allocation in fitSinglePrimitive)
+  r: Float64Array; r_tgt: Float64Array; r_init: Float64Array;
+  newR: Float64Array; newRTgt: Float64Array;
+};
+
 export function localPrimitiveFitting(
   path: paper.CompoundPath,
   medialSkeleton: MedialAxisGraph,
   options: Partial<PrimitiveFittingOptions> = {},
+  prebuiltBoundary?: FlatBoundary,
 ): FittedMedialAxisGraph {
   const opts = {
     num_directions: options.num_directions ?? 128,
@@ -64,163 +89,130 @@ export function localPrimitiveFitting(
     primitives: [] as Primitive[],
   } as FittedMedialAxisGraph;
 
-  // 1. Analyze Topology to identify isolated vertices
-  const degree = new Int32Array(skeleton.points.length).fill(0);
-  for (const [idxA, idxB] of skeleton.segments) {
-    degree[idxA]++;
-    degree[idxB]++;
-  }
-
   // 2. Flatten boundary once for fast ray intersection throughout all primitives
-  const flatBoundary = buildFlatBoundary(path);
+  const flatBoundary = prebuiltBoundary ?? buildFlatBoundary(path);
 
   // 3. Prepare Optimization Buffers (Shared for all primitives)
-  // We use the same resolution N for both vertices and edges to reuse these buffers.
-  const SCRATCH_N = opts.num_directions;
-  const scratch = {
-    // Buffers for solveTridiagonal
-    cp: new Float64Array(SCRATCH_N),
-    dp: new Float64Array(SCRATCH_N),
-    // Buffers for solveCyclicTridiagonal
-    y: new Float64Array(SCRATCH_N),
-    z: new Float64Array(SCRATCH_N),
-    u_vec: new Float64Array(SCRATCH_N),
-    T_diag_adj: new Float64Array(SCRATCH_N),
-    d: new Float64Array(SCRATCH_N),
-    rhs: new Float64Array(SCRATCH_N),
-    // Shared ray-test buffer — generation counter avoids fill(0) between calls
-    tested: new Uint32Array(flatBoundary.count),
-    genBox: { gen: 0 },
+  const N = opts.num_directions;
+  const scratch: ScratchBuffers = {
+    cp: new Float64Array(N), dp: new Float64Array(N),
+    y: new Float64Array(N), z: new Float64Array(N),
+    u_vec: new Float64Array(N), T_diag_adj: new Float64Array(N),
+    d: new Float64Array(N), rhs: new Float64Array(N),
+    tested: new Uint32Array(flatBoundary.count), genBox: { gen: 0 },
+    origX: new Float64Array(N), origY: new Float64Array(N),
+    dirX: new Float64Array(N), dirY: new Float64Array(N),
+    r_max: new Float64Array(N),
+    inflX: new Float64Array(N), inflY: new Float64Array(N),
+    tgtInflX: new Float64Array(N), tgtInflY: new Float64Array(N),
+    arcLen: new Float64Array(N + 1),
+    tmpX: new Float64Array(N), tmpY: new Float64Array(N),
+    r: new Float64Array(N), r_tgt: new Float64Array(N),
+    r_init: new Float64Array(N),
+    newR: new Float64Array(N), newRTgt: new Float64Array(N),
   };
 
-  // --- Process 1: Free-standing Vertices (Generalized Disks) ---
-  // "We don't need to extract an envelope for a vertex that is part of an edge"
-  const circleDirections = generateUniformDirections(opts.num_directions);
+  // Pre-compute uniform circle directions for vertex primitives (once)
+  const circDirX = new Float64Array(N);
+  const circDirY = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    const rad = (i / N) * 2 * Math.PI;
+    circDirX[i] = Math.cos(rad);
+    circDirY[i] = Math.sin(rad);
+  }
 
+  // --- Process 1: Free-standing Vertices (Generalized Disks) ---
   for (let i = 0; i < skeleton.points.length; i++) {
     const center = skeleton.points[i];
-    // For a vertex, all rays originate from the center
-    const origins = Array(opts.num_directions).fill(center);
+    for (let j = 0; j < N; j++) {
+      scratch.origX[j] = center.x;
+      scratch.origY[j] = center.y;
+    }
+    scratch.dirX.set(circDirX);
+    scratch.dirY.set(circDirY);
 
-    const fitted = fitSinglePrimitive(
-      origins,
-      circleDirections,
-      flatBoundary,
-      opts,
-      scratch,
-    );
-
-    skeleton.primitives.push({
-      type: "point",
-      elementIdx: i,
-      origins: fitted.origins,
-      directions: fitted.directions,
-      radii: fitted.radii,
-    });
+    const fitted = fitSinglePrimitive(N, flatBoundary, opts, scratch);
+    skeleton.primitives.push({ type: "point", elementIdx: i, ...fitted });
   }
 
   // --- Process 2: Medial Edges (Generalized Capsules/Slabs) ---
-  // "Extract a 2d enveloping 'mesh' that is equally spaced around the edge"
-
   for (let i = 0; i < skeleton.segments.length; i++) {
     const [idxA, idxB] = skeleton.segments[i];
     const pA = skeleton.points[idxA];
     const pB = skeleton.points[idxB];
-
     const cp = skeleton.controlPoints?.[i];
-    // Generate capsule discretization (Origins + Directions) specific to this segment
-    const { origins, directions } = generateCapsuleDiscretization(
-      new paper.Point(pA),
-      new paper.Point(pB),
-      opts.num_directions,
-      cp?.[0],
-      cp?.[1],
+
+    generateCapsuleDiscretization(
+      pA.x, pA.y, pB.x, pB.y, N,
+      scratch.origX, scratch.origY, scratch.dirX, scratch.dirY,
+      cp?.[0], cp?.[1],
     );
 
-    const fitted = fitSinglePrimitive(
-      origins,
-      directions,
-      flatBoundary,
-      opts,
-      scratch,
-    );
-
-    skeleton.primitives.push({
-      type: "edge",
-      elementIdx: i,
-      origins: fitted.origins,
-      directions: fitted.directions,
-      radii: fitted.radii,
-    });
+    const fitted = fitSinglePrimitive(N, flatBoundary, opts, scratch);
+    skeleton.primitives.push({ type: "edge", elementIdx: i, ...fitted });
   }
 
   return skeleton;
 }
 
-// --- Core Optimization Routine (Reused for Point & Edge) ---
+// --- Core Optimization Routine ---
 
-function resamplePoints(
-  origins: paper.Point[],
-  directions: paper.Point[],
-  r: Float64Array,
-  r_tgt: Float64Array,
-): {
-  origins: paper.Point[];
-  directions: paper.Point[];
-  r: Float64Array;
-  r_tgt: Float64Array;
-} {
-  const N = origins.length;
+function resamplePoints(N: number, scratch: ScratchBuffers): void {
+  const {
+    origX, origY, dirX, dirY,
+    inflX, inflY, tgtInflX, tgtInflY,
+    arcLen, tmpX, tmpY,
+    r, r_tgt, newR, newRTgt,
+  } = scratch;
 
-  // Expand to flat arrays — avoids ~1000 paper.Point intermediates per call
-  const inflX = new Float64Array(N);
-  const inflY = new Float64Array(N);
-  const tgtInflX = new Float64Array(N);
-  const tgtInflY = new Float64Array(N);
+  // Phase 1: inflated positions from current origins/directions/radii
   for (let i = 0; i < N; i++) {
-    inflX[i] = origins[i].x + directions[i].x * r[i];
-    inflY[i] = origins[i].y + directions[i].y * r[i];
-    tgtInflX[i] = origins[i].x + directions[i].x * r_tgt[i];
-    tgtInflY[i] = origins[i].y + directions[i].y * r_tgt[i];
+    inflX[i] = origX[i] + dirX[i] * r[i];
+    inflY[i] = origY[i] + dirY[i] * r[i];
+    tgtInflX[i] = origX[i] + dirX[i] * r_tgt[i];
+    tgtInflY[i] = origY[i] + dirY[i] * r_tgt[i];
   }
 
-  // Build cumulative arc-length from inflated positions (closed curve)
-  const cumLen = new Float64Array(N + 1);
+  // Phase 2: cumulative arc-length along inflated contour (closed)
+  arcLen[0] = 0;
   for (let i = 0; i < N; i++) {
     const ni = (i + 1) % N;
     const dx = inflX[ni] - inflX[i], dy = inflY[ni] - inflY[i];
-    cumLen[i + 1] = cumLen[i] + Math.sqrt(dx * dx + dy * dy);
+    arcLen[i + 1] = arcLen[i] + Math.sqrt(dx * dx + dy * dy);
   }
-  const totalLen = cumLen[N];
-  const spacing = totalLen / N;
+  const spacing = arcLen[N] / N;
 
-  const newOrigins: paper.Point[] = [];
-  const newDirections: paper.Point[] = [];
-  const newR = new Float64Array(N);
-  const newRTgt = new Float64Array(N);
-
+  // Phase 3: resample uniformly along the inflated contour.
+  // New origins go to tmpX/tmpY (can't overwrite origX/origY mid-loop since we read them).
+  // New directions go directly to dirX/dirY (dirX/dirY not read after Phase 1).
+  // New radii go to newR/newRTgt (r/r_tgt read via interpolation).
   let segIdx = 0;
   for (let k = 0; k < N; k++) {
     const targetLen = k * spacing;
-    while (segIdx < N && cumLen[segIdx + 1] <= targetLen) segIdx++;
+    while (segIdx < N && arcLen[segIdx + 1] <= targetLen) segIdx++;
 
     const next = (segIdx + 1) % N;
-    const segLen = cumLen[segIdx + 1] - cumLen[segIdx];
-    const t = segLen > 1e-10 ? (targetLen - cumLen[segIdx]) / segLen : 0;
+    const segLen = arcLen[segIdx + 1] - arcLen[segIdx];
+    const t = segLen > 1e-10 ? (targetLen - arcLen[segIdx]) / segLen : 0;
     const s = 1 - t;
 
-    const noX = origins[segIdx].x * s + origins[next].x * t;
-    const noY = origins[segIdx].y * s + origins[next].y * t;
-    newOrigins.push(new paper.Point(noX, noY));
+    const noX = origX[segIdx] * s + origX[next] * t;
+    const noY = origY[segIdx] * s + origY[next] * t;
+    tmpX[k] = noX;
+    tmpY[k] = noY;
 
     const npX = inflX[segIdx] * s + inflX[next] * t;
     const npY = inflY[segIdx] * s + inflY[next] * t;
     const dX = npX - noX, dY = npY - noY;
     const dLen = Math.sqrt(dX * dX + dY * dY);
     newR[k] = dLen;
-    newDirections.push(dLen > 1e-10
-      ? new paper.Point(dX / dLen, dY / dLen)
-      : new paper.Point(1, 0));
+    if (dLen > 1e-10) {
+      dirX[k] = dX / dLen;
+      dirY[k] = dY / dLen;
+    } else {
+      dirX[k] = 1;
+      dirY[k] = 0;
+    }
 
     const ntX = tgtInflX[segIdx] * s + tgtInflX[next] * t;
     const ntY = tgtInflY[segIdx] * s + tgtInflY[next] * t;
@@ -228,75 +220,52 @@ function resamplePoints(
     newRTgt[k] = Math.sqrt(tdX * tdX + tdY * tdY);
   }
 
-  return {
-    origins: newOrigins,
-    directions: newDirections,
-    r: newR,
-    r_tgt: newRTgt,
-  };
+  origX.set(tmpX);
+  origY.set(tmpY);
+  r.set(newR);
+  r_tgt.set(newRTgt);
 }
 
 function fitSinglePrimitive(
-  origins: paper.Point[],
-  directions: paper.Point[],
+  N: number,
   boundary: FlatBoundary,
-  opts: {
-    num_directions: number;
-    w_expansion: number;
-    w_penalty: number;
-    max_progressions: number;
-    expansion_rate: number;
-    max_alternating_iters: number;
-    min_absolute_growth: number;
-  },
-  scratch: {
-    cp: Float64Array;
-    dp: Float64Array;
-    T_diag_adj: Float64Array;
-    u_vec: Float64Array;
-    y: Float64Array;
-    z: Float64Array;
-    d: Float64Array;
-    rhs: Float64Array;
-    tested: Uint32Array;
-    genBox: { gen: number };
-  },
-): { origins: paper.Point[]; directions: paper.Point[]; radii: number[] } {
+  opts: PrimitiveFittingOptions,
+  scratch: ScratchBuffers,
+): { origins: Vec2D[]; directions: Vec2D[]; radii: number[] } {
+  const { origX, origY, r, r_tgt, r_init, r_max } = scratch;
 
-  // 1. Compute Max Extents (r_max)
-  let curOrigins = origins;
-  let curDirections = directions;
-  let r_max = computeMaxExtents(curOrigins, curDirections, boundary, scratch.tested, scratch.genBox);
+  // 1. Compute max extents
+  computeMaxExtents(N, scratch, boundary);
 
-  // 2. Initialize Radii — per-ray inscribed radius from each origin to S
-  const r = new Float64Array(opts.num_directions);
-  for (let i = 0; i < opts.num_directions; i++) {
-    const inscribed = nearestDistFlatBoundary(
-      curOrigins[i].x,
-      curOrigins[i].y,
-      boundary,
-    );
-    r[i] = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
+  // 2. Initialize radii from inscribed distance at each origin.
+  // Fast-path: vertex primitives have all origins at the same point — call once.
+  if (origX[0] === origX[N >> 1] && origY[0] === origY[N >> 1]) {
+    const inscribed = nearestDistFlatBoundary(origX[0], origY[0], boundary);
+    r.fill(inscribed > 1e-4 ? inscribed * 0.99 : 1e-3);
+  } else {
+    for (let i = 0; i < N; i++) {
+      const inscribed = nearestDistFlatBoundary(origX[i], origY[i], boundary);
+      r[i] = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
+    }
   }
-  const r_tgt = new Float64Array(r);
-  const r_init = new Float64Array(r); // store initial radii for additive growth
+  r_tgt.set(r);
+  r_init.set(r);
 
   // 3. Progressive Expansion
   for (let prog = 0; prog < opts.max_progressions; prog++) {
-    // Increase target additively by 10% of initial radius (paper Sec. 5.2)
-    for (let k = 0; k < opts.num_directions; k++) {
+    for (let k = 0; k < N; k++) {
       r_tgt[k] = Math.max(
         r_tgt[k] + 0.1 * r_init[k],
-        r_tgt[k] + opts.min_absolute_growth, // floor for near-zero initial radii
+        r_tgt[k] + opts.min_absolute_growth,
       );
     }
 
-    // Solver Loop
+    // Solver loop
     for (let iter = 0; iter < opts.max_alternating_iters; iter++) {
       scratch.d.fill(2 + opts.w_expansion);
       let constraintsActive = false;
 
-      for (let j = 0; j < opts.num_directions; j++) {
+      for (let j = 0; j < N; j++) {
         scratch.rhs[j] = opts.w_expansion * r_tgt[j];
         if (r[j] > r_max[j]) {
           constraintsActive = true;
@@ -305,30 +274,24 @@ function fitSinglePrimitive(
         }
       }
 
-      // Solve (L + wI + P)r = RHS
-      // L is always cyclic tridiagonal for a closed boundary (disk or capsule)
       solveCyclicTridiagonal(scratch.d, -1, -1, scratch.rhs, r, scratch);
-
       if (!constraintsActive) break;
     }
 
-    if (prog % 3 == 0 && prog < opts.max_progressions - 1) {
-      const resampled = resamplePoints(curOrigins, curDirections, r, r_tgt);
-      curOrigins = resampled.origins;
-      curDirections = resampled.directions;
-      r.set(resampled.r);
-      r_tgt.set(resampled.r_tgt);
-
-      // recompute max extents because the origins and directions have changed
-      r_max = computeMaxExtents(curOrigins, curDirections, boundary, scratch.tested, scratch.genBox);
+    if (prog % 3 === 0 && prog < opts.max_progressions - 1) {
+      resamplePoints(N, scratch);
+      computeMaxExtents(N, scratch, boundary);
     }
   }
 
-  return {
-    origins: curOrigins,
-    directions: curDirections,
-    radii: Array.from(r),
-  };
+  // Copy flat buffers into Vec2D[] for the public Primitive interface
+  const origins: Vec2D[] = new Array(N);
+  const directions: Vec2D[] = new Array(N);
+  for (let i = 0; i < N; i++) {
+    origins[i] = { x: scratch.origX[i], y: scratch.origY[i] };
+    directions[i] = { x: scratch.dirX[i], y: scratch.dirY[i] };
+  }
+  return { origins, directions, radii: Array.from(r) };
 }
 
 // --- Geometry Helpers ---
@@ -354,154 +317,138 @@ function cubicBezierTangent(
 }
 
 /**
- * Generates origins and directions for a "Capsule" primitive around a segment.
- * When cp1/cp2 are supplied the bone follows a cubic Bezier instead of a chord,
- * with outward normals always perpendicular to the local tangent.
+ * Writes origins and directions for a capsule primitive into the provided
+ * Float64Arrays. When cp1/cp2 are supplied the bone follows a cubic Bezier.
+ * All angles computed in radians; no paper.Point allocations.
  */
 function generateCapsuleDiscretization(
-  pA: paper.Point,
-  pB: paper.Point,
+  pAx: number, pAy: number,
+  pBx: number, pBy: number,
   N: number,
-  cp1?: Vec2D,
-  cp2?: Vec2D,
-) {
-  const origins: paper.Point[] = [];
-  const directions: paper.Point[] = [];
-
-  // Divide N samples into 4 parts: Side1, CapB, Side2, CapA
+  origX: Float64Array, origY: Float64Array,
+  dirX: Float64Array, dirY: Float64Array,
+  cp1?: Vec2D, cp2?: Vec2D,
+): void {
   const quarter = Math.floor(N / 4);
   const remainder = N - quarter * 4;
   const nSide = quarter + Math.floor(remainder / 2);
   const nCap = quarter;
+  let j = 0;
 
   if (cp1 && cp2) {
-    // Bezier bone: tangent varies along the curve
-    const tanAtT = (t: number) => {
+    const pA: Vec2D = { x: pAx, y: pAy };
+    const pB: Vec2D = { x: pBx, y: pBy };
+
+    const unitTan = (t: number): Vec2D => {
       const raw = cubicBezierTangent(pA, cp1, cp2, pB, t);
       const len = Math.hypot(raw.x, raw.y);
       return len > 1e-8 ? { x: raw.x / len, y: raw.y / len } : { x: 1, y: 0 };
     };
-    const angleAtT = (t: number) => {
-      const tn = tanAtT(t);
-      return Math.atan2(tn.y, tn.x) * (180 / Math.PI);
-    };
 
-    const baseAngleA = angleAtT(0);
-    const baseAngleB = angleAtT(1);
+    const tanA = unitTan(0);
+    const tanB = unitTan(1);
+    const baseAngleA = Math.atan2(tanA.y, tanA.x);
+    const baseAngleB = Math.atan2(tanB.y, tanB.x);
 
-    // Section 1: Side A→B (+normal)
+    // Section 1: Side A→B (+90° normal to tangent)
     for (let i = 0; i < nSide; i++) {
       const t = nSide > 1 ? i / (nSide - 1) : 0;
       const pt = cubicBezierPoint(pA, cp1, cp2, pB, t);
-      const ang = (angleAtT(t) + 90) * (Math.PI / 180);
-      origins.push(new paper.Point(pt.x, pt.y));
-      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+      const tn = unitTan(t);
+      origX[j] = pt.x; origY[j] = pt.y;
+      dirX[j] = -tn.y; dirY[j] = tn.x;
+      j++;
     }
 
-    // Section 2: Cap B — fan from +90° to −90° of tangent at t=1
-    const startAngleB = baseAngleB + 90;
-    const endAngleB = baseAngleB - 90;
+    // Section 2: Cap B — fan from +90° to −90° around tangent at t=1
+    const startB = baseAngleB + Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
-      const t = (i + 1) / (nCap + 1);
-      const ang = (startAngleB + t * (endAngleB - startAngleB)) * (Math.PI / 180);
-      origins.push(pB);
-      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+      const ang = startB - ((i + 1) / (nCap + 1)) * Math.PI;
+      origX[j] = pBx; origY[j] = pBy;
+      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      j++;
     }
 
-    // Section 3: Side B→A (−normal)
+    // Section 3: Side B→A (−90° normal)
     for (let i = 0; i < nSide; i++) {
       const t = nSide > 1 ? i / (nSide - 1) : 0;
       const pt = cubicBezierPoint(pA, cp1, cp2, pB, 1 - t);
-      const ang = (angleAtT(1 - t) + 270) * (Math.PI / 180); // +270° = −90° = opposite normal
-      origins.push(new paper.Point(pt.x, pt.y));
-      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+      const tn = unitTan(1 - t);
+      origX[j] = pt.x; origY[j] = pt.y;
+      dirX[j] = tn.y; dirY[j] = -tn.x;
+      j++;
     }
 
-    // Section 4: Cap A — fan from −90° to −270° of tangent at t=0
-    const startAngleA = baseAngleA - 90;
-    const endAngleA = baseAngleA - 270;
+    // Section 4: Cap A — fan from −90° to −270° around tangent at t=0
+    const startA = baseAngleA - Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
-      const t = (i + 1) / (nCap + 1);
-      const ang = (startAngleA + t * (endAngleA - startAngleA)) * (Math.PI / 180);
-      origins.push(pA);
-      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+      const ang = startA - ((i + 1) / (nCap + 1)) * Math.PI;
+      origX[j] = pAx; origY[j] = pAy;
+      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      j++;
     }
   } else {
-    // Straight-line bone (original behaviour)
-    const v = pB.subtract(pA);
-    const baseAngle = v.angle;
-    const normalAngle = baseAngle + 90;
-    const normalRad = normalAngle * (Math.PI / 180);
-    const normal = new paper.Point(Math.cos(normalRad), Math.sin(normalRad));
+    // Straight-line bone
+    const vx = pBx - pAx, vy = pBy - pAy;
+    const vLen = Math.sqrt(vx * vx + vy * vy);
+    const nX = vLen > 1e-10 ? -vy / vLen : 0;  // +90° normal
+    const nY = vLen > 1e-10 ? vx / vLen : 1;
+    const baseAngle = Math.atan2(vy, vx);
 
+    // Section 1: Side A→B
     for (let i = 0; i < nSide; i++) {
       const t = i / (nSide - 1 || 1);
-      origins.push(pA.add(v.multiply(t)));
-      directions.push(normal);
+      origX[j] = pAx + vx * t; origY[j] = pAy + vy * t;
+      dirX[j] = nX; dirY[j] = nY;
+      j++;
     }
 
-    const startAngleB = baseAngle + 90;
-    const endAngleB = baseAngle - 90;
+    // Section 2: Cap B
+    const startB = baseAngle + Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
-      const t = (i + 1) / (nCap + 1);
-      const ang = (startAngleB + t * (endAngleB - startAngleB)) * (Math.PI / 180);
-      origins.push(pB);
-      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+      const ang = startB - ((i + 1) / (nCap + 1)) * Math.PI;
+      origX[j] = pBx; origY[j] = pBy;
+      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      j++;
     }
 
+    // Section 3: Side B→A
     for (let i = 0; i < nSide; i++) {
       const t = i / (nSide - 1 || 1);
-      origins.push(pB.subtract(v.multiply(t)));
-      directions.push(normal.multiply(-1));
+      origX[j] = pBx - vx * t; origY[j] = pBy - vy * t;
+      dirX[j] = -nX; dirY[j] = -nY;
+      j++;
     }
 
-    const startAngleA = baseAngle - 90;
-    const endAngleA = baseAngle - 270;
+    // Section 4: Cap A
+    const startA = baseAngle - Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
-      const t = (i + 1) / (nCap + 1);
-      const ang = (startAngleA + t * (endAngleA - startAngleA)) * (Math.PI / 180);
-      origins.push(pA);
-      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+      const ang = startA - ((i + 1) / (nCap + 1)) * Math.PI;
+      origX[j] = pAx; origY[j] = pAy;
+      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      j++;
     }
   }
-
-  return { origins, directions };
-}
-
-function generateUniformDirections(n: number): paper.Point[] {
-  const directions: paper.Point[] = [];
-  for (let i = 0; i < n; i++) {
-    const angle = (i / n) * 360;
-    const rad = (angle * Math.PI) / 180;
-    directions.push(new paper.Point(Math.cos(rad), Math.sin(rad)));
-  }
-  return directions;
 }
 
 /**
- * Computes max extent for each ray defined by (origin[i], direction[i]).
+ * Computes max ray extent for each sample, writing results into scratch.r_max.
  */
 function computeMaxExtents(
-  origins: paper.Point[],
-  directions: paper.Point[],
+  N: number,
+  scratch: ScratchBuffers,
   boundary: FlatBoundary,
-  tested: Uint32Array,
-  genBox: { gen: number },
-): number[] {
-  return directions.map((dir, i) => {
-    return rayIntersectFlatBoundary(
-      origins[i].x,
-      origins[i].y,
-      dir.x,
-      dir.y,
-      boundary,
-      tested,
-      ++genBox.gen,
+): void {
+  const { origX, origY, dirX, dirY, r_max, tested, genBox } = scratch;
+  for (let i = 0; i < N; i++) {
+    r_max[i] = rayIntersectFlatBoundary(
+      origX[i], origY[i], dirX[i], dirY[i],
+      boundary, tested, ++genBox.gen,
     );
-  });
+  }
 }
 
-// --- Solver Functions (Unchanged logic, just re-included for completeness) ---
+// --- Solver Functions ---
 
 function solveCyclicTridiagonal(
   d: Float64Array,
