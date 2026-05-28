@@ -637,10 +637,15 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       }
 
       // Junction collinearity metric: for every degree-≥3 vertex P, for each
-      // arm PA, compute min over all other arms PB of
-      //   perp_dist(A, line_through_PB) / |PA|
-      // then take the min over arms. Report the min over all such junctions.
-      // Low value = two arms nearly collinear → potentially redundant edge.
+      // arm PA, compute the minimum over all other arms PB of the perpendicular
+      // distance from A to the *outward ray* from P through B, divided by |PA|.
+      // Using the outward ray (not the full line) means anti-parallel arms — the
+      // two bar arms of a valid T-junction — do not register as collinear: when
+      // dot(PA, PB) ≤ 0, the foot of the perpendicular falls behind P, so the
+      // closest point on the ray is P itself and the ratio is 1.  Only arms that
+      // point in the same forward half-plane can yield a small ratio.
+      // Low value = some pair of co-directional arms is nearly collinear →
+      // potentially redundant junction edge.
       {
         // Build adjacency: vertex → list of neighbour indices
         const nbrs: number[][] = Array.from(
@@ -668,8 +673,8 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             const armLen = Math.hypot(ax, ay);
             if (armLen < 1e-6) continue;
 
-            // min perpendicular distance from A to any other arm's line through P
-            let minPerpDist = Infinity;
+            // min ratio over other arms, using outward-ray distance
+            let minRatio = Infinity;
             for (const b of nbrs[p]) {
               if (b === a) continue;
               const pb = fitted.points[b];
@@ -677,13 +682,17 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
                 by = pb.y - pp.y;
               const bLen = Math.hypot(bx, by);
               if (bLen < 1e-6) continue;
-              // perp dist = |cross(A-P, B-P_dir)| = |(ax*by - ay*bx)| / bLen
-              const perp = Math.abs(ax * by - ay * bx) / bLen;
-              if (perp < minPerpDist) minPerpDist = perp;
+              const dot = ax * bx + ay * by;
+              // If dot ≤ 0, A is in the backward hemisphere of ray PB;
+              // closest point on the outward ray is P → distance = armLen → ratio = 1.
+              const ratio =
+                dot <= 0
+                  ? 1.0
+                  : Math.abs(ax * by - ay * bx) / (bLen * armLen);
+              if (ratio < minRatio) minRatio = ratio;
             }
 
-            const ratio = minPerpDist / armLen;
-            if (ratio < junctionMin) junctionMin = ratio;
+            if (minRatio < junctionMin) junctionMin = minRatio;
           }
 
           if (junctionMin < worstJunctionRatio) {
@@ -696,14 +705,14 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           console.log(
             `  junction collinearity: ${worstJunctionRatio.toFixed(3)}  (vertex ${worstJunctionVertex})`,
           );
-          if (worstJunctionRatio < 0.01) {
+          if (worstJunctionRatio < 0.3) {
             console.log(
               `  segments: ${fitted.segments.map(([u, v], i) => `${i}:[${u}->${v} (${fitted.points[u].x.toFixed(0)},${fitted.points[u].y.toFixed(0)})→(${fitted.points[v].x.toFixed(0)},${fitted.points[v].y.toFixed(0)})]`).join("  ")}`,
             );
           }
           check(
-            "worst junction collinearity >= 0.01",
-            worstJunctionRatio >= 0.01,
+            "junction collinearity ≥ 0.3",
+            worstJunctionRatio >= 0.3,
             `${worstJunctionRatio.toFixed(3)}`,
           );
         }
