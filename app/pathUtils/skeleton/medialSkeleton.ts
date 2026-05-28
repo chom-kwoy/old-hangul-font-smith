@@ -226,12 +226,18 @@ export function constructMedialSkeleton(
     const chord = Math.hypot(pB.x - pA.x, pB.y - pA.y);
     let txA = 0, tyA = 0, txB = 0, tyB = 0;
     if (rawPath.length >= 2) {
-      // Departure at pA: direction from pA toward the second raw node.
-      const p1 = rawPoints[rawPath[1]];
+      // Use a look-ahead of up to 3 raw-axis hops when computing the departure
+      // and arrival tangents.  A single hop (rawPath[1]) is only ~5–15 px from
+      // a junction node, so local triangulation jitter is amplified into a large
+      // bezier bulge when scaled by chord/3.  Three hops provide a stable
+      // base-line while still capturing genuine path curvature near the endpoints.
+      const LA = 3;
+      const kA = Math.min(rawPath.length - 1, LA);
+      const kB = Math.max(0, rawPath.length - 1 - LA);
+      const p1 = rawPoints[rawPath[kA]];
       const la = Math.hypot(p1.x - pA.x, p1.y - pA.y);
       if (la > 1e-6) { txA = (p1.x - pA.x) / la; tyA = (p1.y - pA.y) / la; }
-      // Arrival at pB: direction from second-to-last raw node toward pB.
-      const pK = rawPoints[rawPath[rawPath.length - 2]];
+      const pK = rawPoints[rawPath[kB]];
       const lb = Math.hypot(pB.x - pK.x, pB.y - pK.y);
       if (lb > 1e-6) { txB = (pB.x - pK.x) / lb; tyB = (pB.y - pK.y) / lb; }
     } else if (chord > 1e-6) {
