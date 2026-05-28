@@ -15,9 +15,26 @@ import {
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
 import { Vec2D } from "@/app/utils/types";
 
-// Energy weights (paper Sec. 5.3)
+// Energy weights (paper Sec. 5.3) — used as defaults for SkeletonPointsOptions.
 const C1 = 1;     // centrality
 const C2 = 1e-3;  // count — penalises excess vertices (paper value)
+
+export type SkeletonPointsOptions = {
+  /** Maximum outer (NM) iterations. Default: 12. */
+  maxOuterIter: number;
+  /** Minimum NM iterations per inner call. Default: 50. */
+  nmItersMin: number;
+  /** NM iterations added per free-seed dimension. Default: 20. */
+  nmItersPerDim: number;
+  /** NM eval count threshold before starting to add extra seeds. Default: 50. */
+  growthStart: number;
+  /** Base number of new seeds added per growth step. Default: 1. */
+  nNew: number;
+  /** Energy weight for centrality term (paper §5.3). Default: 1. */
+  c1: number;
+  /** Energy weight for seed-count penalty (paper §5.3). Default: 1e-3. */
+  c2: number;
+};
 
 export type SkeletonIterCallback = (
   iter: number,    // iteration index; MAX_OUTER = final state after loop
@@ -38,7 +55,18 @@ export function computeMedialSkeletonPoints(
   _tolerance: number = 3.0, // eslint-disable-line @typescript-eslint/no-unused-vars
   verbose: boolean = false,
   onIteration?: SkeletonIterCallback,
+  options: Partial<SkeletonPointsOptions> = {},
 ): paper.Point[] {
+  const opts: SkeletonPointsOptions = {
+    maxOuterIter:  options.maxOuterIter  ?? 12,
+    nmItersMin:    options.nmItersMin    ?? 50,
+    nmItersPerDim: options.nmItersPerDim ?? 20,
+    growthStart:   options.growthStart   ?? 50,
+    nNew:          options.nNew          ?? 1,
+    c1:            options.c1            ?? C1,
+    c2:            options.c2            ?? C2,
+  };
+
   const { points: boundarySamples } = sampleBoundary(path, { step: 10 });
   const flatBoundary = buildFlatBoundary(path);
 
@@ -67,18 +95,13 @@ export function computeMedialSkeletonPoints(
   }
 
   // Incremental outer loop
-  const MAX_OUTER = 12;          // max outer iterations
-  const NM_ITERS_MIN = 50;       // minimum NM iterations per inner call
-  const NM_ITERS_PER_DIM = 20;   // NM iterations per free-seed dimension
-  const GROWTH_START = 50;       // start adding n>1 vertices after this many NM evals
-  const N_NEW = 1;         // base vertices to add per growth step
   let nmEvalCount = 0;
   let lastCovFraction = 0;
 
   // Frozen vertices from previous NM runs; only V_new is optimized each round
   let frozenV: paper.Point[] = [];
 
-  for (let outerIter = 0; outerIter < MAX_OUTER; outerIter++) {
+  for (let outerIter = 0; outerIter < opts.maxOuterIter; outerIter++) {
     const freeV = V.slice(frozenV.length); // only optimize the unfrozen suffix
 
     // Step 10: Nelder-Mead over freeV (flat x array: [x0,y0, x1,y1, ...])
@@ -96,10 +119,11 @@ export function computeMedialSkeletonPoints(
         return computeEnergyPartial(
           projFrozen, inscribedFrozen,
           currentFree, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq,
+          opts.c1, opts.c2,
         );
       },
       x0,
-      { maxIterations: Math.max(NM_ITERS_MIN, x0.length * NM_ITERS_PER_DIM) },
+      { maxIterations: Math.max(opts.nmItersMin, x0.length * opts.nmItersPerDim) },
     );
 
     V = [...frozenV, ...flatToPoints(result.x)];
@@ -124,8 +148,8 @@ export function computeMedialSkeletonPoints(
     const willStop = trueCov >= 0.98 || uncovered.length === 0;
 
     const nNew = willStop ? 0 :
-      nmEvalCount >= GROWTH_START
-        ? N_NEW + (outerIter % 3 === 0 ? 1 : 0)
+      nmEvalCount >= opts.growthStart
+        ? opts.nNew + (outerIter % 3 === 0 ? 1 : 0)
         : 1;
 
     onIteration?.(outerIter, V.slice(), trueCov, covGain, nNew, nmEvalCount);
@@ -155,13 +179,15 @@ function computeEnergyPartial(
   medialAxisR: Float64Array,
   flatBoundary: FlatBoundary,
   normSq: number,
+  c1: number,
+  c2: number,
 ): number {
   const freeProjected = freeV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR));
   const projFree = freeProjected.map((r) => r.point);
   const inscribedFree = freeProjected.map((r) => r.inscribed);
   const projV = [...projFrozen, ...projFree];
   const inscribed = [...inscribedFrozen, ...inscribedFree];
-  return computeEnergyCore(projV, inscribed, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq);
+  return computeEnergyCore(projV, inscribed, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq, c1, c2);
 }
 
 
@@ -173,6 +199,8 @@ function computeEnergyCore(
   medialAxisR: Float64Array,
   _flatBoundary: FlatBoundary,
   normSq: number,
+  c1: number,
+  c2: number,
 ): number {
   if (projV.length === 0) return 0;
   const nSeeds = projV.length;
@@ -221,7 +249,7 @@ function computeEnergyCore(
     }
   }
 
-  return eCoverage + C1 * eCentrality + C2 * nSeeds;
+  return eCoverage + c1 * eCentrality + c2 * nSeeds;
 }
 
 // ---------------------------------------------------------------------------

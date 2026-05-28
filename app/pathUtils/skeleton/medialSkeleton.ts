@@ -9,6 +9,19 @@ import {
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { Vec2D } from "@/app/utils/types";
 
+export type SkeletonConstructionOptions = {
+  /** Maximum total output vertices (seeds + Steiner points). Default: 25. */
+  maxTotalVertices: number;
+  /** Maximum bisection depth for off-centre edges. Default: 4. */
+  maxBisectDepth: number;
+  /** Centrality ratio threshold below which an edge is off-centre. Default: 0.35. */
+  centreThreshold: number;
+  /** Centrality threshold used for Steiner sub-segment validity. Default: 0.25. */
+  centreThresholdValid: number;
+  /** Number of sample points along each edge for centrality checks. Default: 12. */
+  centreNSamp: number;
+};
+
 /**
  * Constructs the Medial Skeleton (M_S) from selected vertices (V) and the Raw Medial Axis (M).
  * Implements Section 5.1: Medial Skeleton Construction.
@@ -23,7 +36,16 @@ export function constructMedialSkeleton(
   rawMedialAxis: MedialAxisGraph,
   originalPath: paper.CompoundPath,
   enforceInsideEdges: boolean = false,
+  options: Partial<SkeletonConstructionOptions> = {},
 ): MedialAxisGraph {
+  const opts: SkeletonConstructionOptions = {
+    maxTotalVertices:      options.maxTotalVertices      ?? 25,
+    maxBisectDepth:        options.maxBisectDepth        ?? 4,
+    centreThreshold:       options.centreThreshold       ?? CENTRE_THRESHOLD,
+    centreThresholdValid:  options.centreThresholdValid  ?? CENTRE_THRESHOLD_VALID,
+    centreNSamp:           options.centreNSamp           ?? CENTRE_N_SAMP,
+  };
+
   // ---------------------------------------------------------
   // Pre-processing
   // ---------------------------------------------------------
@@ -207,8 +229,6 @@ export function constructMedialSkeleton(
   const newSegments: [number, number][] = [];
   const finalControlPoints: [Vec2D, Vec2D][] = [];
   const segmentSet = new Set<string>();
-  const MAX_TOTAL_VERTICES = 25;
-  const MAX_BISECT_DEPTH = 4;
 
   function addSegment(u: number, v: number, cp1: Vec2D, cp2: Vec2D): void {
     if (u === v) return;
@@ -300,8 +320,8 @@ export function constructMedialSkeleton(
 
   // Returns true if the bone curve from pA to pB (Bezier if cp given) stays inside the path.
   function isEdgeInside(pA: Vec2D, pB: Vec2D, cp1?: Vec2D, cp2?: Vec2D): boolean {
-    for (let k = 1; k < CENTRE_N_SAMP; k++) {
-      const { x, y } = evalBone(pA, pB, cp1, cp2, k / CENTRE_N_SAMP);
+    for (let k = 1; k < opts.centreNSamp; k++) {
+      const { x, y } = evalBone(pA, pB, cp1, cp2, k / opts.centreNSamp);
       if (!originalPath.contains(new paper.Point(x, y))) return false;
     }
     return true;
@@ -311,7 +331,7 @@ export function constructMedialSkeleton(
   // Steiner candidates are picked from rawPath itself (not from a fresh BFS),
   // so ring shapes whose two pair-paths share the same endpoints still produce
   // distinct Steiner nodes (one from each half of the raw ring).
-  function emitEdge(rawPath: number[], depth: number, maxDepth = MAX_BISECT_DEPTH): void {
+  function emitEdge(rawPath: number[], depth: number, maxDepth = opts.maxBisectDepth): void {
     if (rawPath.length < 2) return;
     const rawA = rawPath[0];
     const rawB = rawPath[rawPath.length - 1];
@@ -324,12 +344,12 @@ export function constructMedialSkeleton(
     const pB = finalPoints[idxB];
     const [cp1, cp2] = bezierCPs(rawPath, pA, pB);
 
-    if (depth >= maxDepth || finalPoints.length >= MAX_TOTAL_VERTICES) {
+    if (depth >= maxDepth || finalPoints.length >= opts.maxTotalVertices) {
       addSegment(idxA, idxB, cp1, cp2);
       return;
     }
 
-    const centred = isEdgeCentred(pA, pB, flatBoundary, CENTRE_THRESHOLD, cp1, cp2);
+    const centred = isEdgeCentred(pA, pB, flatBoundary, opts.centreThreshold, opts.centreNSamp, cp1, cp2);
     const inside = !enforceInsideEdges || isEdgeInside(pA, pB, cp1, cp2);
 
     if (centred && inside) {
@@ -353,8 +373,8 @@ export function constructMedialSkeleton(
       if (ci <= 0 || ci >= rawPath.length - 1) continue;
       const candRaw = rawPath[ci];
       const candPt = new paper.Point(rawPoints[candRaw]);
-      const subCentred = isEdgeCentred(pA, candPt, flatBoundary, CENTRE_THRESHOLD_VALID) &&
-                         isEdgeCentred(candPt, pB, flatBoundary, CENTRE_THRESHOLD_VALID);
+      const subCentred = isEdgeCentred(pA, candPt, flatBoundary, opts.centreThresholdValid, opts.centreNSamp) &&
+                         isEdgeCentred(candPt, pB, flatBoundary, opts.centreThresholdValid, opts.centreNSamp);
       // Bisect if sub-segments are centrally valid, OR if the current edge exits the shape
       // (in which case any bisection is better than accepting an outside edge).
       if (subCentred || !inside) {
@@ -434,10 +454,10 @@ export function constructMedialSkeleton(
       return sB - sA;
     });
     for (const { rn } of rawTips) {
-      if (finalPoints.length >= MAX_TOTAL_VERTICES) break;
+      if (finalPoints.length >= opts.maxTotalVertices) break;
       const tipR = rawNodeR[rn];
       if (tipR >= origR * 0.65 &&
-          isEdgeCentred(rawPoints[rn], nbPt, flatBoundary) &&
+          isEdgeCentred(rawPoints[rn], nbPt, flatBoundary, opts.centreThreshold, opts.centreNSamp) &&
           (!enforceInsideEdges || isEdgeInside(rawPoints[rn], nbPt))) {
         finalPoints[seedOutIdx] = new paper.Point(rawPoints[rn]);
         directSnapRn = rn;
@@ -463,7 +483,7 @@ export function constructMedialSkeleton(
     // Always add UNLESS direct snap already reached that exact tip.
     // emitEdge bisects using actual path midpoints so curved arms stay centred.
     rawTips.sort((a, b) => b.dist - a.dist);
-    if (rawTips.length > 0 && finalPoints.length < MAX_TOTAL_VERTICES) {
+    if (rawTips.length > 0 && finalPoints.length < opts.maxTotalVertices) {
       const { rn: tipRn } = rawTips[0];
       if (tipRn !== directSnapRn) {
         getOrAddVertex(tipRn);
@@ -628,12 +648,13 @@ function evalBone(
 }
 
 function isEdgeCentred(
-  pA: Vec2D, pB: Vec2D, fb: FlatBoundary, threshold = CENTRE_THRESHOLD,
+  pA: Vec2D, pB: Vec2D, fb: FlatBoundary,
+  threshold = CENTRE_THRESHOLD, nSamp = CENTRE_N_SAMP,
   cp1?: Vec2D, cp2?: Vec2D,
 ): boolean {
   let minDist = Infinity, maxDist = 0;
-  for (let k = 0; k <= CENTRE_N_SAMP; k++) {
-    const { x, y } = evalBone(pA, pB, cp1, cp2, k / CENTRE_N_SAMP);
+  for (let k = 0; k <= nSamp; k++) {
+    const { x, y } = evalBone(pA, pB, cp1, cp2, k / nSamp);
     const d = nearestDistFlatBoundary(x, y, fb);
     if (d < minDist) minDist = d;
     if (d > maxDist) maxDist = d;

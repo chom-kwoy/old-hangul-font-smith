@@ -27,15 +27,17 @@ export interface Primitive {
   radii: number[];
 }
 
-type PrimitiveFittingOptions = {
+export type PrimitiveFittingOptions = {
   // The "resolution" of your generalized primitive. Must be even.
   num_directions: number;
   // How aggressively the balloon tries to expand towards the target size
   w_expansion: number;
   // The hardness of the walls (the "Brakes").
   w_penalty: number;
-  // The number of "growth stages."
+  // The number of "growth stages" in the coarse phase.
   max_progressions: number;
+  // The number of "growth stages" in the fine phase (after upsample).
+  fine_progressions: number;
   // The growth rate per stage.
   expansion_rate: number;
   // The "collision resolution" attempts per growth stage.
@@ -79,6 +81,7 @@ export function localPrimitiveFitting(
     w_expansion: options.w_expansion ?? 0.1,
     w_penalty: options.w_penalty ?? 10000,
     max_progressions: options.max_progressions ?? 25,
+    fine_progressions: options.fine_progressions ?? 10,
     expansion_rate: options.expansion_rate ?? 1.1,
     max_alternating_iters: options.max_alternating_iters ?? 15,
     min_absolute_growth: options.min_absolute_growth ?? 1.0,
@@ -226,9 +229,6 @@ function resamplePoints(N: number, scratch: ScratchBuffers): void {
   r_tgt.set(newRTgt);
 }
 
-// Number of fine-phase progressions after upsample from coarse.
-const FINE_PROGS = 10;
-
 // Expand balloon for `n` active directions, up to maxProgs progressions, with early
 // termination when growth stagnates. When doResample is true, redistributes origins
 // every 3 progressions; set false for the fine phase where origins are already placed.
@@ -369,7 +369,7 @@ function fitSinglePrimitive(
   // === FINE PHASE (N directions, a few more progressions) ===
   computeMaxExtents(N, scratch, boundary);
   for (let k = 0; k < N; k++) { r_tgt[k] = r[k]; r_init[k] = r[k]; }
-  runProgressions(N, FINE_PROGS, opts, scratch, boundary, false);
+  runProgressions(N, opts.fine_progressions, opts, scratch, boundary, false);
 
   // Copy flat buffers into Vec2D[] for the public Primitive interface.
   const origins: Vec2D[] = new Array(N);
