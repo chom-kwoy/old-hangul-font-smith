@@ -239,10 +239,9 @@ export function constructMedialSkeleton(
     finalControlPoints.push([cp1, cp2]);
   }
 
-  // Compute cubic Bezier interior control points for the edge pA→pB.
-  // Tangents are measured FROM the output vertices pA/pB toward the raw-path interior,
-  // so snapped or NM-displaced vertices get the correct departure/arrival directions.
-  function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
+  // Fallback: tangent-based control point estimation (arc-length look-ahead).
+  // Used when the LSQ system is ill-conditioned or the raw path is too short.
+  function tangentBasedBezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
     const chord = Math.hypot(pB.x - pA.x, pB.y - pA.y);
     let txA = 0, tyA = 0, txB = 0, tyB = 0;
     const n = rawPath.length;
@@ -315,6 +314,50 @@ export function constructMedialSkeleton(
     return [
       { x: pA.x + txA * s, y: pA.y + tyA * s },
       { x: pB.x - txB * s, y: pB.y - tyB * s },
+    ];
+  }
+
+  // Arc-length least-squares fit of cp1/cp2 to all raw path nodes.
+  // Minimises sum of squared distances from raw axis points to the cubic Bezier.
+  // Falls back to tangent-based estimation when the system is ill-conditioned.
+  function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
+    const n = rawPath.length;
+    // Need ≥4 nodes: endpoints (t=0,1) contribute A=B=0; n=3 gives a rank-1 system.
+    if (n < 4) return tangentBasedBezierCPs(rawPath, pA, pB);
+
+    // Arc-length parameterisation along the raw path
+    const arcLen = new Float64Array(n);
+    for (let i = 1; i < n; i++) {
+      const prev = rawPoints[rawPath[i - 1]], curr = rawPoints[rawPath[i]];
+      arcLen[i] = arcLen[i - 1] + Math.hypot(curr.x - prev.x, curr.y - prev.y);
+    }
+    const totalLen = arcLen[n - 1];
+    if (totalLen < 1e-6) return tangentBasedBezierCPs(rawPath, pA, pB);
+
+    // Accumulate normal-equation sums for the 2×2 system (x and y share the same matrix)
+    let sumA2 = 0, sumAB = 0, sumB2 = 0;
+    let sumARx = 0, sumBRx = 0, sumARy = 0, sumBRy = 0;
+    for (let i = 0; i < n; i++) {
+      const t = arcLen[i] / totalLen, u = 1 - t;
+      const Ai = 3 * u * u * t, Bi = 3 * u * t * t;
+      const pt = rawPoints[rawPath[i]];
+      const Rxi = pt.x - u * u * u * pA.x - t * t * t * pB.x;
+      const Ryi = pt.y - u * u * u * pA.y - t * t * t * pB.y;
+      sumA2 += Ai * Ai; sumAB += Ai * Bi; sumB2 += Bi * Bi;
+      sumARx += Ai * Rxi; sumBRx += Bi * Rxi;
+      sumARy += Ai * Ryi; sumBRy += Bi * Ryi;
+    }
+
+    // Cramer's rule; fall back if matrix is ill-conditioned (rank < 2)
+    const det = sumA2 * sumB2 - sumAB * sumAB;
+    if (!(Math.abs(det) >= 1e-10 * sumA2 * sumB2)) {
+      return tangentBasedBezierCPs(rawPath, pA, pB);
+    }
+    return [
+      { x: (sumARx * sumB2 - sumBRx * sumAB) / det,
+        y: (sumARy * sumB2 - sumBRy * sumAB) / det },
+      { x: (sumA2  * sumBRx - sumAB  * sumARx) / det,
+        y: (sumA2  * sumBRy - sumAB  * sumARy) / det },
     ];
   }
 
