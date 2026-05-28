@@ -38,6 +38,8 @@ export type PrimitiveFittingOptions = {
   max_progressions: number;
   // The number of "growth stages" in the fine phase (after upsample).
   fine_progressions: number;
+  // Divisor applied to num_directions to get the coarse resolution. Default: 4 (→ N/4).
+  coarse_divisor: number;
   // The growth rate per stage.
   expansion_rate: number;
   // The "collision resolution" attempts per growth stage.
@@ -49,25 +51,38 @@ export type PrimitiveFittingOptions = {
 // All pre-allocated work buffers shared across every fitSinglePrimitive call.
 type ScratchBuffers = {
   // Solver
-  cp: Float64Array; dp: Float64Array;
-  y: Float64Array; z: Float64Array;
-  u_vec: Float64Array; T_diag_adj: Float64Array;
-  d: Float64Array; rhs: Float64Array;
+  cp: Float64Array;
+  dp: Float64Array;
+  y: Float64Array;
+  z: Float64Array;
+  u_vec: Float64Array;
+  T_diag_adj: Float64Array;
+  d: Float64Array;
+  rhs: Float64Array;
   // Ray tests
-  tested: Uint32Array; genBox: { gen: number };
+  tested: Uint32Array;
+  genBox: { gen: number };
   // Current origins/directions (size N)
-  origX: Float64Array; origY: Float64Array;
-  dirX: Float64Array; dirY: Float64Array;
+  origX: Float64Array;
+  origY: Float64Array;
+  dirX: Float64Array;
+  dirY: Float64Array;
   // Ray-extent output (size N)
   r_max: Float64Array;
   // resamplePoints intermediate buffers
-  inflX: Float64Array; inflY: Float64Array;
-  tgtInflX: Float64Array; tgtInflY: Float64Array;
+  inflX: Float64Array;
+  inflY: Float64Array;
+  tgtInflX: Float64Array;
+  tgtInflY: Float64Array;
   arcLen: Float64Array; // size N+1
-  tmpX: Float64Array; tmpY: Float64Array; // safe write targets for new origins
+  tmpX: Float64Array;
+  tmpY: Float64Array; // safe write targets for new origins
   // Radii (avoids per-call allocation in fitSinglePrimitive)
-  r: Float64Array; r_tgt: Float64Array; r_init: Float64Array;
-  newR: Float64Array; newRTgt: Float64Array;
+  r: Float64Array;
+  r_tgt: Float64Array;
+  r_init: Float64Array;
+  newR: Float64Array;
+  newRTgt: Float64Array;
 };
 
 export function localPrimitiveFitting(
@@ -81,7 +96,8 @@ export function localPrimitiveFitting(
     w_expansion: options.w_expansion ?? 0.1,
     w_penalty: options.w_penalty ?? 10000,
     max_progressions: options.max_progressions ?? 25,
-    fine_progressions: options.fine_progressions ?? 10,
+    fine_progressions: options.fine_progressions ?? 5,
+    coarse_divisor: options.coarse_divisor ?? 4,
     expansion_rate: options.expansion_rate ?? 1.1,
     max_alternating_iters: options.max_alternating_iters ?? 15,
     min_absolute_growth: options.min_absolute_growth ?? 1.0,
@@ -98,21 +114,33 @@ export function localPrimitiveFitting(
   // 3. Prepare Optimization Buffers (Shared for all primitives)
   const N = opts.num_directions;
   const scratch: ScratchBuffers = {
-    cp: new Float64Array(N), dp: new Float64Array(N),
-    y: new Float64Array(N), z: new Float64Array(N),
-    u_vec: new Float64Array(N), T_diag_adj: new Float64Array(N),
-    d: new Float64Array(N), rhs: new Float64Array(N),
-    tested: new Uint32Array(flatBoundary.count), genBox: { gen: 0 },
-    origX: new Float64Array(N), origY: new Float64Array(N),
-    dirX: new Float64Array(N), dirY: new Float64Array(N),
+    cp: new Float64Array(N),
+    dp: new Float64Array(N),
+    y: new Float64Array(N),
+    z: new Float64Array(N),
+    u_vec: new Float64Array(N),
+    T_diag_adj: new Float64Array(N),
+    d: new Float64Array(N),
+    rhs: new Float64Array(N),
+    tested: new Uint32Array(flatBoundary.count),
+    genBox: { gen: 0 },
+    origX: new Float64Array(N),
+    origY: new Float64Array(N),
+    dirX: new Float64Array(N),
+    dirY: new Float64Array(N),
     r_max: new Float64Array(N),
-    inflX: new Float64Array(N), inflY: new Float64Array(N),
-    tgtInflX: new Float64Array(N), tgtInflY: new Float64Array(N),
+    inflX: new Float64Array(N),
+    inflY: new Float64Array(N),
+    tgtInflX: new Float64Array(N),
+    tgtInflY: new Float64Array(N),
     arcLen: new Float64Array(N + 1),
-    tmpX: new Float64Array(N), tmpY: new Float64Array(N),
-    r: new Float64Array(N), r_tgt: new Float64Array(N),
+    tmpX: new Float64Array(N),
+    tmpY: new Float64Array(N),
+    r: new Float64Array(N),
+    r_tgt: new Float64Array(N),
     r_init: new Float64Array(N),
-    newR: new Float64Array(N), newRTgt: new Float64Array(N),
+    newR: new Float64Array(N),
+    newRTgt: new Float64Array(N),
   };
 
   // Pre-compute uniform circle directions for vertex primitives (once)
@@ -146,9 +174,17 @@ export function localPrimitiveFitting(
     const cp = skeleton.controlPoints?.[i];
 
     generateCapsuleDiscretization(
-      pA.x, pA.y, pB.x, pB.y, N,
-      scratch.origX, scratch.origY, scratch.dirX, scratch.dirY,
-      cp?.[0], cp?.[1],
+      pA.x,
+      pA.y,
+      pB.x,
+      pB.y,
+      N,
+      scratch.origX,
+      scratch.origY,
+      scratch.dirX,
+      scratch.dirY,
+      cp?.[0],
+      cp?.[1],
     );
 
     const fitted = fitSinglePrimitive(N, flatBoundary, opts, scratch);
@@ -162,10 +198,21 @@ export function localPrimitiveFitting(
 
 function resamplePoints(N: number, scratch: ScratchBuffers): void {
   const {
-    origX, origY, dirX, dirY,
-    inflX, inflY, tgtInflX, tgtInflY,
-    arcLen, tmpX, tmpY,
-    r, r_tgt, newR, newRTgt,
+    origX,
+    origY,
+    dirX,
+    dirY,
+    inflX,
+    inflY,
+    tgtInflX,
+    tgtInflY,
+    arcLen,
+    tmpX,
+    tmpY,
+    r,
+    r_tgt,
+    newR,
+    newRTgt,
   } = scratch;
 
   // Phase 1: inflated positions from current origins/directions/radii
@@ -180,7 +227,8 @@ function resamplePoints(N: number, scratch: ScratchBuffers): void {
   arcLen[0] = 0;
   for (let i = 0; i < N; i++) {
     const ni = (i + 1) % N;
-    const dx = inflX[ni] - inflX[i], dy = inflY[ni] - inflY[i];
+    const dx = inflX[ni] - inflX[i],
+      dy = inflY[ni] - inflY[i];
     arcLen[i + 1] = arcLen[i] + Math.sqrt(dx * dx + dy * dy);
   }
   const spacing = arcLen[N] / N;
@@ -206,7 +254,8 @@ function resamplePoints(N: number, scratch: ScratchBuffers): void {
 
     const npX = inflX[segIdx] * s + inflX[next] * t;
     const npY = inflY[segIdx] * s + inflY[next] * t;
-    const dX = npX - noX, dY = npY - noY;
+    const dX = npX - noX,
+      dY = npY - noY;
     const dLen = Math.sqrt(dX * dX + dY * dY);
     newR[k] = dLen;
     if (dLen > 1e-10) {
@@ -219,7 +268,8 @@ function resamplePoints(N: number, scratch: ScratchBuffers): void {
 
     const ntX = tgtInflX[segIdx] * s + tgtInflX[next] * t;
     const ntY = tgtInflY[segIdx] * s + tgtInflY[next] * t;
-    const tdX = ntX - noX, tdY = ntY - noY;
+    const tdX = ntX - noX,
+      tdY = ntY - noY;
     newRTgt[k] = Math.sqrt(tdX * tdX + tdY * tdY);
   }
 
@@ -247,7 +297,10 @@ function runProgressions(
 
   for (let prog = 0; prog < maxProgs; prog++) {
     for (let k = 0; k < n; k++) {
-      r_tgt[k] = Math.max(r_tgt[k] + 0.1 * r_init[k], r_tgt[k] + opts.min_absolute_growth);
+      r_tgt[k] = Math.max(
+        r_tgt[k] + 0.1 * r_init[k],
+        r_tgt[k] + opts.min_absolute_growth,
+      );
     }
 
     for (let iter = 0; iter < opts.max_alternating_iters; iter++) {
@@ -262,8 +315,12 @@ function runProgressions(
         }
       }
       solveCyclicTridiagonal(
-        scratch.d.subarray(0, n), -1, -1,
-        scratch.rhs.subarray(0, n), r.subarray(0, n), scratch,
+        scratch.d.subarray(0, n),
+        -1,
+        -1,
+        scratch.rhs.subarray(0, n),
+        r.subarray(0, n),
+        scratch,
       );
       if (!constraintsActive) break;
     }
@@ -290,7 +347,19 @@ function runProgressions(
 // Resample the coarse balloon (Nc points) uniformly to N points by arc-length along
 // the inflated contour. Writes new origins, directions, and r into scratch[0..N-1].
 function upsampleBalloon(Nc: number, N: number, scratch: ScratchBuffers): void {
-  const { origX, origY, dirX, dirY, r, inflX, inflY, arcLen, tmpX, tmpY, newR } = scratch;
+  const {
+    origX,
+    origY,
+    dirX,
+    dirY,
+    r,
+    inflX,
+    inflY,
+    arcLen,
+    tmpX,
+    tmpY,
+    newR,
+  } = scratch;
 
   for (let i = 0; i < Nc; i++) {
     inflX[i] = origX[i] + dirX[i] * r[i];
@@ -299,7 +368,8 @@ function upsampleBalloon(Nc: number, N: number, scratch: ScratchBuffers): void {
   arcLen[0] = 0;
   for (let i = 0; i < Nc; i++) {
     const ni = (i + 1) % Nc;
-    const dx = inflX[ni] - inflX[i], dy = inflY[ni] - inflY[i];
+    const dx = inflX[ni] - inflX[i],
+      dy = inflY[ni] - inflY[i];
     arcLen[i + 1] = arcLen[i] + Math.sqrt(dx * dx + dy * dy);
   }
   const spacing = arcLen[Nc] / N;
@@ -315,7 +385,8 @@ function upsampleBalloon(Nc: number, N: number, scratch: ScratchBuffers): void {
     tmpY[k] = origY[segIdx] * s + origY[next] * t;
     const npX = inflX[segIdx] * s + inflX[next] * t;
     const npY = inflY[segIdx] * s + inflY[next] * t;
-    const dX = npX - tmpX[k], dY = npY - tmpY[k];
+    const dX = npX - tmpX[k],
+      dY = npY - tmpY[k];
     const dLen = Math.sqrt(dX * dX + dY * dY);
     newR[k] = dLen;
     dirX[k] = dLen > 1e-10 ? dX / dLen : 1;
@@ -333,7 +404,7 @@ function fitSinglePrimitive(
   scratch: ScratchBuffers,
 ): { origins: Vec2D[]; directions: Vec2D[]; radii: number[] } {
   const { origX, origY, r, r_tgt, r_init } = scratch;
-  const Nc = N >> 2; // coarse resolution: N/4
+  const Nc = Math.max(1, Math.floor(N / opts.coarse_divisor)); // coarse resolution
 
   // Subsample the N-element initial setup to Nc by striding every (N/Nc) elements.
   // Safe: reads from higher indices before overwriting lower ones (stride >= 1).
@@ -352,12 +423,17 @@ function fitSinglePrimitive(
   if (origX[0] === origX[Nc >> 1] && origY[0] === origY[Nc >> 1]) {
     const inscribed = nearestDistFlatBoundary(origX[0], origY[0], boundary);
     const rval = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
-    for (let k = 0; k < Nc; k++) { r[k] = rval; r_tgt[k] = rval; r_init[k] = rval; }
+    for (let k = 0; k < Nc; k++) {
+      r[k] = rval;
+      r_tgt[k] = rval;
+      r_init[k] = rval;
+    }
   } else {
     for (let i = 0; i < Nc; i++) {
       const inscribed = nearestDistFlatBoundary(origX[i], origY[i], boundary);
       r[i] = inscribed > 1e-4 ? inscribed * 0.99 : 1e-3;
-      r_tgt[i] = r[i]; r_init[i] = r[i];
+      r_tgt[i] = r[i];
+      r_init[i] = r[i];
     }
   }
 
@@ -368,7 +444,10 @@ function fitSinglePrimitive(
 
   // === FINE PHASE (N directions, a few more progressions) ===
   computeMaxExtents(N, scratch, boundary);
-  for (let k = 0; k < N; k++) { r_tgt[k] = r[k]; r_init[k] = r[k]; }
+  for (let k = 0; k < N; k++) {
+    r_tgt[k] = r[k];
+    r_init[k] = r[k];
+  }
   runProgressions(N, opts.fine_progressions, opts, scratch, boundary, false);
 
   // Copy flat buffers into Vec2D[] for the public Primitive interface.
@@ -384,22 +463,46 @@ function fitSinglePrimitive(
 // --- Geometry Helpers ---
 
 function cubicBezierPoint(
-  pA: Vec2D, cp1: Vec2D, cp2: Vec2D, pB: Vec2D, t: number,
+  pA: Vec2D,
+  cp1: Vec2D,
+  cp2: Vec2D,
+  pB: Vec2D,
+  t: number,
 ): Vec2D {
   const u = 1 - t;
   return {
-    x: u*u*u*pA.x + 3*u*u*t*cp1.x + 3*u*t*t*cp2.x + t*t*t*pB.x,
-    y: u*u*u*pA.y + 3*u*u*t*cp1.y + 3*u*t*t*cp2.y + t*t*t*pB.y,
+    x:
+      u * u * u * pA.x +
+      3 * u * u * t * cp1.x +
+      3 * u * t * t * cp2.x +
+      t * t * t * pB.x,
+    y:
+      u * u * u * pA.y +
+      3 * u * u * t * cp1.y +
+      3 * u * t * t * cp2.y +
+      t * t * t * pB.y,
   };
 }
 
 function cubicBezierTangent(
-  pA: Vec2D, cp1: Vec2D, cp2: Vec2D, pB: Vec2D, t: number,
+  pA: Vec2D,
+  cp1: Vec2D,
+  cp2: Vec2D,
+  pB: Vec2D,
+  t: number,
 ): Vec2D {
   const u = 1 - t;
   return {
-    x: 3*(u*u*(cp1.x-pA.x) + 2*u*t*(cp2.x-cp1.x) + t*t*(pB.x-cp2.x)),
-    y: 3*(u*u*(cp1.y-pA.y) + 2*u*t*(cp2.y-cp1.y) + t*t*(pB.y-cp2.y)),
+    x:
+      3 *
+      (u * u * (cp1.x - pA.x) +
+        2 * u * t * (cp2.x - cp1.x) +
+        t * t * (pB.x - cp2.x)),
+    y:
+      3 *
+      (u * u * (cp1.y - pA.y) +
+        2 * u * t * (cp2.y - cp1.y) +
+        t * t * (pB.y - cp2.y)),
   };
 }
 
@@ -409,12 +512,17 @@ function cubicBezierTangent(
  * All angles computed in radians; no paper.Point allocations.
  */
 function generateCapsuleDiscretization(
-  pAx: number, pAy: number,
-  pBx: number, pBy: number,
+  pAx: number,
+  pAy: number,
+  pBx: number,
+  pBy: number,
   N: number,
-  origX: Float64Array, origY: Float64Array,
-  dirX: Float64Array, dirY: Float64Array,
-  cp1?: Vec2D, cp2?: Vec2D,
+  origX: Float64Array,
+  origY: Float64Array,
+  dirX: Float64Array,
+  dirY: Float64Array,
+  cp1?: Vec2D,
+  cp2?: Vec2D,
 ): void {
   const quarter = Math.floor(N / 4);
   const remainder = N - quarter * 4;
@@ -442,8 +550,10 @@ function generateCapsuleDiscretization(
       const t = nSide > 1 ? i / (nSide - 1) : 0;
       const pt = cubicBezierPoint(pA, cp1, cp2, pB, t);
       const tn = unitTan(t);
-      origX[j] = pt.x; origY[j] = pt.y;
-      dirX[j] = -tn.y; dirY[j] = tn.x;
+      origX[j] = pt.x;
+      origY[j] = pt.y;
+      dirX[j] = -tn.y;
+      dirY[j] = tn.x;
       j++;
     }
 
@@ -451,8 +561,10 @@ function generateCapsuleDiscretization(
     const startB = baseAngleB + Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
       const ang = startB - ((i + 1) / (nCap + 1)) * Math.PI;
-      origX[j] = pBx; origY[j] = pBy;
-      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      origX[j] = pBx;
+      origY[j] = pBy;
+      dirX[j] = Math.cos(ang);
+      dirY[j] = Math.sin(ang);
       j++;
     }
 
@@ -461,8 +573,10 @@ function generateCapsuleDiscretization(
       const t = nSide > 1 ? i / (nSide - 1) : 0;
       const pt = cubicBezierPoint(pA, cp1, cp2, pB, 1 - t);
       const tn = unitTan(1 - t);
-      origX[j] = pt.x; origY[j] = pt.y;
-      dirX[j] = tn.y; dirY[j] = -tn.x;
+      origX[j] = pt.x;
+      origY[j] = pt.y;
+      dirX[j] = tn.y;
+      dirY[j] = -tn.x;
       j++;
     }
 
@@ -470,23 +584,28 @@ function generateCapsuleDiscretization(
     const startA = baseAngleA - Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
       const ang = startA - ((i + 1) / (nCap + 1)) * Math.PI;
-      origX[j] = pAx; origY[j] = pAy;
-      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      origX[j] = pAx;
+      origY[j] = pAy;
+      dirX[j] = Math.cos(ang);
+      dirY[j] = Math.sin(ang);
       j++;
     }
   } else {
     // Straight-line bone
-    const vx = pBx - pAx, vy = pBy - pAy;
+    const vx = pBx - pAx,
+      vy = pBy - pAy;
     const vLen = Math.sqrt(vx * vx + vy * vy);
-    const nX = vLen > 1e-10 ? -vy / vLen : 0;  // +90° normal
+    const nX = vLen > 1e-10 ? -vy / vLen : 0; // +90° normal
     const nY = vLen > 1e-10 ? vx / vLen : 1;
     const baseAngle = Math.atan2(vy, vx);
 
     // Section 1: Side A→B
     for (let i = 0; i < nSide; i++) {
       const t = i / (nSide - 1 || 1);
-      origX[j] = pAx + vx * t; origY[j] = pAy + vy * t;
-      dirX[j] = nX; dirY[j] = nY;
+      origX[j] = pAx + vx * t;
+      origY[j] = pAy + vy * t;
+      dirX[j] = nX;
+      dirY[j] = nY;
       j++;
     }
 
@@ -494,16 +613,20 @@ function generateCapsuleDiscretization(
     const startB = baseAngle + Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
       const ang = startB - ((i + 1) / (nCap + 1)) * Math.PI;
-      origX[j] = pBx; origY[j] = pBy;
-      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      origX[j] = pBx;
+      origY[j] = pBy;
+      dirX[j] = Math.cos(ang);
+      dirY[j] = Math.sin(ang);
       j++;
     }
 
     // Section 3: Side B→A
     for (let i = 0; i < nSide; i++) {
       const t = i / (nSide - 1 || 1);
-      origX[j] = pBx - vx * t; origY[j] = pBy - vy * t;
-      dirX[j] = -nX; dirY[j] = -nY;
+      origX[j] = pBx - vx * t;
+      origY[j] = pBy - vy * t;
+      dirX[j] = -nX;
+      dirY[j] = -nY;
       j++;
     }
 
@@ -511,8 +634,10 @@ function generateCapsuleDiscretization(
     const startA = baseAngle - Math.PI / 2;
     for (let i = 0; i < nCap; i++) {
       const ang = startA - ((i + 1) / (nCap + 1)) * Math.PI;
-      origX[j] = pAx; origY[j] = pAy;
-      dirX[j] = Math.cos(ang); dirY[j] = Math.sin(ang);
+      origX[j] = pAx;
+      origY[j] = pAy;
+      dirX[j] = Math.cos(ang);
+      dirY[j] = Math.sin(ang);
       j++;
     }
   }
@@ -529,8 +654,13 @@ function computeMaxExtents(
   const { origX, origY, dirX, dirY, r_max, tested, genBox } = scratch;
   for (let i = 0; i < N; i++) {
     r_max[i] = rayIntersectFlatBoundary(
-      origX[i], origY[i], dirX[i], dirY[i],
-      boundary, tested, ++genBox.gen,
+      origX[i],
+      origY[i],
+      dirX[i],
+      dirY[i],
+      boundary,
+      tested,
+      ++genBox.gen,
     );
   }
 }
@@ -561,8 +691,20 @@ function solveCyclicTridiagonal(
   scratch.u_vec[n - 1] = 1.0;
 
   // Use subarray views so solveTridiagonal uses n, not the full scratch array length N.
-  solveTridiagonal(scratch.T_diag_adj.subarray(0, n), e, b, scratch.y.subarray(0, n), scratch);
-  solveTridiagonal(scratch.T_diag_adj.subarray(0, n), e, scratch.u_vec.subarray(0, n), scratch.z.subarray(0, n), scratch);
+  solveTridiagonal(
+    scratch.T_diag_adj.subarray(0, n),
+    e,
+    b,
+    scratch.y.subarray(0, n),
+    scratch,
+  );
+  solveTridiagonal(
+    scratch.T_diag_adj.subarray(0, n),
+    e,
+    scratch.u_vec.subarray(0, n),
+    scratch.z.subarray(0, n),
+    scratch,
+  );
 
   const v_dot_y = f * (scratch.y[0] + scratch.y[n - 1]);
   const v_dot_z = f * (scratch.z[0] + scratch.z[n - 1]);
