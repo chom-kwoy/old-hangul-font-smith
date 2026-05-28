@@ -97,7 +97,7 @@ export function localPrimitiveFitting(
     w_penalty: options.w_penalty ?? 10000,
     max_progressions: options.max_progressions ?? 25,
     fine_progressions: options.fine_progressions ?? 5,
-    coarse_divisor: options.coarse_divisor ?? 4,
+    coarse_divisor: options.coarse_divisor ?? 8,
     expansion_rate: options.expansion_rate ?? 1.1,
     max_alternating_iters: options.max_alternating_iters ?? 15,
     min_absolute_growth: options.min_absolute_growth ?? 1.0,
