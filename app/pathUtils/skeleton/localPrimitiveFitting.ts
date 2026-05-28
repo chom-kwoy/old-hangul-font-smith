@@ -252,6 +252,10 @@ function fitSinglePrimitive(
   r_init.set(r);
 
   // 3. Progressive Expansion
+  let prevRSum = 0;
+  for (let k = 0; k < N; k++) prevRSum += r[k];
+  let stagnantCount = 0;
+
   for (let prog = 0; prog < opts.max_progressions; prog++) {
     for (let k = 0; k < N; k++) {
       r_tgt[k] = Math.max(
@@ -278,9 +282,24 @@ function fitSinglePrimitive(
       if (!constraintsActive) break;
     }
 
+    // Early termination: if total radius sum grew less than 0.1 per ray for two
+    // consecutive progressions, the balloon has hit the wall everywhere and stopped.
+    let rSum = 0;
+    for (let k = 0; k < N; k++) rSum += r[k];
+    if (rSum - prevRSum < N * 0.1) {
+      if (++stagnantCount >= 2) break;
+    } else {
+      stagnantCount = 0;
+    }
+    prevRSum = rSum;
+
     if (prog % 3 === 0 && prog < opts.max_progressions - 1) {
       resamplePoints(N, scratch);
       computeMaxExtents(N, scratch, boundary);
+      // Reset after resample: origins and r_max changed, give it a fresh start.
+      prevRSum = 0;
+      for (let k = 0; k < N; k++) prevRSum += r[k];
+      stagnantCount = 0;
     }
   }
 

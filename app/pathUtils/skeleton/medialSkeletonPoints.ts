@@ -1,5 +1,4 @@
 import { MinPriorityQueue } from "@datastructures-js/priority-queue";
-import { Delaunay } from "d3-delaunay";
 import paper from "paper";
 
 import {
@@ -176,33 +175,45 @@ function computeEnergyCore(
   normSq: number,
 ): number {
   if (projV.length === 0) return 0;
-  const delaunay = Delaunay.from(projV.map((p) => [p.x, p.y] as [number, number]));
+  const nSeeds = projV.length;
 
-  // E_coverage: fraction of boundary samples inside inscribed medial ball of nearest seed
+  // E_coverage: fraction of boundary samples inside inscribed medial ball of nearest seed.
+  // Linear nearest-seed scan — faster than Delaunay for nSeeds ≤ 22; no allocations.
+  // Compare squared distances to avoid sqrt; also skip Math.hypot allocation.
   let covered = 0;
   for (const s of boundarySamples) {
-    const idx = delaunay.find(s.x, s.y);
-    const dist = Math.hypot(s.x - projV[idx].x, s.y - projV[idx].y);
-    if (dist <= inscribed[idx]) covered++;
+    let best = 0, bestDistSq = Infinity;
+    for (let i = 0; i < nSeeds; i++) {
+      const dx = s.x - projV[i].x, dy = s.y - projV[i].y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < bestDistSq) { bestDistSq = dSq; best = i; }
+    }
+    const r = inscribed[best];
+    if (bestDistSq <= r * r) covered++;
   }
   const eCoverage = -(covered / boundarySamples.length);
 
   // E_centrality: radius-weighted centroid of each seed's Voronoi cell on M.
   // Pulls each seed toward the thick-axis center of its region (away from thin junctions).
   // Normalized by maxDim² so c1=1 balances correctly (paper normalizes to [0,1]).
-  const cellWX = new Float64Array(projV.length);
-  const cellWY = new Float64Array(projV.length);
-  const cellW = new Float64Array(projV.length);
+  const cellWX = new Float64Array(nSeeds);
+  const cellWY = new Float64Array(nSeeds);
+  const cellW = new Float64Array(nSeeds);
   for (let mu = 0; mu < medialAxis.points.length; mu++) {
     const pu = medialAxis.points[mu];
     const rmu = medialAxisR[mu];
-    const idx = delaunay.find(pu.x, pu.y);
-    cellWX[idx] += pu.x * rmu;
-    cellWY[idx] += pu.y * rmu;
-    cellW[idx] += rmu;
+    let best = 0, bestDistSq = Infinity;
+    for (let i = 0; i < nSeeds; i++) {
+      const dx = pu.x - projV[i].x, dy = pu.y - projV[i].y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < bestDistSq) { bestDistSq = dSq; best = i; }
+    }
+    cellWX[best] += pu.x * rmu;
+    cellWY[best] += pu.y * rmu;
+    cellW[best] += rmu;
   }
   let eCentrality = 0;
-  for (let i = 0; i < projV.length; i++) {
+  for (let i = 0; i < nSeeds; i++) {
     if (cellW[i] > 0) {
       const cx = cellWX[i] / cellW[i];
       const cy = cellWY[i] / cellW[i];
@@ -210,7 +221,7 @@ function computeEnergyCore(
     }
   }
 
-  return eCoverage + C1 * eCentrality + C2 * projV.length;
+  return eCoverage + C1 * eCentrality + C2 * nSeeds;
 }
 
 // ---------------------------------------------------------------------------
