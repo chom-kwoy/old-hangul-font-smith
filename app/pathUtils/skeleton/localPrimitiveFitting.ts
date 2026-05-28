@@ -71,7 +71,10 @@ export function localPrimitiveFitting(
     degree[idxB]++;
   }
 
-  // 2. Prepare Optimization Buffers (Shared for all primitives)
+  // 2. Flatten boundary once for fast ray intersection throughout all primitives
+  const flatBoundary = buildFlatBoundary(path);
+
+  // 3. Prepare Optimization Buffers (Shared for all primitives)
   // We use the same resolution N for both vertices and edges to reuse these buffers.
   const SCRATCH_N = opts.num_directions;
   const scratch = {
@@ -85,10 +88,10 @@ export function localPrimitiveFitting(
     T_diag_adj: new Float64Array(SCRATCH_N),
     d: new Float64Array(SCRATCH_N),
     rhs: new Float64Array(SCRATCH_N),
+    // Shared ray-test buffer — generation counter avoids fill(0) between calls
+    tested: new Uint32Array(flatBoundary.count),
+    genBox: { gen: 0 },
   };
-
-  // 3. Flatten boundary once for fast ray intersection throughout all primitives
-  const flatBoundary = buildFlatBoundary(path);
 
   // --- Process 1: Free-standing Vertices (Generalized Disks) ---
   // "We don't need to extract an envelope for a vertex that is part of an edge"
@@ -124,11 +127,14 @@ export function localPrimitiveFitting(
     const pA = skeleton.points[idxA];
     const pB = skeleton.points[idxB];
 
+    const cp = skeleton.controlPoints?.[i];
     // Generate capsule discretization (Origins + Directions) specific to this segment
     const { origins, directions } = generateCapsuleDiscretization(
       new paper.Point(pA),
       new paper.Point(pB),
       opts.num_directions,
+      cp?.[0],
+      cp?.[1],
     );
 
     const fitted = fitSinglePrimitive(
@@ -166,15 +172,24 @@ function resamplePoints(
 } {
   const N = origins.length;
 
-  const inflated = origins.map((o, i) => o.add(directions[i].multiply(r[i])));
-  const tgtInflated = origins.map((o, i) =>
-    o.add(directions[i].multiply(r_tgt[i])),
-  );
+  // Expand to flat arrays — avoids ~1000 paper.Point intermediates per call
+  const inflX = new Float64Array(N);
+  const inflY = new Float64Array(N);
+  const tgtInflX = new Float64Array(N);
+  const tgtInflY = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    inflX[i] = origins[i].x + directions[i].x * r[i];
+    inflY[i] = origins[i].y + directions[i].y * r[i];
+    tgtInflX[i] = origins[i].x + directions[i].x * r_tgt[i];
+    tgtInflY[i] = origins[i].y + directions[i].y * r_tgt[i];
+  }
 
   // Build cumulative arc-length from inflated positions (closed curve)
   const cumLen = new Float64Array(N + 1);
   for (let i = 0; i < N; i++) {
-    cumLen[i + 1] = cumLen[i] + inflated[i].getDistance(inflated[(i + 1) % N]);
+    const ni = (i + 1) % N;
+    const dx = inflX[ni] - inflX[i], dy = inflY[ni] - inflY[i];
+    cumLen[i + 1] = cumLen[i] + Math.sqrt(dx * dx + dy * dy);
   }
   const totalLen = cumLen[N];
   const spacing = totalLen / N;
@@ -192,25 +207,25 @@ function resamplePoints(
     const next = (segIdx + 1) % N;
     const segLen = cumLen[segIdx + 1] - cumLen[segIdx];
     const t = segLen > 1e-10 ? (targetLen - cumLen[segIdx]) / segLen : 0;
+    const s = 1 - t;
 
-    const newOrigin = origins[segIdx]
-      .multiply(1 - t)
-      .add(origins[next].multiply(t));
-    newOrigins.push(newOrigin);
+    const noX = origins[segIdx].x * s + origins[next].x * t;
+    const noY = origins[segIdx].y * s + origins[next].y * t;
+    newOrigins.push(new paper.Point(noX, noY));
 
-    const pt0 = inflated[segIdx];
-    const pt1 = inflated[next];
-    const newPt = pt0.multiply(1 - t).add(pt1.multiply(t));
-    const diff = newPt.subtract(newOrigin);
+    const npX = inflX[segIdx] * s + inflX[next] * t;
+    const npY = inflY[segIdx] * s + inflY[next] * t;
+    const dX = npX - noX, dY = npY - noY;
+    const dLen = Math.sqrt(dX * dX + dY * dY);
+    newR[k] = dLen;
+    newDirections.push(dLen > 1e-10
+      ? new paper.Point(dX / dLen, dY / dLen)
+      : new paper.Point(1, 0));
 
-    newR[k] = diff.length;
-    newDirections.push(diff.normalize());
-
-    const tgtPt0 = tgtInflated[segIdx];
-    const tgtPt1 = tgtInflated[next];
-    const newTgtPt = tgtPt0.multiply(1 - t).add(tgtPt1.multiply(t));
-    const newTgtDiff = newTgtPt.subtract(newOrigin);
-    newRTgt[k] = newTgtDiff.length;
+    const ntX = tgtInflX[segIdx] * s + tgtInflX[next] * t;
+    const ntY = tgtInflY[segIdx] * s + tgtInflY[next] * t;
+    const tdX = ntX - noX, tdY = ntY - noY;
+    newRTgt[k] = Math.sqrt(tdX * tdX + tdY * tdY);
   }
 
   return {
@@ -243,14 +258,15 @@ function fitSinglePrimitive(
     z: Float64Array;
     d: Float64Array;
     rhs: Float64Array;
+    tested: Uint32Array;
+    genBox: { gen: number };
   },
 ): { origins: paper.Point[]; directions: paper.Point[]; radii: number[] } {
-  const tested = new Uint8Array(boundary.count);
 
   // 1. Compute Max Extents (r_max)
   let curOrigins = origins;
   let curDirections = directions;
-  let r_max = computeMaxExtents(curOrigins, curDirections, boundary, tested);
+  let r_max = computeMaxExtents(curOrigins, curDirections, boundary, scratch.tested, scratch.genBox);
 
   // 2. Initialize Radii — per-ray inscribed radius from each origin to S
   const r = new Float64Array(opts.num_directions);
@@ -304,7 +320,7 @@ function fitSinglePrimitive(
       r_tgt.set(resampled.r_tgt);
 
       // recompute max extents because the origins and directions have changed
-      r_max = computeMaxExtents(curOrigins, curDirections, boundary, tested);
+      r_max = computeMaxExtents(curOrigins, curDirections, boundary, scratch.tested, scratch.genBox);
     }
   }
 
@@ -316,84 +332,137 @@ function fitSinglePrimitive(
 }
 
 // --- Geometry Helpers ---
+
+function cubicBezierPoint(
+  pA: Vec2D, cp1: Vec2D, cp2: Vec2D, pB: Vec2D, t: number,
+): Vec2D {
+  const u = 1 - t;
+  return {
+    x: u*u*u*pA.x + 3*u*u*t*cp1.x + 3*u*t*t*cp2.x + t*t*t*pB.x,
+    y: u*u*u*pA.y + 3*u*u*t*cp1.y + 3*u*t*t*cp2.y + t*t*t*pB.y,
+  };
+}
+
+function cubicBezierTangent(
+  pA: Vec2D, cp1: Vec2D, cp2: Vec2D, pB: Vec2D, t: number,
+): Vec2D {
+  const u = 1 - t;
+  return {
+    x: 3*(u*u*(cp1.x-pA.x) + 2*u*t*(cp2.x-cp1.x) + t*t*(pB.x-cp2.x)),
+    y: 3*(u*u*(cp1.y-pA.y) + 2*u*t*(cp2.y-cp1.y) + t*t*(pB.y-cp2.y)),
+  };
+}
+
 /**
  * Generates origins and directions for a "Capsule" primitive around a segment.
- * FIXED: Uses relative angles to ensure caps always bulge outward.
+ * When cp1/cp2 are supplied the bone follows a cubic Bezier instead of a chord,
+ * with outward normals always perpendicular to the local tangent.
  */
 function generateCapsuleDiscretization(
   pA: paper.Point,
   pB: paper.Point,
   N: number,
+  cp1?: Vec2D,
+  cp2?: Vec2D,
 ) {
   const origins: paper.Point[] = [];
   const directions: paper.Point[] = [];
 
-  // 1. Setup Bone Geometry
-  const v = pB.subtract(pA);
-  const baseAngle = v.angle; // Degrees
-
-  // Normal vector (90 degrees relative to bone)
-  // We calculate this explicitly from angle to ensure consistency with the caps
-  const normalAngle = baseAngle + 90;
-  const normalRad = normalAngle * (Math.PI / 180);
-  const normal = new paper.Point(Math.cos(normalRad), Math.sin(normalRad));
-
-  // 2. Sample Distribution
-  // We divide N samples into 4 parts: Side1, CapB, Side2, CapA
+  // Divide N samples into 4 parts: Side1, CapB, Side2, CapA
   const quarter = Math.floor(N / 4);
   const remainder = N - quarter * 4;
   const nSide = quarter + Math.floor(remainder / 2);
   const nCap = quarter;
 
-  // --- SECTION 1: Side A->B (+Normal side) ---
-  for (let i = 0; i < nSide; i++) {
-    const t = i / (nSide - 1 || 1);
-    origins.push(pA.add(v.multiply(t)));
-    directions.push(normal);
-  }
+  if (cp1 && cp2) {
+    // Bezier bone: tangent varies along the curve
+    const tanAtT = (t: number) => {
+      const raw = cubicBezierTangent(pA, cp1, cp2, pB, t);
+      const len = Math.hypot(raw.x, raw.y);
+      return len > 1e-8 ? { x: raw.x / len, y: raw.y / len } : { x: 1, y: 0 };
+    };
+    const angleAtT = (t: number) => {
+      const tn = tanAtT(t);
+      return Math.atan2(tn.y, tn.x) * (180 / Math.PI);
+    };
 
-  // --- SECTION 2: Cap B (The Tip) ---
-  // Must sweep from +90 to -90 (Clockwise visual / Decreasing degrees)
-  // Start: baseAngle + 90
-  // End:   baseAngle - 90
-  const startAngleB = baseAngle + 90;
-  const endAngleB = baseAngle - 90;
+    const baseAngleA = angleAtT(0);
+    const baseAngleB = angleAtT(1);
 
-  for (let i = 0; i < nCap; i++) {
-    // Interpolate t from 0..1 (exclusive of corners to avoid duplicate normals)
-    const t = (i + 1) / (nCap + 1);
+    // Section 1: Side A→B (+normal)
+    for (let i = 0; i < nSide; i++) {
+      const t = nSide > 1 ? i / (nSide - 1) : 0;
+      const pt = cubicBezierPoint(pA, cp1, cp2, pB, t);
+      const ang = (angleAtT(t) + 90) * (Math.PI / 180);
+      origins.push(new paper.Point(pt.x, pt.y));
+      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+    }
 
-    // Linear interpolation of angle
-    const ang = startAngleB + t * (endAngleB - startAngleB);
-    const rad = ang * (Math.PI / 180);
+    // Section 2: Cap B — fan from +90° to −90° of tangent at t=1
+    const startAngleB = baseAngleB + 90;
+    const endAngleB = baseAngleB - 90;
+    for (let i = 0; i < nCap; i++) {
+      const t = (i + 1) / (nCap + 1);
+      const ang = (startAngleB + t * (endAngleB - startAngleB)) * (Math.PI / 180);
+      origins.push(pB);
+      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+    }
 
-    origins.push(pB); // Fan originates from endpoint B
-    directions.push(new paper.Point(Math.cos(rad), Math.sin(rad)));
-  }
+    // Section 3: Side B→A (−normal)
+    for (let i = 0; i < nSide; i++) {
+      const t = nSide > 1 ? i / (nSide - 1) : 0;
+      const pt = cubicBezierPoint(pA, cp1, cp2, pB, 1 - t);
+      const ang = (angleAtT(1 - t) + 270) * (Math.PI / 180); // +270° = −90° = opposite normal
+      origins.push(new paper.Point(pt.x, pt.y));
+      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+    }
 
-  // --- SECTION 3: Side B->A (-Normal side) ---
-  for (let i = 0; i < nSide; i++) {
-    const t = i / (nSide - 1 || 1);
-    // Move backwards from B to A
-    origins.push(pB.subtract(v.multiply(t)));
-    directions.push(normal.multiply(-1));
-  }
+    // Section 4: Cap A — fan from −90° to −270° of tangent at t=0
+    const startAngleA = baseAngleA - 90;
+    const endAngleA = baseAngleA - 270;
+    for (let i = 0; i < nCap; i++) {
+      const t = (i + 1) / (nCap + 1);
+      const ang = (startAngleA + t * (endAngleA - startAngleA)) * (Math.PI / 180);
+      origins.push(pA);
+      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+    }
+  } else {
+    // Straight-line bone (original behaviour)
+    const v = pB.subtract(pA);
+    const baseAngle = v.angle;
+    const normalAngle = baseAngle + 90;
+    const normalRad = normalAngle * (Math.PI / 180);
+    const normal = new paper.Point(Math.cos(normalRad), Math.sin(normalRad));
 
-  // --- SECTION 4: Cap A (The Tail) ---
-  // Must sweep from -90 to -270 (Clockwise visual / Decreasing degrees)
-  // Start: baseAngle - 90
-  // End:   baseAngle - 270
-  const startAngleA = baseAngle - 90;
-  const endAngleA = baseAngle - 270;
+    for (let i = 0; i < nSide; i++) {
+      const t = i / (nSide - 1 || 1);
+      origins.push(pA.add(v.multiply(t)));
+      directions.push(normal);
+    }
 
-  for (let i = 0; i < nCap; i++) {
-    const t = (i + 1) / (nCap + 1);
+    const startAngleB = baseAngle + 90;
+    const endAngleB = baseAngle - 90;
+    for (let i = 0; i < nCap; i++) {
+      const t = (i + 1) / (nCap + 1);
+      const ang = (startAngleB + t * (endAngleB - startAngleB)) * (Math.PI / 180);
+      origins.push(pB);
+      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+    }
 
-    const ang = startAngleA + t * (endAngleA - startAngleA);
-    const rad = ang * (Math.PI / 180);
+    for (let i = 0; i < nSide; i++) {
+      const t = i / (nSide - 1 || 1);
+      origins.push(pB.subtract(v.multiply(t)));
+      directions.push(normal.multiply(-1));
+    }
 
-    origins.push(pA); // Fan originates from endpoint A
-    directions.push(new paper.Point(Math.cos(rad), Math.sin(rad)));
+    const startAngleA = baseAngle - 90;
+    const endAngleA = baseAngle - 270;
+    for (let i = 0; i < nCap; i++) {
+      const t = (i + 1) / (nCap + 1);
+      const ang = (startAngleA + t * (endAngleA - startAngleA)) * (Math.PI / 180);
+      origins.push(pA);
+      directions.push(new paper.Point(Math.cos(ang), Math.sin(ang)));
+    }
   }
 
   return { origins, directions };
@@ -416,10 +485,10 @@ function computeMaxExtents(
   origins: paper.Point[],
   directions: paper.Point[],
   boundary: FlatBoundary,
-  tested: Uint8Array,
+  tested: Uint32Array,
+  genBox: { gen: number },
 ): number[] {
   return directions.map((dir, i) => {
-    tested.fill(0);
     return rayIntersectFlatBoundary(
       origins[i].x,
       origins[i].y,
@@ -427,6 +496,7 @@ function computeMaxExtents(
       dir.y,
       boundary,
       tested,
+      ++genBox.gen,
     );
   });
 }

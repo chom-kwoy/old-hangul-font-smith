@@ -12,6 +12,9 @@ import { Vec2D } from "@/app/utils/types";
 export interface MedialAxisGraph {
   points: Vec2D[];
   segments: [number, number][]; // pairs of indices into `points`
+  // Cubic Bezier interior control points, one pair per segment (parallel to `segments`).
+  // controlPoints[i] = [cp1, cp2] for segments[i].  Absent → treat as straight line.
+  controlPoints?: [Vec2D, Vec2D][];
 }
 
 /**
@@ -45,7 +48,8 @@ export function extractMedialAxis(
 
   // 2. Build flat boundary for accurate ray-based interior testing
   const fb = buildFlatBoundary(path);
-  const tested = new Uint8Array(fb.count);
+  const tested = new Uint32Array(fb.count);
+  let rayGen = 0;
 
   // 3. Compute Voronoi Diagram
   const delaunay = Delaunay.from(pointsArray);
@@ -104,7 +108,6 @@ export function extractMedialAxis(
       const edgeDy = p2y - p1y;
       const edgeLen = Math.hypot(edgeDx, edgeDy);
       if (edgeLen > 1e-10) {
-        tested.fill(0);
         const dist = rayIntersectFlatBoundary(
           p1x,
           p1y,
@@ -112,6 +115,7 @@ export function extractMedialAxis(
           edgeDy / edgeLen,
           fb,
           tested,
+          ++rayGen,
         );
         if (dist < edgeLen) continue;
       }

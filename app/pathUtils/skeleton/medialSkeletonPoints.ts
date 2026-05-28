@@ -1,3 +1,4 @@
+import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import { Delaunay } from "d3-delaunay";
 import paper from "paper";
 
@@ -25,6 +26,7 @@ export type SkeletonIterCallback = (
   cov: number,     // true primitive coverage fraction (paper's E_coverage metric)
   covGain: number, // improvement over previous iteration
   adding: number,  // how many new seeds are about to be added (0 = stopping)
+  nmEvals: number, // cumulative NM evaluations so far
 ) => void;
 
 /**
@@ -66,9 +68,10 @@ export function computeMedialSkeletonPoints(
   }
 
   // Incremental outer loop
-  const MAX_OUTER = 12;    // max outer iterations
-  const NM_ITERS = 200;    // NM iterations per inner call
-  const GROWTH_START = 50; // start adding n>1 vertices after this many NM evals
+  const MAX_OUTER = 12;          // max outer iterations
+  const NM_ITERS_MIN = 50;       // minimum NM iterations per inner call
+  const NM_ITERS_PER_DIM = 20;   // NM iterations per free-seed dimension
+  const GROWTH_START = 50;       // start adding n>1 vertices after this many NM evals
   const N_NEW = 1;         // base vertices to add per growth step
   let nmEvalCount = 0;
   let lastCovFraction = 0;
@@ -80,21 +83,28 @@ export function computeMedialSkeletonPoints(
     const freeV = V.slice(frozenV.length); // only optimize the unfrozen suffix
 
     // Step 10: Nelder-Mead over freeV (flat x array: [x0,y0, x1,y1, ...])
+    // Pre-compute projections + inscribed radii for frozen seeds once per outer iter.
+    const frozenProj = frozenV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR));
+    const projFrozen = frozenProj.map((r) => r.point);
+    const inscribedFrozen = frozenProj.map((r) => r.inscribed);
+
     const x0 = pointsToFlat(freeV);
 
     const result = nelderMead(
       (x: number[]) => {
         nmEvalCount++;
         const currentFree = flatToPoints(x);
-        const allV = [...frozenV, ...currentFree];
-        return computeEnergy(allV, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq);
+        return computeEnergyPartial(
+          projFrozen, inscribedFrozen,
+          currentFree, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq,
+        );
       },
       x0,
-      { maxIterations: NM_ITERS },
+      { maxIterations: Math.max(NM_ITERS_MIN, x0.length * NM_ITERS_PER_DIM) },
     );
 
     V = [...frozenV, ...flatToPoints(result.x)];
-    V = V.map((p) => projectToMedialAxis(p, medialAxis));
+    V = V.map((p) => projectToMedialAxis(p, medialAxis).point);
     V = deduplicateSeeds(V, 10); // remove seeds within 10 em-units of each other
 
     // Evaluate true coverage using fitted primitives (paper's E_coverage metric).
@@ -110,7 +120,9 @@ export function computeMedialSkeletonPoints(
     const covGain = trueCov - lastCovFraction;
     lastCovFraction = trueCov;
 
-    const uncovered = boundarySamples.filter((s) => !primCovers(s.x, s.y, fitted.primitives));
+    const maxN2 = fitted.primitives.reduce((m, p) => Math.max(m, p.origins.length), 0);
+    const _vx2 = new Float64Array(maxN2), _vy2 = new Float64Array(maxN2);
+    const uncovered = boundarySamples.filter((s) => !primCovers(s.x, s.y, fitted.primitives, 5.0, _vx2, _vy2));
 
     // Stop when coverage is achieved or no samples remain uncovered.
     // Bad-centrality edges are fixed structurally by Steiner points in constructMedialSkeleton.
@@ -121,7 +133,7 @@ export function computeMedialSkeletonPoints(
         ? N_NEW + (outerIter % 3 === 0 ? 1 : 0)
         : 1;
 
-    onIteration?.(outerIter, V.slice(), trueCov, covGain, nNew);
+    onIteration?.(outerIter, V.slice(), trueCov, covGain, nNew, nmEvalCount);
 
     if (willStop) break;
 
@@ -137,18 +149,37 @@ export function computeMedialSkeletonPoints(
 // Full primitive fitting is NOT called here; it runs once after optimization.
 // ---------------------------------------------------------------------------
 
-function computeEnergy(
-  V: paper.Point[],
+// Variant used inside the NM loop: frozen seeds are pre-projected; only free seeds
+// need projection each call.
+function computeEnergyPartial(
+  projFrozen: paper.Point[],
+  inscribedFrozen: number[],
+  freeV: paper.Point[],
   medialAxis: MedialAxisGraph,
   boundarySamples: paper.Point[],
   medialAxisR: Float64Array,
   flatBoundary: FlatBoundary,
   normSq: number,
 ): number {
-  if (V.length === 0) return 0;
+  const freeProjected = freeV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR));
+  const projFree = freeProjected.map((r) => r.point);
+  const inscribedFree = freeProjected.map((r) => r.inscribed);
+  const projV = [...projFrozen, ...projFree];
+  const inscribed = [...inscribedFrozen, ...inscribedFree];
+  return computeEnergyCore(projV, inscribed, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq);
+}
 
-  const projV = V.map((p) => projectToMedialAxis(p, medialAxis));
-  const inscribed = projV.map((p) => nearestDistFlatBoundary(p.x, p.y, flatBoundary));
+
+function computeEnergyCore(
+  projV: paper.Point[],
+  inscribed: number[],
+  medialAxis: MedialAxisGraph,
+  boundarySamples: paper.Point[],
+  medialAxisR: Float64Array,
+  _flatBoundary: FlatBoundary,
+  normSq: number,
+): number {
+  if (projV.length === 0) return 0;
   const delaunay = Delaunay.from(projV.map((p) => [p.x, p.y] as [number, number]));
 
   // E_coverage: fraction of boundary samples inside inscribed medial ball of nearest seed
@@ -163,9 +194,9 @@ function computeEnergy(
   // E_centrality: radius-weighted centroid of each seed's Voronoi cell on M.
   // Pulls each seed toward the thick-axis center of its region (away from thin junctions).
   // Normalized by maxDim² so c1=1 balances correctly (paper normalizes to [0,1]).
-  const cellWX = new Float64Array(V.length);
-  const cellWY = new Float64Array(V.length);
-  const cellW = new Float64Array(V.length);
+  const cellWX = new Float64Array(projV.length);
+  const cellWY = new Float64Array(projV.length);
+  const cellW = new Float64Array(projV.length);
   for (let mu = 0; mu < medialAxis.points.length; mu++) {
     const pu = medialAxis.points[mu];
     const rmu = medialAxisR[mu];
@@ -234,26 +265,28 @@ function primCovers(
   py: number,
   primitives: Primitive[],
   delta = 5.0,
+  vx?: Float64Array,
+  vy?: Float64Array,
 ): boolean {
   for (const prim of primitives) {
     const N = prim.origins.length;
-    const vx = new Float64Array(N);
-    const vy = new Float64Array(N);
+    const _vx = vx && vx.length >= N ? vx : new Float64Array(N);
+    const _vy = vy && vy.length >= N ? vy : new Float64Array(N);
     for (let i = 0; i < N; i++) {
-      vx[i] = prim.origins[i].x + prim.directions[i].x * prim.radii[i];
-      vy[i] = prim.origins[i].y + prim.directions[i].y * prim.radii[i];
+      _vx[i] = prim.origins[i].x + prim.directions[i].x * prim.radii[i];
+      _vy[i] = prim.origins[i].y + prim.directions[i].y * prim.radii[i];
     }
     // Point-in-polygon
     let inside = false;
     for (let i = 0, j = N - 1; i < N; j = i++) {
-      if (vy[i] > py !== vy[j] > py &&
-          px < ((vx[j] - vx[i]) * (py - vy[i])) / (vy[j] - vy[i]) + vx[i])
+      if (_vy[i] > py !== _vy[j] > py &&
+          px < ((_vx[j] - _vx[i]) * (py - _vy[i])) / (_vy[j] - _vy[i]) + _vx[i])
         inside = !inside;
     }
     if (inside) return true;
     // Proximity to polygon edges
     for (let i = 0, j = N - 1; i < N; j = i++) {
-      const ax = vx[j], ay = vy[j], bx = vx[i], by = vy[i];
+      const ax = _vx[j], ay = _vy[j], bx = _vx[i], by = _vy[i];
       const ddx = bx - ax, ddy = by - ay;
       const lenSq = ddx * ddx + ddy * ddy;
       let t = lenSq > 1e-10 ? ((px - ax) * ddx + (py - ay) * ddy) / lenSq : 0;
@@ -270,9 +303,12 @@ function primitiveCoverage(
   delta = 5.0,
 ): number {
   if (samples.length === 0) return 1;
+  const maxN = primitives.reduce((m, p) => Math.max(m, p.origins.length), 0);
+  const vx = new Float64Array(maxN);
+  const vy = new Float64Array(maxN);
   let covered = 0;
   for (const s of samples) {
-    if (primCovers(s.x, s.y, primitives, delta)) covered++;
+    if (primCovers(s.x, s.y, primitives, delta, vx, vy)) covered++;
   }
   return covered / samples.length;
 }
@@ -297,7 +333,7 @@ function pickNewSeeds(
       }
       if (minD > maxDist) { maxDist = minD; bestIdx = i; }
     }
-    const proj = projectToMedialAxis(remaining[bestIdx], medialAxis);
+    const proj = projectToMedialAxis(remaining[bestIdx], medialAxis).point;
     newSeeds.push(proj);
     remaining.splice(bestIdx, 1);
   }
@@ -325,9 +361,11 @@ function flatToPoints(x: number[]): paper.Point[] {
 function projectToMedialAxis(
   pt: paper.Point,
   medialAxis: MedialAxisGraph,
-): paper.Point {
+  medialAxisR?: Float64Array,
+): { point: paper.Point; inscribed: number } {
   const pts = medialAxis.points;
   let bestX = pts[0].x, bestY = pts[0].y, minDist = Infinity;
+  let bestI1 = 0, bestI2 = 0, bestT = 0;
   for (const [i1, i2] of medialAxis.segments) {
     const ax = pts[i1].x, ay = pts[i1].y;
     const dx = pts[i2].x - ax, dy = pts[i2].y - ay;
@@ -336,9 +374,12 @@ function projectToMedialAxis(
     t = Math.max(0, Math.min(1, t));
     const cx = ax + t * dx, cy = ay + t * dy;
     const d = Math.hypot(pt.x - cx, pt.y - cy);
-    if (d < minDist) { minDist = d; bestX = cx; bestY = cy; }
+    if (d < minDist) { minDist = d; bestX = cx; bestY = cy; bestI1 = i1; bestI2 = i2; bestT = t; }
   }
-  return new paper.Point(bestX, bestY);
+  const inscribed = medialAxisR
+    ? (1 - bestT) * medialAxisR[bestI1] + bestT * medialAxisR[bestI2]
+    : 0;
+  return { point: new paper.Point(bestX, bestY), inscribed };
 }
 
 
@@ -366,14 +407,13 @@ function dijkstraFrom(
   pts: Vec2D[],
   dist: Float64Array,
 ): void {
-  // Simple Dijkstra using a sorted array (good enough for small graphs)
   dist[start] = 0;
   const visited = new Uint8Array(pts.length);
-  const queue: [number, number][] = [[0, start]]; // [dist, node]
+  const pq = new MinPriorityQueue<[number, number]>((x) => x[0]);
+  pq.push([0, start]);
 
-  while (queue.length > 0) {
-    queue.sort((a, b) => a[0] - b[0]);
-    const [d, u] = queue.shift()!;
+  while (!pq.isEmpty()) {
+    const [d, u] = pq.pop()!;
     if (visited[u]) continue;
     visited[u] = 1;
     for (const v of adj[u]) {
@@ -381,7 +421,7 @@ function dijkstraFrom(
       const nd = d + w;
       if (nd < dist[v]) {
         dist[v] = nd;
-        queue.push([nd, v]);
+        pq.push([nd, v]);
       }
     }
   }
@@ -418,6 +458,11 @@ function nelderMead(
     const ord = fS.map((_, i) => i).sort((a, b) => fS[a] - fS[b]);
     const Ss = ord.map((i) => S[i].slice());
     const fSs = ord.map((i) => fS[i]);
+
+    // Early exit when simplex has converged (coordinates are in ~[0,1000] em space)
+    let xSpread = 0;
+    for (let d = 0; d < n; d++) xSpread = Math.max(xSpread, Math.abs(Ss[n][d] - Ss[0][d]));
+    if (fSs[n] - fSs[0] < 1e-5 && xSpread < 1.0) break;
 
     // Centroid of all but worst
     const c = Array<number>(n).fill(0);

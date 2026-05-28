@@ -56,7 +56,8 @@ export function constructMedialSkeleton(
     const { dist, u, owner } = pq.pop()!;
     if (dist > distToSeed[u] + 1e-5) continue;
     for (const v of rawAdj[u]) {
-      const w = new paper.Point(rawPoints[u]).getDistance(rawPoints[v]);
+      const ru = rawPoints[u], rv = rawPoints[v];
+      const w = Math.sqrt((rv.x - ru.x) ** 2 + (rv.y - ru.y) ** 2);
       if (!Number.isFinite(w)) continue;
       const nd = dist + w;
       if (nd < distToSeed[v]) {
@@ -201,16 +202,41 @@ export function constructMedialSkeleton(
   // Step 5: Build output edges from essential chains; check centrality
   // ---------------------------------------------------------
   const newSegments: [number, number][] = [];
+  const finalControlPoints: [Vec2D, Vec2D][] = [];
   const segmentSet = new Set<string>();
   const MAX_TOTAL_VERTICES = 25;
   const MAX_BISECT_DEPTH = 4;
 
-  function addSegment(u: number, v: number): void {
+  function addSegment(u: number, v: number, cp1: Vec2D, cp2: Vec2D): void {
     if (u === v) return;
     const key = u < v ? `${u}-${v}` : `${v}-${u}`;
     if (segmentSet.has(key)) return;
     segmentSet.add(key);
     newSegments.push([u, v]);
+    finalControlPoints.push([cp1, cp2]);
+  }
+
+  // Compute cubic Bezier interior control points for the edge pA→pB, using the
+  // raw-path end tangents scaled to 1/3 of the chord (Hermite→Bezier conversion).
+  function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
+    const chord = Math.hypot(pB.x - pA.x, pB.y - pA.y);
+    let txA = 0, tyA = 0, txB = 0, tyB = 0;
+    if (rawPath.length >= 2) {
+      const p0 = rawPoints[rawPath[0]], p1 = rawPoints[rawPath[1]];
+      const la = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+      if (la > 1e-6) { txA = (p1.x - p0.x) / la; tyA = (p1.y - p0.y) / la; }
+      const pL = rawPoints[rawPath[rawPath.length - 1]], pK = rawPoints[rawPath[rawPath.length - 2]];
+      const lb = Math.hypot(pL.x - pK.x, pL.y - pK.y);
+      if (lb > 1e-6) { txB = (pL.x - pK.x) / lb; tyB = (pL.y - pK.y) / lb; }
+    } else if (chord > 1e-6) {
+      txA = (pB.x - pA.x) / chord; tyA = (pB.y - pA.y) / chord;
+      txB = txA; tyB = tyA;
+    }
+    const s = chord / 3;
+    return [
+      { x: pA.x + txA * s, y: pA.y + tyA * s },
+      { x: pB.x - txB * s, y: pB.y - tyB * s },
+    ];
   }
 
   // Emit a skeleton edge along a specific raw-axis sub-path.
@@ -226,15 +252,17 @@ export function constructMedialSkeleton(
     const idxB = rawToOut.get(rawB)!;
     if (idxA === idxB) return;
 
+    const pA = finalPoints[idxA];
+    const pB = finalPoints[idxB];
+    const [cp1, cp2] = bezierCPs(rawPath, pA, pB);
+
     if (depth >= maxDepth || finalPoints.length >= MAX_TOTAL_VERTICES) {
-      addSegment(idxA, idxB);
+      addSegment(idxA, idxB, cp1, cp2);
       return;
     }
 
-    const pA = finalPoints[idxA];
-    const pB = finalPoints[idxB];
     if (isEdgeCentred(pA, pB, flatBoundary)) {
-      addSegment(idxA, idxB);
+      addSegment(idxA, idxB, cp1, cp2);
       return;
     }
 
@@ -261,7 +289,7 @@ export function constructMedialSkeleton(
       }
     }
 
-    addSegment(idxA, idxB);
+    addSegment(idxA, idxB, cp1, cp2);
   }
 
   for (const { path } of pairPaths) {
@@ -356,7 +384,11 @@ export function constructMedialSkeleton(
     }
   }
 
-  return { points: finalPoints, segments: newSegments };
+  return {
+    points: finalPoints,
+    segments: newSegments,
+    controlPoints: finalControlPoints,
+  };
 }
 
 // ---------------------------------------------------------
@@ -524,7 +556,8 @@ function buildAdjacencyList(graph: MedialAxisGraph): number[][] {
 function getNearestNodeIndex(pt: paper.Point, nodes: Vec2D[]): number {
   let minDst = Infinity, idx = -1;
   for (let i = 0; i < nodes.length; i++) {
-    const d = pt.getDistance(nodes[i]);
+    const dx = pt.x - nodes[i].x, dy = pt.y - nodes[i].y;
+    const d = dx * dx + dy * dy;
     if (d < minDst) { minDst = d; idx = i; }
   }
   return idx;

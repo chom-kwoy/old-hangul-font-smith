@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import {
   Circle as FabricCircle,
   Line as FabricLine,
+  Path as FabricPath,
   Polygon as FabricPolygon,
   Polyline as FabricPolyline,
   StaticCanvas,
@@ -154,28 +155,54 @@ function renderSkeletonization(
   }
 
   // --- 4. Skeleton edges (on top of raw axis) ---
+  // Draw as cubic Bezier curves when control points are available.
   for (let i = 0; i < fitted.segments.length; i++) {
     const [u, v] = fitted.segments[i];
     const pu = fitted.points[u];
     const pv = fitted.points[v];
-    canvas.add(
-      new FabricLine([tx(pu.x), ty(pu.y), tx(pv.x), ty(pv.y)], {
-        stroke: strokeColor(i),
-        strokeWidth: 2.5,
-        selectable: false,
-      }),
-    );
+    const cp = fitted.controlPoints?.[i];
+    if (cp) {
+      const [c1, c2] = cp;
+      const d = `M ${tx(pu.x)} ${ty(pu.y)} C ${tx(c1.x)} ${ty(c1.y)} ${tx(c2.x)} ${ty(c2.y)} ${tx(pv.x)} ${ty(pv.y)}`;
+      canvas.add(
+        new FabricPath(d, {
+          fill: "",
+          stroke: strokeColor(i),
+          strokeWidth: 2.5,
+          selectable: false,
+        }),
+      );
+    } else {
+      canvas.add(
+        new FabricLine([tx(pu.x), ty(pu.y), tx(pv.x), ty(pv.y)], {
+          stroke: strokeColor(i),
+          strokeWidth: 2.5,
+          selectable: false,
+        }),
+      );
+    }
   }
 
-  // Edge index labels at midpoint of each skeleton edge
+  // Edge index labels at Bezier midpoint (t=0.5) of each skeleton edge
   for (let i = 0; i < fitted.segments.length; i++) {
     const [u, v] = fitted.segments[i];
     const pu = fitted.points[u];
     const pv = fitted.points[v];
+    const cp = fitted.controlPoints?.[i];
+    let mx: number, my: number;
+    if (cp) {
+      const [c1, c2] = cp;
+      // cubic Bezier at t=0.5: (pA + 3*cp1 + 3*cp2 + pB) / 8
+      mx = (pu.x + 3*c1.x + 3*c2.x + pv.x) / 8;
+      my = (pu.y + 3*c1.y + 3*c2.y + pv.y) / 8;
+    } else {
+      mx = (pu.x + pv.x) / 2;
+      my = (pu.y + pv.y) / 2;
+    }
     canvas.add(
       new FabricText(String(i), {
-        left: tx((pu.x + pv.x) / 2),
-        top: ty((pu.y + pv.y) / 2),
+        left: tx(mx),
+        top: ty(my),
         fontSize: 13,
         fontFamily: "monospace",
         fill: strokeColor(i),
@@ -396,7 +423,9 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     const flatBoundary = getFlatBoundary(path);
     const samples = getBoundarySamples(path);
 
-    const iterCallback: SkeletonIterCallback = (iter, V, cov, covGain, adding) => {
+    let totalNmEvals = 0;
+    const iterCallback: SkeletonIterCallback = (iter, V, cov, covGain, adding, nmEvals) => {
+      totalNmEvals = nmEvals;
       renderIteration(path, axis, flatBoundary, V, cov, covGain, adding, iter, label);
     };
 
@@ -411,7 +440,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       error = e;
     }
     const ms = Date.now() - t0;
-    console.log(`  ⏱  full pipeline: ${ms}ms`);
+    console.log(`  ⏱  full pipeline: ${ms}ms  (NM evals: ${totalNmEvals})`);
 
     check("no exceptions", error === null, error ? String(error) : "");
     check("completes in < 20000ms", ms < 20000, `${ms}ms`);
