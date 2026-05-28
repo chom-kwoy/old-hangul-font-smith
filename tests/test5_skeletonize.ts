@@ -559,24 +559,28 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         );
       }
 
-      // Junction collinearity metric: for every degree-≥3 vertex P, for each
-      // arm PA, compute min over all other arms PB of
-      //   perp_dist(A, line_through_PB) / |PA|
-      // then take the min over arms. Report the min over all such junctions.
-      // Low value = two arms nearly collinear → potentially redundant edge.
+      // Junction spread metric: for every degree-≥3 vertex P, for each arm PA,
+      // compute the MAX |sin| to any other arm PB (= best perpendicular partner).
+      // Take the min over arms of that max — i.e. "every arm has at least one
+      // non-collinear partner."
+      //
+      // Valid T-junction (two collinear arms + one perpendicular): each arm's
+      // best partner is the perpendicular arm → score ≈ 1.0.
+      // Valid Y-junction (120° apart): score = sin(120°) ≈ 0.866.
+      // Degenerate junction (all arms in a narrow cone): every arm's best partner
+      // is still nearly collinear → score ≪ 0.3 → fails.
       {
-        // Build adjacency: vertex → list of neighbour indices
         const nbrs: number[][] = Array.from({ length: fitted.points.length }, () => []);
         for (const [u, v] of fitted.segments) {
           nbrs[u].push(v);
           nbrs[v].push(u);
         }
 
-        let worstJunctionRatio = Infinity;
-        let worstJunctionVertex = -1;
+        let worstSpread = Infinity;
+        let worstSpreadVertex = -1;
 
         for (let p = 0; p < fitted.points.length; p++) {
-          if (nbrs[p].length < 3) continue; // only junctions
+          if (nbrs[p].length < 3) continue;
 
           const pp = fitted.points[p];
           let junctionMin = Infinity;
@@ -587,34 +591,34 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             const armLen = Math.hypot(ax, ay);
             if (armLen < 1e-6) continue;
 
-            // min perpendicular distance from A to any other arm's line through P
-            let minPerpDist = Infinity;
+            // max |sin| from arm PA to any other arm PB
+            let maxSine = 0;
             for (const b of nbrs[p]) {
               if (b === a) continue;
               const pb = fitted.points[b];
               const bx = pb.x - pp.x, by = pb.y - pp.y;
               const bLen = Math.hypot(bx, by);
               if (bLen < 1e-6) continue;
-              // perp dist = |cross(A-P, B-P_dir)| = |(ax*by - ay*bx)| / bLen
-              const perp = Math.abs(ax * by - ay * bx) / bLen;
-              if (perp < minPerpDist) minPerpDist = perp;
+              const sine = Math.abs(ax * by - ay * bx) / (armLen * bLen);
+              if (sine > maxSine) maxSine = sine;
             }
 
-            const ratio = minPerpDist / armLen;
-            if (ratio < junctionMin) junctionMin = ratio;
+            if (maxSine < junctionMin) junctionMin = maxSine;
           }
 
-          if (junctionMin < worstJunctionRatio) {
-            worstJunctionRatio = junctionMin;
-            worstJunctionVertex = p;
+          if (junctionMin < worstSpread) {
+            worstSpread = junctionMin;
+            worstSpreadVertex = p;
           }
         }
 
-        if (worstJunctionVertex >= 0) {
-          console.log(`  junction collinearity: ${worstJunctionRatio.toFixed(3)}  (vertex ${worstJunctionVertex})`);
-          if (worstJunctionRatio < 0.01) {
-            console.log(`  segments: ${fitted.segments.map(([u,v],i)=>`${i}:[${u}->${v} (${fitted.points[u].x.toFixed(0)},${fitted.points[u].y.toFixed(0)})→(${fitted.points[v].x.toFixed(0)},${fitted.points[v].y.toFixed(0)})]`).join('  ')}`);
-          }
+        if (worstSpreadVertex >= 0) {
+          console.log(`  junction spread: ${worstSpread.toFixed(3)}  (vertex ${worstSpreadVertex})`);
+          check(
+            "junction spread ≥ 0.3",
+            worstSpread >= 0.3,
+            `${worstSpread.toFixed(3)}`,
+          );
         }
       }
 
