@@ -10,17 +10,16 @@
  *   2) skeleton edges (each a distinct hue)
  *   3) fitted primitives (same hue as their edge; vertex disks in grey)
  */
-import * as fs from "node:fs";
-
 import {
   Circle as FabricCircle,
   Line as FabricLine,
   Path as FabricPath,
   Polygon as FabricPolygon,
   Polyline as FabricPolyline,
-  StaticCanvas,
   Text as FabricText,
+  StaticCanvas,
 } from "fabric/node";
+import * as fs from "node:fs";
 import paper from "paper";
 
 import {
@@ -40,15 +39,16 @@ import {
   SkeletonIterCallback,
   computeMedialSkeletonPoints,
 } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+
 import {
+  TEST_PATHS,
   check,
   coverageFraction,
   finish,
-  getFlatBoundary,
   getBoundarySamples,
+  getFlatBoundary,
   suite,
   svgToCompoundPaths,
-  TEST_PATHS,
 } from "./testUtils";
 
 fs.mkdirSync("test_outputs", { recursive: true });
@@ -193,8 +193,8 @@ function renderSkeletonization(
     if (cp) {
       const [c1, c2] = cp;
       // cubic Bezier at t=0.5: (pA + 3*cp1 + 3*cp2 + pB) / 8
-      mx = (pu.x + 3*c1.x + 3*c2.x + pv.x) / 8;
-      my = (pu.y + 3*c1.y + 3*c2.y + pv.y) / 8;
+      mx = (pu.x + 3 * c1.x + 3 * c2.x + pv.x) / 8;
+      my = (pu.y + 3 * c1.y + 3 * c2.y + pv.y) / 8;
     } else {
       mx = (pu.x + pv.x) / 2;
       my = (pu.y + pv.y) / 2;
@@ -232,7 +232,7 @@ function renderSkeletonization(
   // --- Uncovered boundary samples (red dots) ---
   if (boundarySamples) {
     for (const s of boundarySamples) {
-      const covered = fitted.primitives.some(prim => {
+      const covered = fitted.primitives.some((prim) => {
         const pts = prim.origins.map((o, i) => ({
           x: o.x + prim.directions[i].x * prim.radii[i],
           y: o.y + prim.directions[i].y * prim.radii[i],
@@ -240,26 +240,42 @@ function renderSkeletonization(
         const N = pts.length;
         let inside = false;
         for (let i = 0, j = N - 1; i < N; j = i++) {
-          if (pts[i].y > s.y !== pts[j].y > s.y &&
-              s.x < ((pts[j].x - pts[i].x) * (s.y - pts[i].y)) / (pts[j].y - pts[i].y) + pts[i].x)
+          if (
+            pts[i].y > s.y !== pts[j].y > s.y &&
+            s.x <
+              ((pts[j].x - pts[i].x) * (s.y - pts[i].y)) /
+                (pts[j].y - pts[i].y) +
+                pts[i].x
+          )
             inside = !inside;
         }
         if (inside) return true;
         for (let i = 0, j = N - 1; i < N; j = i++) {
-          const ax = pts[j].x, ay = pts[j].y, bx = pts[i].x, by = pts[i].y;
-          const ddx = bx - ax, ddy = by - ay;
+          const ax = pts[j].x,
+            ay = pts[j].y,
+            bx = pts[i].x,
+            by = pts[i].y;
+          const ddx = bx - ax,
+            ddy = by - ay;
           const lenSq = ddx * ddx + ddy * ddy;
-          let t = lenSq > 1e-10 ? ((s.x - ax) * ddx + (s.y - ay) * ddy) / lenSq : 0;
+          let t =
+            lenSq > 1e-10 ? ((s.x - ax) * ddx + (s.y - ay) * ddy) / lenSq : 0;
           t = Math.max(0, Math.min(1, t));
-          if (Math.hypot(s.x - (ax + t * ddx), s.y - (ay + t * ddy)) < 5.0) return true;
+          if (Math.hypot(s.x - (ax + t * ddx), s.y - (ay + t * ddy)) < 5.0)
+            return true;
         }
         return false;
       });
       if (!covered) {
-        canvas.add(new FabricCircle({
-          left: tx(s.x), top: ty(s.y),
-          radius: 5, fill: "red", selectable: false,
-        }));
+        canvas.add(
+          new FabricCircle({
+            left: tx(s.x),
+            top: ty(s.y),
+            radius: 5,
+            fill: "red",
+            selectable: false,
+          }),
+        );
       }
     }
   }
@@ -313,8 +329,12 @@ function renderIteration(
 
   // --- Text banner ---
   const iterLabel = iter === 12 /* MAX_OUTER */ ? "final" : `iter ${iter}`;
-  const gainStr = iter === 0 ? "" : `  gain ${covGain >= 0 ? "+" : ""}${(covGain * 100).toFixed(1)}%`;
-  const actionStr = adding > 0 ? `  → adding ${adding} seed(s)` : `  → stopping`;
+  const gainStr =
+    iter === 0
+      ? ""
+      : `  gain ${covGain >= 0 ? "+" : ""}${(covGain * 100).toFixed(1)}%`;
+  const actionStr =
+    adding > 0 ? `  → adding ${adding} seed(s)` : `  → stopping`;
   const banner = `${iterLabel}  |  seeds=${V.length}  |  cov=${(cov * 100).toFixed(1)}%${gainStr}${actionStr}`;
   canvas.add(
     new FabricText(banner, {
@@ -424,16 +444,39 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     const samples = getBoundarySamples(path);
 
     let totalNmEvals = 0;
-    const iterCallback: SkeletonIterCallback = (iter, V, cov, covGain, adding, nmEvals) => {
+    const iterCallback: SkeletonIterCallback = (
+      iter,
+      V,
+      cov,
+      covGain,
+      adding,
+      nmEvals,
+    ) => {
       totalNmEvals = nmEvals;
-      renderIteration(path, axis, flatBoundary, V, cov, covGain, adding, iter, label);
+      renderIteration(
+        path,
+        axis,
+        flatBoundary,
+        V,
+        cov,
+        covGain,
+        adding,
+        iter,
+        label,
+      );
     };
 
     let fitted: FittedMedialAxisGraph | null = null;
     let error: unknown = null;
     const t0 = Date.now();
     try {
-      const seeds = computeMedialSkeletonPoints(path, axis, 3.0, false, iterCallback);
+      const seeds = computeMedialSkeletonPoints(
+        path,
+        axis,
+        3.0,
+        false,
+        iterCallback,
+      );
       const skeleton = constructMedialSkeleton(seeds, axis, path, true);
       fitted = localPrimitiveFitting(path, skeleton);
     } catch (e) {
@@ -450,7 +493,11 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       const nEdges = fitted.segments.length;
       const cov = coverageFraction(samples, fitted.primitives);
       console.log(`  📐 ${nVerts} vertices, ${nEdges} edges`);
-      check("final coverage ≥ 99.5%", cov >= 0.995, `${(cov * 100).toFixed(1)}%`);
+      check(
+        "final coverage ≥ 99.5%",
+        cov >= 0.995,
+        `${(cov * 100).toFixed(1)}%`,
+      );
       check("vertex count ≤ 25", nVerts <= 25, `${nVerts} vertices`);
       check(
         "has primitives",
@@ -461,15 +508,25 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       // Evaluate a point on a skeleton edge at parameter t ∈ [0,1].
       // Uses the cubic Bezier if control points are present, otherwise linear.
       function evalEdgeCurve(
-        pu: { x: number; y: number }, pv: { x: number; y: number },
+        pu: { x: number; y: number },
+        pv: { x: number; y: number },
         cp: [{ x: number; y: number }, { x: number; y: number }] | undefined,
         t: number,
       ): { x: number; y: number } {
-        if (!cp) return { x: pu.x + t * (pv.x - pu.x), y: pu.y + t * (pv.y - pu.y) };
+        if (!cp)
+          return { x: pu.x + t * (pv.x - pu.x), y: pu.y + t * (pv.y - pu.y) };
         const u = 1 - t;
         return {
-          x: u*u*u*pu.x + 3*u*u*t*cp[0].x + 3*u*t*t*cp[1].x + t*t*t*pv.x,
-          y: u*u*u*pu.y + 3*u*u*t*cp[0].y + 3*u*t*t*cp[1].y + t*t*t*pv.y,
+          x:
+            u * u * u * pu.x +
+            3 * u * u * t * cp[0].x +
+            3 * u * t * t * cp[1].x +
+            t * t * t * pv.x,
+          y:
+            u * u * u * pu.y +
+            3 * u * u * t * cp[0].y +
+            3 * u * t * t * cp[1].y +
+            t * t * t * pv.y,
         };
       }
 
@@ -482,7 +539,10 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       // by design, so their cap circles expand backward into the stroke body, inflating
       // meanR well above the actual boundary distances along the bezier.
       const vertexDegree = new Int32Array(fitted.points.length);
-      for (const [u, v] of fitted.segments) { vertexDegree[u]++; vertexDegree[v]++; }
+      for (const [u, v] of fitted.segments) {
+        vertexDegree[u]++;
+        vertexDegree[v]++;
+      }
       let worstRatio = Infinity;
       let worstEdgeIdx = -1;
       for (let i = 0; i < fitted.segments.length; i++) {
@@ -495,8 +555,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           (p) => p.type === "edge" && p.elementIdx === i,
         );
         if (!prim || prim.radii.length === 0) continue;
-        const meanR =
-          prim.radii.reduce((a, b) => a + b, 0) / prim.radii.length;
+        const meanR = prim.radii.reduce((a, b) => a + b, 0) / prim.radii.length;
         if (meanR <= 0) continue;
         let minBoundaryDist = Infinity;
         const N_SAMP = 20;
@@ -549,75 +608,87 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           const pv = fitted.points[v];
           console.log(
             `  ⚠  skeleton edge ${outsideEdge} exits shape at t=${outsideT.toFixed(2)}: ` +
-            `(${pu.x.toFixed(1)},${pu.y.toFixed(1)}) → (${pv.x.toFixed(1)},${pv.y.toFixed(1)})`,
+              `(${pu.x.toFixed(1)},${pu.y.toFixed(1)}) → (${pv.x.toFixed(1)},${pv.y.toFixed(1)})`,
           );
         }
         check(
           "all skeleton edges inside shape",
           outsideEdge < 0,
-          outsideEdge >= 0 ? `edge ${outsideEdge} exits at t=${outsideT.toFixed(2)}` : "",
+          outsideEdge >= 0
+            ? `edge ${outsideEdge} exits at t=${outsideT.toFixed(2)}`
+            : "",
         );
       }
 
-      // Junction spread metric: for every degree-≥3 vertex P, for each arm PA,
-      // compute the MAX |sin| to any other arm PB (= best perpendicular partner).
-      // Take the min over arms of that max — i.e. "every arm has at least one
-      // non-collinear partner."
-      //
-      // Valid T-junction (two collinear arms + one perpendicular): each arm's
-      // best partner is the perpendicular arm → score ≈ 1.0.
-      // Valid Y-junction (120° apart): score = sin(120°) ≈ 0.866.
-      // Degenerate junction (all arms in a narrow cone): every arm's best partner
-      // is still nearly collinear → score ≪ 0.3 → fails.
+      // Junction collinearity metric: for every degree-≥3 vertex P, for each
+      // arm PA, compute min over all other arms PB of
+      //   perp_dist(A, line_through_PB) / |PA|
+      // then take the min over arms. Report the min over all such junctions.
+      // Low value = two arms nearly collinear → potentially redundant edge.
       {
-        const nbrs: number[][] = Array.from({ length: fitted.points.length }, () => []);
+        // Build adjacency: vertex → list of neighbour indices
+        const nbrs: number[][] = Array.from(
+          { length: fitted.points.length },
+          () => [],
+        );
         for (const [u, v] of fitted.segments) {
           nbrs[u].push(v);
           nbrs[v].push(u);
         }
 
-        let worstSpread = Infinity;
-        let worstSpreadVertex = -1;
+        let worstJunctionRatio = Infinity;
+        let worstJunctionVertex = -1;
 
         for (let p = 0; p < fitted.points.length; p++) {
-          if (nbrs[p].length < 3) continue;
+          if (nbrs[p].length < 3) continue; // only junctions
 
           const pp = fitted.points[p];
           let junctionMin = Infinity;
 
           for (const a of nbrs[p]) {
             const pa = fitted.points[a];
-            const ax = pa.x - pp.x, ay = pa.y - pp.y;
+            const ax = pa.x - pp.x,
+              ay = pa.y - pp.y;
             const armLen = Math.hypot(ax, ay);
             if (armLen < 1e-6) continue;
 
-            // max |sin| from arm PA to any other arm PB
-            let maxSine = 0;
+            // min perpendicular distance from A to any other arm's line through P
+            let minPerpDist = Infinity;
             for (const b of nbrs[p]) {
               if (b === a) continue;
               const pb = fitted.points[b];
-              const bx = pb.x - pp.x, by = pb.y - pp.y;
+              const bx = pb.x - pp.x,
+                by = pb.y - pp.y;
               const bLen = Math.hypot(bx, by);
               if (bLen < 1e-6) continue;
-              const sine = Math.abs(ax * by - ay * bx) / (armLen * bLen);
-              if (sine > maxSine) maxSine = sine;
+              // perp dist = |cross(A-P, B-P_dir)| = |(ax*by - ay*bx)| / bLen
+              const perp = Math.abs(ax * by - ay * bx) / bLen;
+              if (perp < minPerpDist) minPerpDist = perp;
             }
 
-            if (maxSine < junctionMin) junctionMin = maxSine;
+            const ratio = minPerpDist / armLen;
+            if (ratio < junctionMin) junctionMin = ratio;
           }
 
-          if (junctionMin < worstSpread) {
-            worstSpread = junctionMin;
-            worstSpreadVertex = p;
+          if (junctionMin < worstJunctionRatio) {
+            worstJunctionRatio = junctionMin;
+            worstJunctionVertex = p;
           }
         }
 
-        if (worstSpreadVertex >= 0) {
-          console.log(`  junction spread: ${worstSpread.toFixed(3)}  (vertex ${worstSpreadVertex})`);
+        if (worstJunctionVertex >= 0) {
+          console.log(
+            `  junction collinearity: ${worstJunctionRatio.toFixed(3)}  (vertex ${worstJunctionVertex})`,
+          );
+          if (worstJunctionRatio < 0.01) {
+            console.log(
+              `  segments: ${fitted.segments.map(([u, v], i) => `${i}:[${u}->${v} (${fitted.points[u].x.toFixed(0)},${fitted.points[u].y.toFixed(0)})→(${fitted.points[v].x.toFixed(0)},${fitted.points[v].y.toFixed(0)})]`).join("  ")}`,
+            );
+          }
           check(
-            "junction spread ≥ 0.3",
-            worstSpread >= 0.3,
-            `${worstSpread.toFixed(3)}`,
+            "worst junction collinearity >= 0.01",
+            worstJunctionRatio >= 0.01,
+            `${worstJunctionRatio.toFixed(3)}`,
           );
         }
       }

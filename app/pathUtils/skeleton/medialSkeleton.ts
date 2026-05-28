@@ -225,21 +225,68 @@ export function constructMedialSkeleton(
   function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
     const chord = Math.hypot(pB.x - pA.x, pB.y - pA.y);
     let txA = 0, tyA = 0, txB = 0, tyB = 0;
-    if (rawPath.length >= 2) {
-      // Use a look-ahead of up to 3 raw-axis hops when computing the departure
-      // and arrival tangents.  A single hop (rawPath[1]) is only ~5–15 px from
-      // a junction node, so local triangulation jitter is amplified into a large
-      // bezier bulge when scaled by chord/3.  Three hops provide a stable
-      // base-line while still capturing genuine path curvature near the endpoints.
-      const LA = 3;
-      const kA = Math.min(rawPath.length - 1, LA);
-      const kB = Math.max(0, rawPath.length - 1 - LA);
+    const n = rawPath.length;
+    if (n >= 2) {
+      // Skip micro-steps at the start of the raw path (< 5px) that appear when
+      // a T-junction node is offset from the rest of the raw axis.  Then walk
+      // forward until cumulative arc-length >= MIN_DIST.
+      // The departure tangent is computed as the body direction (rawPath[startA]
+      // → rawPath[kA]) rather than the vertex-to-look-ahead direction, so the
+      // junction kink at rawPath[0] doesn't tilt the Bezier.
+      const MIN_STEP = 5.0;
+      const MIN_DIST = Math.min(chord * 0.12, 40.0);
+
+      let startA = 1;
+      while (startA < n - 1) {
+        const ps = rawPoints[rawPath[startA]];
+        const p0 = rawPoints[rawPath[0]];
+        if (Math.hypot(ps.x - p0.x, ps.y - p0.y) >= MIN_STEP) break;
+        startA++;
+      }
+      // Walk forward from startA: advance kA first, then check cumulative distance.
+      // This guarantees kA > startA so pStart != p1 and the tangent is never zero.
+      let cumA = 0, kA = startA;
+      while (kA < n - 1) {
+        const curr = rawPoints[rawPath[kA]];
+        const next = rawPoints[rawPath[kA + 1]];
+        cumA += Math.hypot(next.x - curr.x, next.y - curr.y);
+        kA++;
+        if (cumA >= MIN_DIST) break;
+      }
+      const pStart = rawPoints[rawPath[startA]];
       const p1 = rawPoints[rawPath[kA]];
-      const la = Math.hypot(p1.x - pA.x, p1.y - pA.y);
-      if (la > 1e-6) { txA = (p1.x - pA.x) / la; tyA = (p1.y - pA.y) / la; }
+      const la = Math.hypot(p1.x - pStart.x, p1.y - pStart.y);
+      if (la > 1e-6) {
+        txA = (p1.x - pStart.x) / la; tyA = (p1.y - pStart.y) / la;
+      } else {
+        // Path too short for body-direction: fall back to raw-path chord
+        const r0 = rawPoints[rawPath[0]], rN1 = rawPoints[rawPath[n - 1]];
+        const df = Math.hypot(rN1.x - r0.x, rN1.y - r0.y);
+        if (df > 1e-6) { txA = (rN1.x - r0.x) / df; tyA = (rN1.y - r0.y) / df; }
+      }
+
+      // Arrival tangent at pB: walk backward from n-2 until cumulative arc >= MIN_DIST,
+      // then use direction from rawPath[kB] toward pB (the actual output vertex).
+      // Unlike the departure, we always aim toward pB — not toward a raw node — so that
+      // T-junction snaps and NM-displaced endpoints arrive at the correct vertex position.
+      let cumB = 0, kB = n - 2;
+      while (kB > 0) {
+        const curr = rawPoints[rawPath[kB]];
+        const prev = rawPoints[rawPath[kB - 1]];
+        cumB += Math.hypot(curr.x - prev.x, curr.y - prev.y);
+        kB--;
+        if (cumB >= MIN_DIST) break;
+      }
       const pK = rawPoints[rawPath[kB]];
       const lb = Math.hypot(pB.x - pK.x, pB.y - pK.y);
-      if (lb > 1e-6) { txB = (pB.x - pK.x) / lb; tyB = (pB.y - pK.y) / lb; }
+      if (lb > 1e-6) {
+        txB = (pB.x - pK.x) / lb; tyB = (pB.y - pK.y) / lb;
+      } else {
+        // kB is right next to pB; use the raw-path chord as fallback
+        const r0 = rawPoints[rawPath[0]], rN1 = rawPoints[rawPath[n - 1]];
+        const df = Math.hypot(rN1.x - r0.x, rN1.y - r0.y);
+        if (df > 1e-6) { txB = (rN1.x - r0.x) / df; tyB = (rN1.y - r0.y) / df; }
+      }
     } else if (chord > 1e-6) {
       txA = (pB.x - pA.x) / chord; tyA = (pB.y - pA.y) / chord;
       txB = txA; tyB = tyA;
