@@ -94,38 +94,46 @@ function renderSkeletonization(
   const strokeColor = (i: number) => `hsl(${hue(i)}, 70%, 35%)`;
   const fillColor = (i: number) => `hsla(${hue(i)}, 70%, 60%, 0.18)`;
 
-  // --- 1. Original path outline — exact bezier curves via FabricPath ---
-  for (const child of path.children as paper.Path[]) {
-    if (child.segments.length === 0) continue;
-    const cmds: string[] = [];
-    for (let i = 0; i < child.segments.length; i++) {
-      const seg = child.segments[i];
-      const pt = seg.point;
-      if (i === 0) {
-        cmds.push(`M ${tx(pt.x)} ${ty(pt.y)}`);
-      } else {
-        const prev = child.segments[i - 1];
-        const cp1 = prev.point.add(prev.handleOut);
-        const cp2 = pt.add(seg.handleIn);
-        cmds.push(`C ${tx(cp1.x)} ${ty(cp1.y)} ${tx(cp2.x)} ${ty(cp2.y)} ${tx(pt.x)} ${ty(pt.y)}`);
+  // --- 1. Original path outline — single compound FabricPath (holes render as holes) ---
+  {
+    const allCmds: string[] = [];
+    for (const child of path.children as paper.Path[]) {
+      if (child.segments.length === 0) continue;
+      for (let i = 0; i < child.segments.length; i++) {
+        const seg = child.segments[i];
+        const pt = seg.point;
+        if (i === 0) {
+          allCmds.push(`M ${tx(pt.x)} ${ty(pt.y)}`);
+        } else {
+          const prev = child.segments[i - 1];
+          const cp1 = prev.point.add(prev.handleOut);
+          const cp2 = pt.add(seg.handleIn);
+          allCmds.push(
+            `C ${tx(cp1.x)} ${ty(cp1.y)} ${tx(cp2.x)} ${ty(cp2.y)} ${tx(pt.x)} ${ty(pt.y)}`,
+          );
+        }
+      }
+      if (child.closed) {
+        const last = child.segments[child.segments.length - 1];
+        const first = child.segments[0];
+        const cp1 = last.point.add(last.handleOut);
+        const cp2 = first.point.add(first.handleIn);
+        allCmds.push(
+          `C ${tx(cp1.x)} ${ty(cp1.y)} ${tx(cp2.x)} ${ty(cp2.y)} ${tx(first.point.x)} ${ty(first.point.y)} Z`,
+        );
       }
     }
-    // Close with a bezier back to the first segment
-    if (child.closed) {
-      const last = child.segments[child.segments.length - 1];
-      const first = child.segments[0];
-      const cp1 = last.point.add(last.handleOut);
-      const cp2 = first.point.add(first.handleIn);
-      cmds.push(`C ${tx(cp1.x)} ${ty(cp1.y)} ${tx(cp2.x)} ${ty(cp2.y)} ${tx(first.point.x)} ${ty(first.point.y)} Z`);
+    if (allCmds.length > 0) {
+      canvas.add(
+        new FabricPath(allCmds.join(" "), {
+          fill: "rgba(0,0,0,0.5)",
+          fillRule: "evenodd",
+          stroke: "rgba(0,0,0,0.75)",
+          strokeWidth: 2,
+          selectable: false,
+        }),
+      );
     }
-    canvas.add(
-      new FabricPath(cmds.join(" "), {
-        fill: "none",
-        stroke: "rgba(0,0,0,0.75)",
-        strokeWidth: 2,
-        selectable: false,
-      }),
-    );
   }
 
   // --- 2. Fitted primitives (under edges so edges stay visible) ---
