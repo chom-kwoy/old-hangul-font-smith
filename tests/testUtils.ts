@@ -4,7 +4,14 @@
 import { DOMParser } from "@xmldom/xmldom";
 import paper from "paper";
 
-import { buildFlatBoundary, sampleBoundary } from "@/app/pathUtils/flatBoundary";
+import {
+  buildFlatBoundary,
+  sampleBoundary,
+} from "@/app/pathUtils/flatBoundary";
+import {
+  Primitive,
+  primitivePts,
+} from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import * as testPaths from "@/app/testpage/testPaths";
 import { initDrawContexts } from "@/app/utils/init";
 
@@ -67,10 +74,17 @@ export function checkApprox(
   lo: number,
   hi: number,
 ) {
-  check(label, actual >= lo && actual <= hi, `got ${actual.toFixed(3)}, expected [${lo}, ${hi}]`);
+  check(
+    label,
+    actual >= lo && actual <= hi,
+    `got ${actual.toFixed(3)}, expected [${lo}, ${hi}]`,
+  );
 }
 
-export function measure<T>(label: string, fn: () => T): { result: T; ms: number } {
+export function measure<T>(
+  label: string,
+  fn: () => T,
+): { result: T; ms: number } {
   const t0 = Date.now();
   const result = fn();
   const ms = Date.now() - t0;
@@ -102,13 +116,16 @@ export function getFlatBoundary(path: paper.CompoundPath) {
 /** Count boundary samples covered by any primitive boundary polygon. */
 export function coverageFraction(
   samples: paper.Point[],
-  primitives: Array<{ origins: { x: number; y: number }[]; directions: { x: number; y: number }[]; radii: number[] }>,
-  delta = 5.0,
+  primitives: Primitive[],
+  delta = 1.0,
 ): number {
   let covered = 0;
   for (const s of samples) {
     for (const prim of primitives) {
-      if (primCovers(s.x, s.y, prim, delta)) { covered++; break; }
+      if (primCovers(s.x, s.y, prim, delta)) {
+        covered++;
+        break;
+      }
     }
   }
   return covered / samples.length;
@@ -117,29 +134,38 @@ export function coverageFraction(
 function primCovers(
   px: number,
   py: number,
-  prim: { origins: { x: number; y: number }[]; directions: { x: number; y: number }[]; radii: number[] },
+  prim: Primitive,
   delta: number,
 ): boolean {
-  const N = prim.origins.length;
+  const pts = primitivePts(prim);
+  const N = pts.length;
   const vx = new Float64Array(N);
   const vy = new Float64Array(N);
   for (let i = 0; i < N; i++) {
-    vx[i] = prim.origins[i].x + prim.directions[i].x * prim.radii[i];
-    vy[i] = prim.origins[i].y + prim.directions[i].y * prim.radii[i];
+    vx[i] = pts[i].x;
+    vy[i] = pts[i].y;
   }
   let inside = false;
   for (let i = 0, j = N - 1; i < N; j = i++) {
-    if (vy[i] > py !== vy[j] > py && px < ((vx[j] - vx[i]) * (py - vy[i])) / (vy[j] - vy[i]) + vx[i])
+    if (
+      vy[i] > py !== vy[j] > py &&
+      px < ((vx[j] - vx[i]) * (py - vy[i])) / (vy[j] - vy[i]) + vx[i]
+    )
       inside = !inside;
   }
   if (inside) return true;
   for (let i = 0, j = N - 1; i < N; j = i++) {
-    const ax = vx[j], ay = vy[j], bx = vx[i], by = vy[i];
-    const ddx = bx - ax, ddy = by - ay;
+    const ax = vx[j],
+      ay = vy[j],
+      bx = vx[i],
+      by = vy[i];
+    const ddx = bx - ax,
+      ddy = by - ay;
     const lenSq = ddx * ddx + ddy * ddy;
     let t = lenSq > 1e-10 ? ((px - ax) * ddx + (py - ay) * ddy) / lenSq : 0;
     t = Math.max(0, Math.min(1, t));
-    if (Math.hypot(px - (ax + t * ddx), py - (ay + t * ddy)) < delta) return true;
+    if (Math.hypot(px - (ax + t * ddx), py - (ay + t * ddy)) < delta)
+      return true;
   }
   return false;
 }

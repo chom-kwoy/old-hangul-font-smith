@@ -47,10 +47,13 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
 
     check("completes in < 10000ms", ms < 10000, `${ms}ms`);
 
-    // One primitive per vertex + one per edge (Step 4: all vertices get disks)
-    const expectedCount = skeleton.points.length + skeleton.segments.length;
+    // One primitive per isolated vertex (degree 0) + one per edge
+    const degree = new Int32Array(skeleton.points.length);
+    for (const [a, b] of skeleton.segments) { degree[a]++; degree[b]++; }
+    const isolatedVerts = Array.from(degree).filter((d) => d === 0).length;
+    const expectedCount = isolatedVerts + skeleton.segments.length;
     check(
-      "primitive count = vertices + edges",
+      "primitive count = isolated vertices + edges",
       fitted!.primitives.length === expectedCount,
       `got ${fitted!.primitives.length}, expected ${expectedCount}`,
     );

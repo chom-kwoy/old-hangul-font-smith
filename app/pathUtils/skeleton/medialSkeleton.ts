@@ -6,6 +6,10 @@ import {
   buildFlatBoundary,
   nearestDistFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
+import {
+  fitBezierCPs,
+  tangentFallbackCPs,
+} from "@/app/pathUtils/skeleton/bezierFitting";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { Vec2D } from "@/app/utils/types";
 
@@ -294,180 +298,18 @@ export function constructMedialSkeleton(
     ]);
   }
 
-  // Fallback: tangent-based control point estimation (arc-length look-ahead).
-  // Used when the LSQ system is ill-conditioned or the raw path is too short.
+  // Thin wrappers around the standalone functions in bezierFitting.ts that
+  // capture rawPoints and regularization from the enclosing scope.
   function tangentBasedBezierCPs(
     rawPath: number[],
     pA: Vec2D,
     pB: Vec2D,
   ): [Vec2D, Vec2D] {
-    const chord = Math.hypot(pB.x - pA.x, pB.y - pA.y);
-    let txA = 0,
-      tyA = 0,
-      txB = 0,
-      tyB = 0;
-    const n = rawPath.length;
-    if (n >= 2) {
-      // Skip micro-steps at the start of the raw path (< 5px) that appear when
-      // a T-junction node is offset from the rest of the raw axis.  Then walk
-      // forward until cumulative arc-length >= MIN_DIST.
-      // The departure tangent is computed as the body direction (rawPath[startA]
-      // → rawPath[kA]) rather than the vertex-to-look-ahead direction, so the
-      // junction kink at rawPath[0] doesn't tilt the Bezier.
-      const MIN_STEP = 5.0;
-      const MIN_DIST = Math.min(chord * 0.12, 40.0);
-
-      let startA = 1;
-      while (startA < n - 1) {
-        const ps = rawPoints[rawPath[startA]];
-        const p0 = rawPoints[rawPath[0]];
-        if (Math.hypot(ps.x - p0.x, ps.y - p0.y) >= MIN_STEP) break;
-        startA++;
-      }
-      // Walk forward from startA: advance kA first, then check cumulative distance.
-      // This guarantees kA > startA so pStart != p1 and the tangent is never zero.
-      let cumA = 0,
-        kA = startA;
-      while (kA < n - 1) {
-        const curr = rawPoints[rawPath[kA]];
-        const next = rawPoints[rawPath[kA + 1]];
-        cumA += Math.hypot(next.x - curr.x, next.y - curr.y);
-        kA++;
-        if (cumA >= MIN_DIST) break;
-      }
-      const pStart = rawPoints[rawPath[startA]];
-      const p1 = rawPoints[rawPath[kA]];
-      const la = Math.hypot(p1.x - pStart.x, p1.y - pStart.y);
-      if (la > 1e-6) {
-        txA = (p1.x - pStart.x) / la;
-        tyA = (p1.y - pStart.y) / la;
-      } else {
-        // Path too short for body-direction: fall back to raw-path chord
-        const r0 = rawPoints[rawPath[0]],
-          rN1 = rawPoints[rawPath[n - 1]];
-        const df = Math.hypot(rN1.x - r0.x, rN1.y - r0.y);
-        if (df > 1e-6) {
-          txA = (rN1.x - r0.x) / df;
-          tyA = (rN1.y - r0.y) / df;
-        }
-      }
-
-      // Arrival tangent at pB: walk backward from n-2 until cumulative arc >= MIN_DIST,
-      // then use direction from rawPath[kB] toward pB (the actual output vertex).
-      // Unlike the departure, we always aim toward pB — not toward a raw node — so that
-      // T-junction snaps and NM-displaced endpoints arrive at the correct vertex position.
-      let cumB = 0,
-        kB = n - 2;
-      while (kB > 0) {
-        const curr = rawPoints[rawPath[kB]];
-        const prev = rawPoints[rawPath[kB - 1]];
-        cumB += Math.hypot(curr.x - prev.x, curr.y - prev.y);
-        kB--;
-        if (cumB >= MIN_DIST) break;
-      }
-      const pK = rawPoints[rawPath[kB]];
-      const lb = Math.hypot(pB.x - pK.x, pB.y - pK.y);
-      if (lb > 1e-6) {
-        txB = (pB.x - pK.x) / lb;
-        tyB = (pB.y - pK.y) / lb;
-      } else {
-        // kB is right next to pB; use the raw-path chord as fallback
-        const r0 = rawPoints[rawPath[0]],
-          rN1 = rawPoints[rawPath[n - 1]];
-        const df = Math.hypot(rN1.x - r0.x, rN1.y - r0.y);
-        if (df > 1e-6) {
-          txB = (rN1.x - r0.x) / df;
-          tyB = (rN1.y - r0.y) / df;
-        }
-      }
-    } else if (chord > 1e-6) {
-      txA = (pB.x - pA.x) / chord;
-      tyA = (pB.y - pA.y) / chord;
-      txB = txA;
-      tyB = tyA;
-    }
-    const s = chord / 3;
-    return [
-      { x: pA.x + txA * s, y: pA.y + tyA * s },
-      { x: pB.x - txB * s, y: pB.y - tyB * s },
-    ];
+    return tangentFallbackCPs(rawPath, rawPoints, pA, pB);
   }
 
-  // Arc-length least-squares fit of cp1/cp2 to all raw path nodes.
-  // Minimises sum of squared distances from raw axis points to the cubic Bezier.
-  // Falls back to tangent-based estimation when the system is ill-conditioned.
   function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
-    const n = rawPath.length;
-    // Need ≥4 nodes: endpoints (t=0,1) contribute A=B=0; n=3 gives a rank-1 system.
-    if (n < 4) return tangentBasedBezierCPs(rawPath, pA, pB);
-
-    // Arc-length parameterisation along the raw path
-    const arcLen = new Float64Array(n);
-    for (let i = 1; i < n; i++) {
-      const prev = rawPoints[rawPath[i - 1]],
-        curr = rawPoints[rawPath[i]];
-      arcLen[i] = arcLen[i - 1] + Math.hypot(curr.x - prev.x, curr.y - prev.y);
-    }
-    const totalLen = arcLen[n - 1];
-    if (totalLen < 1e-6) return tangentBasedBezierCPs(rawPath, pA, pB);
-
-    // Accumulate normal-equation sums for the 2×2 system (x and y share the same matrix)
-    let sumA2 = 0,
-      sumAB = 0,
-      sumB2 = 0;
-    let sumARx = 0,
-      sumBRx = 0,
-      sumARy = 0,
-      sumBRy = 0;
-    for (let i = 0; i < n; i++) {
-      const t = arcLen[i] / totalLen,
-        u = 1 - t;
-      const Ai = 3 * u * u * t,
-        Bi = 3 * u * t * t;
-      const pt = rawPoints[rawPath[i]];
-      const Rxi = pt.x - u * u * u * pA.x - t * t * t * pB.x;
-      const Ryi = pt.y - u * u * u * pA.y - t * t * t * pB.y;
-      sumA2 += Ai * Ai;
-      sumAB += Ai * Bi;
-      sumB2 += Bi * Bi;
-      sumARx += Ai * Rxi;
-      sumBRx += Bi * Rxi;
-      sumARy += Ai * Ryi;
-      sumBRy += Bi * Ryi;
-    }
-
-    // Tikhonov regularisation: add λ·‖(cp − cp_nat)/L‖² toward the chord-line prior.
-    // Dividing by totalLen normalises by arc length so the relative-curvature bias
-    // is constant across segment lengths (without it, longer segments get suppressed
-    // more than shorter ones with equal curvature).
-    const lambda =
-      (opts.bezierLSQRegularization * (sumA2 + sumB2)) / 2 / totalLen;
-    const cp1NatX = pA.x + (pB.x - pA.x) / 3,
-      cp1NatY = pA.y + (pB.y - pA.y) / 3;
-    const cp2NatX = pA.x + (2 * (pB.x - pA.x)) / 3,
-      cp2NatY = pA.y + (2 * (pB.y - pA.y)) / 3;
-    const rA2 = sumA2 + lambda,
-      rB2 = sumB2 + lambda;
-    const rARx = sumARx + lambda * cp1NatX,
-      rARy = sumARy + lambda * cp1NatY;
-    const rBRx = sumBRx + lambda * cp2NatX,
-      rBRy = sumBRy + lambda * cp2NatY;
-
-    // Cramer's rule; fall back if matrix is still ill-conditioned
-    const det = rA2 * rB2 - sumAB * sumAB;
-    if (!(Math.abs(det) >= 1e-10 * rA2 * rB2)) {
-      return tangentBasedBezierCPs(rawPath, pA, pB);
-    }
-    return [
-      {
-        x: (rARx * rB2 - rBRx * sumAB) / det,
-        y: (rARy * rB2 - rBRy * sumAB) / det,
-      },
-      {
-        x: (rA2 * rBRx - sumAB * rARx) / det,
-        y: (rA2 * rBRy - sumAB * rARy) / det,
-      },
-    ];
+    return fitBezierCPs(rawPath, rawPoints, pA, pB, opts.bezierLSQRegularization);
   }
 
   // Returns true if the bone curve from pA to pB (Bezier if cp given) stays inside the path.
@@ -747,11 +589,15 @@ export function constructMedialSkeleton(
     }
   }
 
+  const vertexRawNodes = new Array<number>(finalPoints.length).fill(-1);
+  for (const [outIdx, rn] of outToRaw) vertexRawNodes[outIdx] = rn;
+
   return {
     points: finalPoints,
     segments: newSegments,
     controlPoints: finalControlPoints,
     rawPathSamples,
+    vertexRawNodes,
   };
 }
 

@@ -40,6 +40,7 @@ import {
   SkeletonIterCallback,
   computeMedialSkeletonPoints,
 } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
 import { clipPrimitivesToShape } from "@/app/pathUtils/skeleton/skeleton";
 
 import {
@@ -151,12 +152,12 @@ function renderSkeletonization(
         }),
       );
     } else {
-      // vertex disk — subtle grey
+      // vertex disk (this should only appear for 0-degree vertices)
       canvas.add(
         new FabricPolygon(pts, {
-          fill: "rgba(160,160,210,0.10)",
-          stroke: "rgba(120,120,180,0.30)",
-          strokeWidth: 0.5,
+          fill: "rgba(255,100,100,1.0)",
+          stroke: "rgba(255,0,0,1.0)",
+          strokeWidth: 3,
           selectable: false,
           objectCaching: false,
         }),
@@ -391,7 +392,8 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         iterCallback,
       );
       const skeleton = constructMedialSkeleton(seeds, axis, path, true);
-      fitted = localPrimitiveFitting(path, skeleton);
+      const simplifiedSkeleton = simplifyMedialSkeleton(skeleton, axis, path);
+      fitted = localPrimitiveFitting(path, simplifiedSkeleton);
       clipPrimitivesToShape(fitted, path);
     } catch (e) {
       error = e;

@@ -166,7 +166,13 @@ export function localPrimitiveFitting(
   }
 
   // --- Process 1: Free-standing Vertices (Generalized Disks) ---
+  // Only fit vertex primitives for isolated vertices (degree 0).
+  // Vertices that belong to edges are already covered by their edge capsule's cap fans.
+  const vertexDegree = new Int32Array(skeleton.points.length);
+  for (const [a, b] of skeleton.segments) { vertexDegree[a]++; vertexDegree[b]++; }
+
   for (let i = 0; i < skeleton.points.length; i++) {
+    if (vertexDegree[i] > 0) continue;
     const center = skeleton.points[i];
     for (let j = 0; j < N; j++) {
       scratch.origX[j] = center.x;

@@ -17,6 +17,8 @@ export interface MedialAxisGraph {
   controlPoints?: [Vec2D, Vec2D][];
   // Diagnostic: raw-path quartile samples [q1, mid, q3] per segment (parallel to `segments`).
   rawPathSamples?: [Vec2D, Vec2D, Vec2D][];
+  // Maps output vertex index → raw medial axis node index. Used by skeleton simplification.
+  vertexRawNodes?: number[];
 }
 
 /**

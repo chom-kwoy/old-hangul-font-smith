@@ -341,7 +341,7 @@ function polyCovers(px: number, py: number, poly: PrimPolygon, delta: number): b
   return false;
 }
 
-function coverageAndUncovered(
+export function coverageAndUncovered(
   samples: paper.Point[],
   primitives: Primitive[],
   delta = 5.0,
