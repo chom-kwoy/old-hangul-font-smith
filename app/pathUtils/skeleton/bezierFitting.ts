@@ -67,14 +67,111 @@ function projectOnBezier(
     // B''(t)
     const d2x = 6 * (u * (c2x - 2 * c1x + pAx) + t * (pBx - 2 * c2x + c1x));
     const d2y = 6 * (u * (c2y - 2 * c1y + pAy) + t * (pBy - 2 * c2y + c1y));
-    // f(t)  = B'(t) · (B(t) - p)
-    // f'(t) = |B'(t)|² + B''(t) · (B(t) - p)
+    // f(t) = B'(t)·(B(t)-p),  f'(t) = |B'(t)|² + B''(t)·(B(t)-p)
     const f = dx * ex + dy * ey;
     const fp = dx * dx + dy * dy + d2x * ex + d2y * ey;
     if (Math.abs(fp) < 1e-10) break;
     t = Math.max(0, Math.min(1, t - f / fp));
   }
   return t;
+}
+
+/**
+ * Shared alternating re-parameterisation loop for both fitting functions.
+ *
+ * Iterates N_REFIT_ITERS+1 times: parametric LSQ solve → Newton foot-point
+ * re-projection of interior parameters → repeat.  ts[0] and ts[n-1] are kept
+ * fixed at 0 and 1.  On an ill-conditioned matrix at the first iteration,
+ * returns onFirstIterFail(); on later iterations returns the last valid CPs.
+ */
+function fitBezierCPsCore(
+  n: number,
+  getPoint: (i: number) => Vec2D,
+  ts: Float64Array,
+  pA: Vec2D,
+  pB: Vec2D,
+  totalLen: number,
+  regularization: number,
+  onFirstIterFail: () => [Vec2D, Vec2D],
+): [Vec2D, Vec2D] {
+  const cp1NatX = pA.x + (pB.x - pA.x) / 3,
+    cp1NatY = pA.y + (pB.y - pA.y) / 3;
+  const cp2NatX = pA.x + (2 * (pB.x - pA.x)) / 3,
+    cp2NatY = pA.y + (2 * (pB.y - pA.y)) / 3;
+  let cp1x = cp1NatX,
+    cp1y = cp1NatY;
+  let cp2x = cp2NatX,
+    cp2y = cp2NatY;
+
+  for (let iter = 0; iter <= N_REFIT_ITERS; iter++) {
+    let sumA2 = 0,
+      sumAB = 0,
+      sumB2 = 0;
+    let sumARx = 0,
+      sumBRx = 0,
+      sumARy = 0,
+      sumBRy = 0;
+    for (let i = 0; i < n; i++) {
+      const t = ts[i],
+        u = 1 - t;
+      const Ai = 3 * u * u * t,
+        Bi = 3 * u * t * t;
+      const pt = getPoint(i);
+      const Rxi = pt.x - u * u * u * pA.x - t * t * t * pB.x;
+      const Ryi = pt.y - u * u * u * pA.y - t * t * t * pB.y;
+      sumA2 += Ai * Ai;
+      sumAB += Ai * Bi;
+      sumB2 += Bi * Bi;
+      sumARx += Ai * Rxi;
+      sumBRx += Bi * Rxi;
+      sumARy += Ai * Ryi;
+      sumBRy += Bi * Ryi;
+    }
+    const lambda =
+      totalLen > 1e-6 ? (regularization * (sumA2 + sumB2)) / 2 / totalLen : 0;
+    const rA2 = sumA2 + lambda,
+      rB2 = sumB2 + lambda;
+    const rARx = sumARx + lambda * cp1NatX,
+      rARy = sumARy + lambda * cp1NatY;
+    const rBRx = sumBRx + lambda * cp2NatX,
+      rBRy = sumBRy + lambda * cp2NatY;
+    const det = rA2 * rB2 - sumAB * sumAB;
+    if (!(Math.abs(det) >= 1e-10 * rA2 * rB2)) {
+      return iter === 0
+        ? onFirstIterFail()
+        : [
+            { x: cp1x, y: cp1y },
+            { x: cp2x, y: cp2y },
+          ];
+    }
+    cp1x = (rARx * rB2 - rBRx * sumAB) / det;
+    cp1y = (rARy * rB2 - rBRy * sumAB) / det;
+    cp2x = (rA2 * rBRx - sumAB * rARx) / det;
+    cp2y = (rA2 * rBRy - sumAB * rARy) / det;
+
+    if (iter < N_REFIT_ITERS) {
+      for (let i = 1; i < n - 1; i++) {
+        const pt = getPoint(i);
+        ts[i] = projectOnBezier(
+          pt.x,
+          pt.y,
+          pA.x,
+          pA.y,
+          cp1x,
+          cp1y,
+          cp2x,
+          cp2y,
+          pB.x,
+          pB.y,
+          ts[i],
+        );
+      }
+    }
+  }
+  return [
+    { x: cp1x, y: cp1y },
+    { x: cp2x, y: cp2y },
+  ];
 }
 
 /**
@@ -99,22 +196,22 @@ export function tangentFallbackCPs(
 
     let startA = 1;
     while (startA < n - 1) {
-      const ps = rawPoints[rawPath[startA]];
-      const p0 = rawPoints[rawPath[0]];
+      const ps = rawPoints[rawPath[startA]],
+        p0 = rawPoints[rawPath[0]];
       if (Math.hypot(ps.x - p0.x, ps.y - p0.y) >= MIN_STEP) break;
       startA++;
     }
     let cumA = 0,
       kA = startA;
     while (kA < n - 1) {
-      const curr = rawPoints[rawPath[kA]];
-      const next = rawPoints[rawPath[kA + 1]];
+      const curr = rawPoints[rawPath[kA]],
+        next = rawPoints[rawPath[kA + 1]];
       cumA += Math.hypot(next.x - curr.x, next.y - curr.y);
       kA++;
       if (cumA >= MIN_DIST) break;
     }
-    const pStart = rawPoints[rawPath[startA]];
-    const p1 = rawPoints[rawPath[kA]];
+    const pStart = rawPoints[rawPath[startA]],
+      p1 = rawPoints[rawPath[kA]];
     const la = Math.hypot(p1.x - pStart.x, p1.y - pStart.y);
     if (la > 1e-6) {
       txA = (p1.x - pStart.x) / la;
@@ -132,8 +229,8 @@ export function tangentFallbackCPs(
     let cumB = 0,
       kB = n - 2;
     while (kB > 0) {
-      const curr = rawPoints[rawPath[kB]];
-      const prev = rawPoints[rawPath[kB - 1]];
+      const curr = rawPoints[rawPath[kB]],
+        prev = rawPoints[rawPath[kB - 1]];
       cumB += Math.hypot(curr.x - prev.x, curr.y - prev.y);
       kB--;
       if (cumB >= MIN_DIST) break;
@@ -168,11 +265,7 @@ export function tangentFallbackCPs(
 /**
  * Least-squares Bezier control point fit over all raw medial axis nodes,
  * with alternating re-parameterisation to minimise orthogonal distance.
- *
- * Each iteration: solve the 2×2 parametric LSQ for cp1/cp2, then Newton-project
- * each interior node onto the current Bezier to update its parameter t_i.
- * Tikhonov regularisation toward the chord-line prior, normalised by arc length.
- * Falls back to tangentFallbackCPs when ill-conditioned or path is too short.
+ * Falls back to tangentFallbackCPs when ill-conditioned or path too short.
  */
 export function fitBezierCPs(
   rawPath: number[],
@@ -184,7 +277,6 @@ export function fitBezierCPs(
   const n = rawPath.length;
   if (n < 4) return tangentFallbackCPs(rawPath, rawPoints, pA, pB);
 
-  // Initial arc-length parameterisation: ts[i] = cumulative arc / total arc
   const ts = new Float64Array(n);
   for (let i = 1; i < n; i++) {
     const prev = rawPoints[rawPath[i - 1]],
@@ -196,86 +288,16 @@ export function fitBezierCPs(
   for (let i = 1; i < n - 1; i++) ts[i] /= totalLen;
   ts[n - 1] = 1.0;
 
-  let cp1x = pA.x + (pB.x - pA.x) / 3,
-    cp1y = pA.y + (pB.y - pA.y) / 3;
-  let cp2x = pA.x + (2 * (pB.x - pA.x)) / 3,
-    cp2y = pA.y + (2 * (pB.y - pA.y)) / 3;
-
-  for (let iter = 0; iter <= N_REFIT_ITERS; iter++) {
-    // --- Parametric LSQ solve with current ts ---
-    let sumA2 = 0,
-      sumAB = 0,
-      sumB2 = 0;
-    let sumARx = 0,
-      sumBRx = 0,
-      sumARy = 0,
-      sumBRy = 0;
-    for (let i = 0; i < n; i++) {
-      const t = ts[i],
-        u = 1 - t;
-      const Ai = 3 * u * u * t,
-        Bi = 3 * u * t * t;
-      const pt = rawPoints[rawPath[i]];
-      const Rxi = pt.x - u * u * u * pA.x - t * t * t * pB.x;
-      const Ryi = pt.y - u * u * u * pA.y - t * t * t * pB.y;
-      sumA2 += Ai * Ai;
-      sumAB += Ai * Bi;
-      sumB2 += Bi * Bi;
-      sumARx += Ai * Rxi;
-      sumBRx += Bi * Rxi;
-      sumARy += Ai * Ryi;
-      sumBRy += Bi * Ryi;
-    }
-    const lambda = (regularization * (sumA2 + sumB2)) / 2 / totalLen;
-    const cp1NatX = pA.x + (pB.x - pA.x) / 3,
-      cp1NatY = pA.y + (pB.y - pA.y) / 3;
-    const cp2NatX = pA.x + (2 * (pB.x - pA.x)) / 3,
-      cp2NatY = pA.y + (2 * (pB.y - pA.y)) / 3;
-    const rA2 = sumA2 + lambda,
-      rB2 = sumB2 + lambda;
-    const rARx = sumARx + lambda * cp1NatX,
-      rARy = sumARy + lambda * cp1NatY;
-    const rBRx = sumBRx + lambda * cp2NatX,
-      rBRy = sumBRy + lambda * cp2NatY;
-    const det = rA2 * rB2 - sumAB * sumAB;
-    if (!(Math.abs(det) >= 1e-10 * rA2 * rB2)) {
-      return iter === 0
-        ? tangentFallbackCPs(rawPath, rawPoints, pA, pB)
-        : [
-            { x: cp1x, y: cp1y },
-            { x: cp2x, y: cp2y },
-          ];
-    }
-    cp1x = (rARx * rB2 - rBRx * sumAB) / det;
-    cp1y = (rARy * rB2 - rBRy * sumAB) / det;
-    cp2x = (rA2 * rBRx - sumAB * rARx) / det;
-    cp2y = (rA2 * rBRy - sumAB * rARy) / det;
-
-    // --- Re-project interior nodes onto current Bezier (skip on final iteration) ---
-    if (iter < N_REFIT_ITERS) {
-      for (let i = 1; i < n - 1; i++) {
-        const pt = rawPoints[rawPath[i]];
-        ts[i] = projectOnBezier(
-          pt.x,
-          pt.y,
-          pA.x,
-          pA.y,
-          cp1x,
-          cp1y,
-          cp2x,
-          cp2y,
-          pB.x,
-          pB.y,
-          ts[i],
-        );
-      }
-    }
-  }
-
-  return [
-    { x: cp1x, y: cp1y },
-    { x: cp2x, y: cp2y },
-  ];
+  return fitBezierCPsCore(
+    n,
+    (i) => rawPoints[rawPath[i]],
+    ts,
+    pA,
+    pB,
+    totalLen,
+    regularization,
+    () => tangentFallbackCPs(rawPath, rawPoints, pA, pB),
+  );
 }
 
 /**
@@ -325,10 +347,7 @@ export function fitBezierCPsFromSamples(
     ];
   }
 
-  // Mutable copy so we don't modify the caller's array
-  const tsMut = Float64Array.from(ts);
-
-  // Arc length of sampled curve — fixed, used only for Tikhonov normalisation
+  const tsMut = Float64Array.from(ts); // mutable copy; don't modify caller's array
   let totalLen = 0;
   for (let i = 1; i < n; i++)
     totalLen += Math.hypot(
@@ -336,78 +355,20 @@ export function fitBezierCPsFromSamples(
       samples[i].y - samples[i - 1].y,
     );
 
-  const cp1NatX = pA.x + (pB.x - pA.x) / 3,
-    cp1NatY = pA.y + (pB.y - pA.y) / 3;
-  const cp2NatX = pA.x + (2 * (pB.x - pA.x)) / 3,
-    cp2NatY = pA.y + (2 * (pB.y - pA.y)) / 3;
-  let cp1x = cp1NatX,
-    cp1y = cp1NatY;
-  let cp2x = cp2NatX,
-    cp2y = cp2NatY;
+  const cp1Nat = { x: pA.x + (pB.x - pA.x) / 3, y: pA.y + (pB.y - pA.y) / 3 };
+  const cp2Nat = {
+    x: pA.x + (2 * (pB.x - pA.x)) / 3,
+    y: pA.y + (2 * (pB.y - pA.y)) / 3,
+  };
 
-  for (let iter = 0; iter <= N_REFIT_ITERS; iter++) {
-    // --- Parametric LSQ solve with current tsMut ---
-    let sumA2 = 0,
-      sumAB = 0,
-      sumB2 = 0;
-    let sumARx = 0,
-      sumBRx = 0,
-      sumARy = 0,
-      sumBRy = 0;
-    for (let i = 0; i < n; i++) {
-      const t = tsMut[i],
-        u = 1 - t;
-      const Ai = 3 * u * u * t,
-        Bi = 3 * u * t * t;
-      const pt = samples[i];
-      const Rxi = pt.x - u * u * u * pA.x - t * t * t * pB.x;
-      const Ryi = pt.y - u * u * u * pA.y - t * t * t * pB.y;
-      sumA2 += Ai * Ai;
-      sumAB += Ai * Bi;
-      sumB2 += Bi * Bi;
-      sumARx += Ai * Rxi;
-      sumBRx += Bi * Rxi;
-      sumARy += Ai * Ryi;
-      sumBRy += Bi * Ryi;
-    }
-    const lambda =
-      totalLen > 1e-6 ? (regularization * (sumA2 + sumB2)) / 2 / totalLen : 0;
-    const rA2 = sumA2 + lambda,
-      rB2 = sumB2 + lambda;
-    const rARx = sumARx + lambda * cp1NatX,
-      rARy = sumARy + lambda * cp1NatY;
-    const rBRx = sumBRx + lambda * cp2NatX,
-      rBRy = sumBRy + lambda * cp2NatY;
-    const det = rA2 * rB2 - sumAB * sumAB;
-    if (!(Math.abs(det) >= 1e-10 * rA2 * rB2)) break; // keep last cp1/cp2
-    cp1x = (rARx * rB2 - rBRx * sumAB) / det;
-    cp1y = (rARy * rB2 - rBRy * sumAB) / det;
-    cp2x = (rA2 * rBRx - sumAB * rARx) / det;
-    cp2y = (rA2 * rBRy - sumAB * rARy) / det;
-
-    // --- Re-project interior samples onto current Bezier ---
-    if (iter < N_REFIT_ITERS) {
-      for (let i = 1; i < n - 1; i++) {
-        const pt = samples[i];
-        tsMut[i] = projectOnBezier(
-          pt.x,
-          pt.y,
-          pA.x,
-          pA.y,
-          cp1x,
-          cp1y,
-          cp2x,
-          cp2y,
-          pB.x,
-          pB.y,
-          tsMut[i],
-        );
-      }
-    }
-  }
-
-  return [
-    { x: cp1x, y: cp1y },
-    { x: cp2x, y: cp2y },
-  ];
+  return fitBezierCPsCore(
+    n,
+    (i) => samples[i],
+    tsMut,
+    pA,
+    pB,
+    totalLen,
+    regularization,
+    () => [cp1Nat, cp2Nat],
+  );
 }

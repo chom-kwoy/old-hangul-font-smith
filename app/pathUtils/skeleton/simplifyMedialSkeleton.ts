@@ -11,11 +11,26 @@ import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import { Vec2D } from "@/app/utils/types";
 
-const BEZIER_REGULARIZATION = 0.5;
-const VALIDITY_N_SAMP = 20;
-const COVERAGE_TOLERANCE = 0.001;
-const N_FIT_SAMPLES = 30; // total samples for composite Bezier fitting
-const N_ARC_EST = 10; // samples per segment for arc-length estimation
+export type SimplifySkeletonOptions = {
+  /** Tikhonov regularisation strength for merged-edge Bezier CP fitting. */
+  bezierRegularization: number;
+  /** Number of interior samples for the merged-edge inside-shape validity check. */
+  validityNSamples: number;
+  /** Max fractional coverage drop that still permits a contraction. */
+  coverageTolerance: number;
+  /** Total sample count for composite Bezier fitting across the three merged segments. */
+  nFitSamples: number;
+  /** Samples per segment used to estimate arc length before allocating fit samples. */
+  nArcEstSamples: number;
+};
+
+const DEFAULTS: SimplifySkeletonOptions = {
+  bezierRegularization: 0.5,
+  validityNSamples: 20,
+  coverageTolerance: 0.001,
+  nFitSamples: 30,
+  nArcEstSamples: 10,
+};
 
 /**
  * Post-processes a medial skeleton by contracting degree-2 chain edges.
@@ -31,7 +46,9 @@ export function simplifyMedialSkeleton(
   skeleton: MedialAxisGraph,
   rawMedialAxis: MedialAxisGraph,
   path: paper.CompoundPath,
+  options: Partial<SimplifySkeletonOptions> = {},
 ): MedialAxisGraph {
+  const opts: SimplifySkeletonOptions = { ...DEFAULTS, ...options };
   const rawPoints = rawMedialAxis.points;
   const rawAdj = buildAdj(rawMedialAxis);
 
@@ -43,7 +60,6 @@ export function simplifyMedialSkeleton(
   let current = skeleton;
   let baselineCoverage = computeCoverage(current, path, boundarySamples);
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const result = tryOneContraction(
       current,
@@ -52,6 +68,7 @@ export function simplifyMedialSkeleton(
       path,
       boundarySamples,
       baselineCoverage,
+      opts,
     );
     if (!result) break;
     current = result.skeleton;
@@ -72,6 +89,7 @@ function tryOneContraction(
   path: paper.CompoundPath,
   boundarySamples: paper.Point[],
   baselineCoverage: number,
+  opts: SimplifySkeletonOptions,
 ): { skeleton: MedialAxisGraph; coverage: number } | null {
   const deg = computeDegrees(skeleton);
 
@@ -96,19 +114,25 @@ function tryOneContraction(
     // Fit Bezier CPs by sampling the composite of the three existing fitted Beziers
     const pW = skeleton.points[w];
     const pX = skeleton.points[x];
-    const composite = sampleCompositeBezier(skeleton, ei, u, v, w, x);
+    const composite = sampleCompositeBezier(skeleton, ei, u, v, w, x, opts);
     const [cp1, cp2] = composite
       ? fitBezierCPsFromSamples(
           composite.samples,
           composite.ts,
           pW,
           pX,
-          BEZIER_REGULARIZATION,
+          opts.bezierRegularization,
         )
-      : fitBezierCPs(mergedRawPath, rawPoints, pW, pX, BEZIER_REGULARIZATION);
+      : fitBezierCPs(
+          mergedRawPath,
+          rawPoints,
+          pW,
+          pX,
+          opts.bezierRegularization,
+        );
 
     // Validity: all sampled Bezier points must be inside the shape
-    if (!isMergedEdgeInside(pW, cp1, cp2, pX, path)) continue;
+    if (!isMergedEdgeInside(pW, cp1, cp2, pX, path, opts)) continue;
 
     // Build the simplified skeleton and evaluate coverage
     const simplified = buildSimplifiedSkeleton(
@@ -126,7 +150,7 @@ function tryOneContraction(
       cp2,
     );
     const cov = computeCoverage(simplified, path, boundarySamples);
-    if (cov >= baselineCoverage - COVERAGE_TOLERANCE) {
+    if (cov >= baselineCoverage - opts.coverageTolerance) {
       const pu = skeleton.points[u],
         pv = skeleton.points[v];
       console.log(
@@ -238,9 +262,10 @@ function isMergedEdgeInside(
   cp2: Vec2D,
   pX: Vec2D,
   path: paper.CompoundPath,
+  opts: SimplifySkeletonOptions,
 ): boolean {
-  for (let k = 1; k < VALIDITY_N_SAMP; k++) {
-    const { x, y } = evalBezier(pW, cp1, cp2, pX, k / VALIDITY_N_SAMP);
+  for (let k = 1; k < opts.validityNSamples; k++) {
+    const { x, y } = evalBezier(pW, cp1, cp2, pX, k / opts.validityNSamples);
     if (!path.contains(new paper.Point(x, y))) return false;
   }
   return true;
@@ -312,6 +337,7 @@ function sampleCompositeBezier(
   v: number,
   w: number,
   x: number,
+  opts: SimplifySkeletonOptions,
 ): { samples: Vec2D[]; ts: Float64Array } | null {
   if (!skeleton.controlPoints) return null;
   const edgeWU = findEdgeIndex(skeleton, w, u);
@@ -331,8 +357,8 @@ function sampleCompositeBezier(
   function segLen(pA: Vec2D, c1: Vec2D, c2: Vec2D, pB: Vec2D): number {
     let len = 0;
     let prev = pA;
-    for (let k = 1; k <= N_ARC_EST; k++) {
-      const pt = evalBezier(pA, c1, c2, pB, k / N_ARC_EST);
+    for (let k = 1; k <= opts.nArcEstSamples; k++) {
+      const pt = evalBezier(pA, c1, c2, pB, k / opts.nArcEstSamples);
       len += Math.hypot(pt.x - prev.x, pt.y - prev.y);
       prev = pt;
     }
@@ -346,9 +372,9 @@ function sampleCompositeBezier(
   if (totalEst < 1e-6) return null;
 
   // Arc-length-proportional sample counts (at least 2 per segment)
-  const nWU = Math.max(2, Math.round((N_FIT_SAMPLES * lenWU) / totalEst));
-  const nUV = Math.max(2, Math.round((N_FIT_SAMPLES * lenUV) / totalEst));
-  const nVX = Math.max(2, Math.round((N_FIT_SAMPLES * lenVX) / totalEst));
+  const nWU = Math.max(2, Math.round((opts.nFitSamples * lenWU) / totalEst));
+  const nUV = Math.max(2, Math.round((opts.nFitSamples * lenUV) / totalEst));
+  const nVX = Math.max(2, Math.round((opts.nFitSamples * lenVX) / totalEst));
 
   // Sample each segment; skip the t=0 duplicate at UV and VX starts
   const pts: Vec2D[] = [];
