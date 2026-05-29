@@ -31,7 +31,6 @@ import {
   localPrimitiveFitting,
   primitivePts,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
-import { clipPrimitivesToShape } from "@/app/pathUtils/skeleton/skeleton";
 import {
   MedialAxisGraph,
   extractMedialAxis,
@@ -41,6 +40,7 @@ import {
   SkeletonIterCallback,
   computeMedialSkeletonPoints,
 } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+import { clipPrimitivesToShape } from "@/app/pathUtils/skeleton/skeleton";
 
 import {
   TEST_PATHS,
@@ -80,11 +80,13 @@ function renderSkeletonization(
   const tx = (x: number) => x * scl + ox;
   const ty = (y: number) => y * scl + oy;
 
+  const dpi = 2.5;
   const canvas = new StaticCanvas("null", {
-    width: SIZE,
-    height: SIZE,
+    width: SIZE * dpi,
+    height: SIZE * dpi,
     backgroundColor: "white",
   });
+  canvas.setZoom(dpi);
 
   // Color helpers — one hue per skeleton segment
   const nSegs = Math.max(1, fitted.segments.length);
@@ -92,29 +94,43 @@ function renderSkeletonization(
   const strokeColor = (i: number) => `hsl(${hue(i)}, 70%, 35%)`;
   const fillColor = (i: number) => `hsla(${hue(i)}, 70%, 60%, 0.18)`;
 
-  // --- 1. Original path outline (one Polyline per sub-path) ---
+  // --- 1. Original path outline — exact bezier curves via FabricPath ---
   for (const child of path.children as paper.Path[]) {
-    const step = Math.max(2, child.length / 300);
-    const pts: { x: number; y: number }[] = [];
-    for (let d = 0; d <= child.length; d += step) {
-      const pt = child.getPointAt(Math.min(d, child.length));
-      if (pt) pts.push({ x: tx(pt.x), y: ty(pt.y) });
+    if (child.segments.length === 0) continue;
+    const cmds: string[] = [];
+    for (let i = 0; i < child.segments.length; i++) {
+      const seg = child.segments[i];
+      const pt = seg.point;
+      if (i === 0) {
+        cmds.push(`M ${tx(pt.x)} ${ty(pt.y)}`);
+      } else {
+        const prev = child.segments[i - 1];
+        const cp1 = prev.point.add(prev.handleOut);
+        const cp2 = pt.add(seg.handleIn);
+        cmds.push(`C ${tx(cp1.x)} ${ty(cp1.y)} ${tx(cp2.x)} ${ty(cp2.y)} ${tx(pt.x)} ${ty(pt.y)}`);
+      }
     }
-    if (pts.length > 1) {
-      canvas.add(
-        new FabricPolyline(pts, {
-          fill: "none",
-          stroke: "rgba(0,0,0,0.75)",
-          strokeWidth: 2,
-          selectable: false,
-        }),
-      );
+    // Close with a bezier back to the first segment
+    if (child.closed) {
+      const last = child.segments[child.segments.length - 1];
+      const first = child.segments[0];
+      const cp1 = last.point.add(last.handleOut);
+      const cp2 = first.point.add(first.handleIn);
+      cmds.push(`C ${tx(cp1.x)} ${ty(cp1.y)} ${tx(cp2.x)} ${ty(cp2.y)} ${tx(first.point.x)} ${ty(first.point.y)} Z`);
     }
+    canvas.add(
+      new FabricPath(cmds.join(" "), {
+        fill: "none",
+        stroke: "rgba(0,0,0,0.75)",
+        strokeWidth: 2,
+        selectable: false,
+      }),
+    );
   }
 
   // --- 2. Fitted primitives (under edges so edges stay visible) ---
   for (const prim of fitted.primitives) {
-    const pts = primitivePts(prim).map(p => ({ x: tx(p.x), y: ty(p.y) }));
+    const pts = primitivePts(prim).map((p) => ({ x: tx(p.x), y: ty(p.y) }));
 
     if (prim.type === "edge") {
       canvas.add(
@@ -305,141 +321,6 @@ function renderSkeletonization(
 }
 
 // ---------------------------------------------------------------------------
-// Per-iteration visualiser
-// ---------------------------------------------------------------------------
-
-function renderIteration(
-  path: paper.CompoundPath,
-  medialAxis: MedialAxisGraph,
-  flatBoundary: FlatBoundary,
-  V: paper.Point[],
-  cov: number,
-  covGain: number,
-  adding: number,
-  iter: number,
-  label: string,
-): void {
-  const SIZE = 1000;
-  const PAD = 55; // extra top padding for text
-
-  const bb = path.bounds;
-  const scl = Math.min(
-    (SIZE - PAD - 20) / bb.width,
-    (SIZE - PAD - 20) / bb.height,
-  );
-  const ox = 10 + (SIZE - 20 - bb.width * scl) / 2 - bb.x * scl;
-  const oy = PAD + (SIZE - PAD - 20 - bb.height * scl) / 2 - bb.y * scl;
-  const tx = (x: number) => x * scl + ox;
-  const ty = (y: number) => y * scl + oy;
-  const ts = (s: number) => s * scl;
-
-  const canvas = new StaticCanvas("null", {
-    width: SIZE,
-    height: SIZE,
-    backgroundColor: "white",
-  });
-
-  // --- Text banner ---
-  const iterLabel = iter === 12 /* MAX_OUTER */ ? "final" : `iter ${iter}`;
-  const gainStr =
-    iter === 0
-      ? ""
-      : `  gain ${covGain >= 0 ? "+" : ""}${(covGain * 100).toFixed(1)}%`;
-  const actionStr =
-    adding > 0 ? `  → adding ${adding} seed(s)` : `  → stopping`;
-  const banner = `${iterLabel}  |  seeds=${V.length}  |  cov=${(cov * 100).toFixed(1)}%${gainStr}${actionStr}`;
-  canvas.add(
-    new FabricText(banner, {
-      left: 8,
-      top: 8,
-      fontSize: 14,
-      fontFamily: "monospace",
-      fill: "rgba(20,20,20,0.92)",
-      selectable: false,
-    }),
-  );
-
-  // --- Path outline ---
-  for (const child of path.children as paper.Path[]) {
-    const step = Math.max(2, child.length / 300);
-    const pts: { x: number; y: number }[] = [];
-    for (let d = 0; d <= child.length; d += step) {
-      const pt = child.getPointAt(Math.min(d, child.length));
-      if (pt) pts.push({ x: tx(pt.x), y: ty(pt.y) });
-    }
-    if (pts.length > 1) {
-      canvas.add(
-        new FabricPolyline(pts, {
-          fill: "none",
-          stroke: "rgba(0,0,0,0.55)",
-          strokeWidth: 1.5,
-          selectable: false,
-        }),
-      );
-    }
-  }
-
-  // --- Medial axis (thin grey) ---
-  for (const [i1, i2] of medialAxis.segments) {
-    const p1 = medialAxis.points[i1];
-    const p2 = medialAxis.points[i2];
-    canvas.add(
-      new FabricLine([tx(p1.x), ty(p1.y), tx(p2.x), ty(p2.y)], {
-        stroke: "rgba(160,160,160,0.35)",
-        strokeWidth: 0.5,
-        selectable: false,
-      }),
-    );
-  }
-
-  // --- Inscribed-radius balls for each seed ---
-  const nSeeds = Math.max(1, V.length);
-  for (let i = 0; i < V.length; i++) {
-    const p = V[i];
-    const r = nearestDistFlatBoundary(p.x, p.y, flatBoundary);
-    const hue = Math.round((i * 360) / nSeeds);
-    const sr = ts(r);
-    canvas.add(
-      new FabricCircle({
-        left: tx(p.x),
-        top: ty(p.y),
-        radius: sr,
-        fill: `hsla(${hue},70%,60%,0.12)`,
-        stroke: `hsl(${hue},70%,40%)`,
-        strokeWidth: 0.8,
-        selectable: false,
-      }),
-    );
-  }
-
-  // --- Seed centre dots ---
-  for (let i = 0; i < V.length; i++) {
-    const p = V[i];
-    const hue = Math.round((i * 360) / nSeeds);
-    canvas.add(
-      new FabricCircle({
-        left: tx(p.x),
-        top: ty(p.y),
-        radius: 4,
-        fill: `hsl(${hue},70%,28%)`,
-        selectable: false,
-      }),
-    );
-  }
-
-  canvas.renderAll();
-
-  const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
-  const iterStr = String(iter).padStart(2, "0");
-  const outPath = `test_outputs/skeletonize_${safeName}_iter${iterStr}.png`;
-  type NodeCanvas = { toBuffer(type: string): Buffer };
-  const buf = (canvas as unknown as { getNodeCanvas(): NodeCanvas })
-    .getNodeCanvas()
-    .toBuffer("image/png");
-  fs.writeFileSync(outPath, buf);
-}
-
-// ---------------------------------------------------------------------------
 // Test loop
 // ---------------------------------------------------------------------------
 
@@ -465,17 +346,6 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       nmEvals,
     ) => {
       totalNmEvals = nmEvals;
-      renderIteration(
-        path,
-        axis,
-        flatBoundary,
-        V,
-        cov,
-        covGain,
-        adding,
-        iter,
-        label,
-      );
     };
 
     let fitted: FittedMedialAxisGraph | null = null;
@@ -683,9 +553,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
               // If dot ≤ 0, A is in the backward hemisphere of ray PB;
               // closest point on the outward ray is P → distance = armLen → ratio = 1.
               const ratio =
-                dot <= 0
-                  ? 1.0
-                  : Math.abs(ax * by - ay * bx) / (bLen * armLen);
+                dot <= 0 ? 1.0 : Math.abs(ax * by - ay * bx) / (bLen * armLen);
               if (ratio < minRatio) minRatio = ratio;
             }
 
