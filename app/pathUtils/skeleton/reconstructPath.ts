@@ -1,6 +1,6 @@
 import paper from "paper";
 
-import { FittedMedialAxisGraph, Primitive } from "./localPrimitiveFitting";
+import { FittedMedialAxisGraph, Primitive, primitivePts } from "./localPrimitiveFitting";
 
 /**
  * Reconstructs the 2D shape boundary from the Medial Skeletal Diagram.
@@ -60,30 +60,21 @@ export function reconstructShapeFromMSD(
 
 /**
  * Converts a mathematical Primitive (origins, dirs, radii) into a Paper.js Path.
+ * When prim.clippedPts is set (by clipPrimitivesToShape), uses those vertices directly
+ * and skips the smooth step since they are already smooth+clipped bezier samples.
  */
 function createPathFromPrimitive(prim: Primitive): paper.Path {
-  const segments: paper.Point[] = [];
-
-  // Calculate boundary points: P = Origin + Radius * Direction
-  for (let i = 0; i < prim.radii.length; i++) {
-    const r = prim.radii[i];
-    const dir = new paper.Point(prim.directions[i]);
-    const origin = new paper.Point(prim.origins[i]); // Array of origins for edges, or repeated center for points
-
-    // P = O + r*d
-    const point = origin.add(dir.multiply(r));
-    segments.push(point);
-  }
-
+  const pts = primitivePts(prim);
   const path = new paper.Path({
-    segments: segments,
+    segments: pts.map(p => new paper.Point(p.x, p.y)),
     closed: true,
-    insert: false, // Keep it in memory, don't add to scene yet
+    insert: false,
   });
 
-  // Convert the discrete polygon into smooth Bezier curves locally
-  // This uses Catmull-Rom style smoothing suitable for the dense 128-point polygon
-  path.smooth({ type: "catmull-rom", factor: 0.5 });
+  if (!prim.clippedPts) {
+    // Not yet post-processed — apply Catmull-Rom smoothing
+    path.smooth({ type: "catmull-rom", factor: 0.5 });
+  }
 
   return path;
 }

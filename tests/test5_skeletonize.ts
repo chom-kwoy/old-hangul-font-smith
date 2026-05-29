@@ -29,7 +29,9 @@ import {
 import {
   FittedMedialAxisGraph,
   localPrimitiveFitting,
+  primitivePts,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import { clipPrimitivesToShape } from "@/app/pathUtils/skeleton/skeleton";
 import {
   MedialAxisGraph,
   extractMedialAxis,
@@ -112,10 +114,7 @@ function renderSkeletonization(
 
   // --- 2. Fitted primitives (under edges so edges stay visible) ---
   for (const prim of fitted.primitives) {
-    const pts = prim.origins.map((o, i) => ({
-      x: tx(o.x + prim.directions[i].x * prim.radii[i]),
-      y: ty(o.y + prim.directions[i].y * prim.radii[i]),
-    }));
+    const pts = primitivePts(prim).map(p => ({ x: tx(p.x), y: ty(p.y) }));
 
     if (prim.type === "edge") {
       canvas.add(
@@ -249,10 +248,7 @@ function renderSkeletonization(
   if (boundarySamples) {
     for (const s of boundarySamples) {
       const covered = fitted.primitives.some((prim) => {
-        const pts = prim.origins.map((o, i) => ({
-          x: o.x + prim.directions[i].x * prim.radii[i],
-          y: o.y + prim.directions[i].y * prim.radii[i],
-        }));
+        const pts = primitivePts(prim);
         const N = pts.length;
         let inside = false;
         for (let i = 0, j = N - 1; i < N; j = i++) {
@@ -495,6 +491,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       );
       const skeleton = constructMedialSkeleton(seeds, axis, path, true);
       fitted = localPrimitiveFitting(path, skeleton);
+      clipPrimitivesToShape(fitted, path);
     } catch (e) {
       error = e;
     }

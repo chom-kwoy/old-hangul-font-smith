@@ -1,5 +1,5 @@
 import { TSimplePathData } from "fabric";
-import { ClipType, PolyFillType } from "js-angusj-clipper/web";
+import { ClipType, EndType, JoinType, PolyFillType } from "js-angusj-clipper/web";
 import * as clipperLib from "js-angusj-clipper/web";
 import paper from "paper";
 
@@ -11,6 +11,7 @@ import {
   FittedMedialAxisGraph,
   Primitive,
   localPrimitiveFitting,
+  primitivePts,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
@@ -65,7 +66,12 @@ export function skeletonize(
   );
 
   // Fit primitives (expandable circles) to each skeleton component
-  return localPrimitiveFitting(paperPath, medialSkeleton);
+  const fitted = localPrimitiveFitting(paperPath, medialSkeleton);
+
+  // Post-process: offset → smooth → clip to shape boundary
+  clipPrimitivesToShape(fitted, paperPath);
+
+  return fitted;
 }
 
 export type PathScaleOptions = {
@@ -193,13 +199,78 @@ function scalePathImpl(
 }
 
 function getPrimitivePoints(primitives: Primitive[]) {
-  return primitives.map((primitive) => {
-    return primitive.origins.map((origin, i) => {
-      const dir = new paper.Point(primitive.directions[i]);
-      const rad = primitive.radii[i];
-      return new paper.Point(origin).add(dir.multiply(rad));
+  return primitives.map((primitive) =>
+    primitivePts(primitive).map(p => new paper.Point(p.x, p.y)),
+  );
+}
+
+/**
+ * Post-processing step: for each fitted primitive, expand outward (Clipper offset),
+ * smooth (Catmull-Rom), then clip back to the original shape boundary (paper.js intersect).
+ * Stores the result in prim.clippedPts, which all downstream consumers respect via primitivePts().
+ */
+export function clipPrimitivesToShape(
+  fitted: FittedMedialAxisGraph,
+  path: paper.CompoundPath,
+  offsetDelta: number = 5,
+): void {
+  const clipperScale = 10000;
+
+  for (const prim of fitted.primitives) {
+    const n = prim.origins.length;
+    const pts = prim.origins.map((o, i) => ({
+      x: o.x + prim.directions[i].x * prim.radii[i],
+      y: o.y + prim.directions[i].y * prim.radii[i],
+    }));
+
+    // Step 1: outward offset with round joins so no sharp protruding corners
+    const inputPath = pts.map(p => ({
+      x: Math.round(p.x * clipperScale),
+      y: Math.round(p.y * clipperScale),
+    }));
+    const offsetPaths = clipper.offsetToPaths({
+      delta: offsetDelta * clipperScale,
+      arcTolerance: 0.25 * clipperScale,
+      offsetInputs: [{ data: inputPath, joinType: JoinType.Round, endType: EndType.ClosedPolygon }],
     });
-  });
+
+    if (!offsetPaths || offsetPaths.length === 0) continue;
+    const offsetPts = offsetPaths
+      .reduce((best, p) =>
+        Math.abs(clipper.area(p)) > Math.abs(clipper.area(best)) ? p : best)
+      .map(p => ({ x: p.x / clipperScale, y: p.y / clipperScale }));
+
+    // Step 2: Catmull-Rom smooth — curves edges outward toward shape boundary
+    const offsetPath = new paper.Path({
+      segments: offsetPts.map(p => new paper.Point(p.x, p.y)),
+      closed: true,
+      insert: false,
+    });
+    offsetPath.smooth({ type: "catmull-rom", factor: 0.5 });
+
+    // Step 3: clip to original shape — overshoot is replaced by exact original bezier arcs
+    const clipped = offsetPath.intersect(path, { insert: false });
+
+    const resultPath = clipped instanceof paper.CompoundPath
+      ? (clipped.children as paper.Path[]).reduce((best, c) =>
+          Math.abs((c as paper.Path).area) > Math.abs(best.area)
+            ? (c as paper.Path)
+            : best)
+      : (clipped as paper.Path);
+
+    if (resultPath.segments.length >= 3) {
+      const M = 2 * n;
+      const len = resultPath.length;
+      prim.clippedPts = Array.from({ length: M }, (_, k) => {
+        const pt = resultPath.getPointAt((k / M) * len)
+          ?? resultPath.firstSegment.point;
+        return { x: pt.x, y: pt.y };
+      });
+    }
+
+    offsetPath.remove();
+    clipped.remove();
+  }
 }
 
 function minkowskiSum(

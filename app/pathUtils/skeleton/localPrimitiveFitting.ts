@@ -25,6 +25,19 @@ export interface Primitive {
   origins: Vec2D[];
   directions: Vec2D[];
   radii: number[];
+
+  // Set by clipPrimitivesToShape() after the full pipeline.
+  // When present, overrides origins+directions*radii for all downstream rendering and coverage use.
+  clippedPts?: Vec2D[];
+}
+
+/** Returns the canonical polygon vertices for a primitive, using clippedPts when available. */
+export function primitivePts(prim: Primitive): Vec2D[] {
+  if (prim.clippedPts) return prim.clippedPts;
+  return prim.origins.map((o, i) => ({
+    x: o.x + prim.directions[i].x * prim.radii[i],
+    y: o.y + prim.directions[i].y * prim.radii[i],
+  }));
 }
 
 export type PrimitiveFittingOptions = {

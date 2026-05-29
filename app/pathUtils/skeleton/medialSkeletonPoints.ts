@@ -11,6 +11,7 @@ import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import {
   Primitive,
   localPrimitiveFitting,
+  primitivePts,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
 import { Vec2D } from "@/app/utils/types";
@@ -301,13 +302,14 @@ type PrimPolygon = {
 
 function buildPrimPolygons(primitives: Primitive[], delta: number): PrimPolygon[] {
   return primitives.map((prim) => {
-    const N = prim.origins.length;
+    const pts = primitivePts(prim);
+    const N = pts.length;
     const vx = new Float64Array(N);
     const vy = new Float64Array(N);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < N; i++) {
-      vx[i] = prim.origins[i].x + prim.directions[i].x * prim.radii[i];
-      vy[i] = prim.origins[i].y + prim.directions[i].y * prim.radii[i];
+      vx[i] = pts[i].x;
+      vy[i] = pts[i].y;
       if (vx[i] < minX) minX = vx[i];
       if (vx[i] > maxX) maxX = vx[i];
       if (vy[i] < minY) minY = vy[i];
