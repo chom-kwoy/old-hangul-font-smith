@@ -207,29 +207,6 @@ function renderSkeletonization(
     }
   }
 
-  // --- Raw path quartile samples (q1=orange, mid=magenta, q3=cyan) ---
-  if (fitted.rawPathSamples) {
-    const colors = ["orange", "magenta", "cyan"];
-    for (let i = 0; i < fitted.segments.length; i++) {
-      const samples = fitted.rawPathSamples[i];
-      if (!samples) continue;
-      for (let q = 0; q < 3; q++) {
-        const pt = samples[q];
-        canvas.add(
-          new FabricCircle({
-            left: tx(pt.x),
-            top: ty(pt.y),
-            radius: 2,
-            fill: colors[q],
-            stroke: "white",
-            strokeWidth: 1,
-            selectable: false,
-          }),
-        );
-      }
-    }
-  }
-
   // Edge index labels at Bezier midpoint (t=0.5) of each skeleton edge
   for (let i = 0; i < fitted.segments.length; i++) {
     const [u, v] = fitted.segments[i];
@@ -321,7 +298,7 @@ function renderSkeletonization(
           let t =
             lenSq > 1e-10 ? ((s.x - ax) * ddx + (s.y - ay) * ddy) / lenSq : 0;
           t = Math.max(0, Math.min(1, t));
-          if (Math.hypot(s.x - (ax + t * ddx), s.y - (ay + t * ddy)) < 5.0)
+          if (Math.hypot(s.x - (ax + t * ddx), s.y - (ay + t * ddy)) < 1.0)
             return true;
         }
         return false;

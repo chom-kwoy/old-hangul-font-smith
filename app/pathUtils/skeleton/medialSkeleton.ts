@@ -58,7 +58,7 @@ export function constructMedialSkeleton(
     centerThresholdValid:
       options.centerThresholdValid ?? CENTER_THRESHOLD_VALID,
     centerNSamp: options.centerNSamp ?? CENTER_N_SAMP,
-    bezierLSQRegularization: options.bezierLSQRegularization ?? 20,
+    bezierLSQRegularization: options.bezierLSQRegularization ?? 0.5,
   };
 
   // ---------------------------------------------------------
@@ -309,7 +309,13 @@ export function constructMedialSkeleton(
   }
 
   function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
-    return fitBezierCPs(rawPath, rawPoints, pA, pB, opts.bezierLSQRegularization);
+    return fitBezierCPs(
+      rawPath,
+      rawPoints,
+      pA,
+      pB,
+      opts.bezierLSQRegularization,
+    );
   }
 
   // Returns true if the bone curve from pA to pB (Bezier if cp given) stays inside the path.
@@ -513,7 +519,8 @@ export function constructMedialSkeleton(
       // Skip tips that are behind the outward direction — snapping to them would move
       // the seed toward the junction rather than away from it, causing topological
       // contradictions when the stub later tries to reach the correct arm tip.
-      const tdx = rawPoints[rn].x - siPt.x, tdy = rawPoints[rn].y - siPt.y;
+      const tdx = rawPoints[rn].x - siPt.x,
+        tdy = rawPoints[rn].y - siPt.y;
       if (tdx * outX + tdy * outY <= 0) continue;
       const tipR = rawNodeR[rn];
       if (
@@ -539,10 +546,8 @@ export function constructMedialSkeleton(
         for (let segI = 0; segI < newSegments.length; segI++) {
           const [su, sv] = newSegments[segI];
           if (su !== seedOutIdx && sv !== seedOutIdx) continue;
-          const suRaw =
-            su === seedOutIdx ? directSnapRn : outToRaw.get(su);
-          const svRaw =
-            sv === seedOutIdx ? directSnapRn : outToRaw.get(sv);
+          const suRaw = su === seedOutIdx ? directSnapRn : outToRaw.get(su);
+          const svRaw = sv === seedOutIdx ? directSnapRn : outToRaw.get(sv);
           const pA2 = finalPoints[su],
             pB2 = finalPoints[sv];
           if (suRaw !== undefined && svRaw !== undefined) {
@@ -575,8 +580,7 @@ export function constructMedialSkeleton(
         // so the stub raw path begins at the seed's actual final position.
         // Fall back to the original seed raw node if the snapped node is not
         // reachable from tipRn through seed-owned nodes.
-        const stubStart =
-          directSnapRn >= 0 ? directSnapRn : seedIndices[si];
+        const stubStart = directSnapRn >= 0 ? directSnapRn : seedIndices[si];
         const stubPath =
           bfsPathFiltered(stubStart, tipRn, rawAdj, inSeed) ??
           (directSnapRn >= 0

@@ -11,11 +11,11 @@ import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import { Vec2D } from "@/app/utils/types";
 
-const BEZIER_REGULARIZATION = 20;
+const BEZIER_REGULARIZATION = 0.5;
 const VALIDITY_N_SAMP = 20;
 const COVERAGE_TOLERANCE = 0.001;
 const N_FIT_SAMPLES = 30; // total samples for composite Bezier fitting
-const N_ARC_EST = 10;     // samples per segment for arc-length estimation
+const N_ARC_EST = 10; // samples per segment for arc-length estimation
 
 /**
  * Post-processes a medial skeleton by contracting degree-2 chain edges.
@@ -98,7 +98,13 @@ function tryOneContraction(
     const pX = skeleton.points[x];
     const composite = sampleCompositeBezier(skeleton, ei, u, v, w, x);
     const [cp1, cp2] = composite
-      ? fitBezierCPsFromSamples(composite.samples, composite.ts, pW, pX, BEZIER_REGULARIZATION)
+      ? fitBezierCPsFromSamples(
+          composite.samples,
+          composite.ts,
+          pW,
+          pX,
+          BEZIER_REGULARIZATION,
+        )
       : fitBezierCPs(mergedRawPath, rawPoints, pW, pX, BEZIER_REGULARIZATION);
 
     // Validity: all sampled Bezier points must be inside the shape
@@ -121,12 +127,13 @@ function tryOneContraction(
     );
     const cov = computeCoverage(simplified, path, boundarySamples);
     if (cov >= baselineCoverage - COVERAGE_TOLERANCE) {
-      const pu = skeleton.points[u], pv = skeleton.points[v];
+      const pu = skeleton.points[u],
+        pv = skeleton.points[v];
       console.log(
         `  [simplify] contracted e${ei}: ` +
-        `v${u}(${pu.x.toFixed(1)},${pu.y.toFixed(1)})–` +
-        `v${v}(${pv.x.toFixed(1)},${pv.y.toFixed(1)}) → ` +
-        `v${w}–v${x}  coverage ${(baselineCoverage * 100).toFixed(2)}%→${(cov * 100).toFixed(2)}%`,
+          `v${u}(${pu.x.toFixed(1)},${pu.y.toFixed(1)})–` +
+          `v${v}(${pv.x.toFixed(1)},${pv.y.toFixed(1)}) → ` +
+          `v${w}–v${x}  coverage ${(baselineCoverage * 100).toFixed(2)}%→${(cov * 100).toFixed(2)}%`,
       );
       return { skeleton: simplified, coverage: cov };
     }
@@ -199,7 +206,8 @@ function buildSimplifiedSkeleton(
   if (sk.vertexRawNodes) {
     // vertexRawNodes for w and x are already in newVRN (they weren't filtered out)
     // The merged edge doesn't add new vertices, so nothing extra needed here.
-    void rawW; void rawX; // used in caller for BFS; raw nodes stay on w and x
+    void rawW;
+    void rawX; // used in caller for BFS; raw nodes stay on w and x
   }
 
   return {
@@ -240,12 +248,19 @@ function isMergedEdgeInside(
 
 function computeDegrees(sk: MedialAxisGraph): Int32Array {
   const deg = new Int32Array(sk.points.length);
-  for (const [a, b] of sk.segments) { deg[a]++; deg[b]++; }
+  for (const [a, b] of sk.segments) {
+    deg[a]++;
+    deg[b]++;
+  }
   return deg;
 }
 
 /** Returns the neighbour of `node` in skeleton that is not `exclude`, or -1. */
-function otherNeighbour(sk: MedialAxisGraph, node: number, exclude: number): number {
+function otherNeighbour(
+  sk: MedialAxisGraph,
+  node: number,
+  exclude: number,
+): number {
   for (const [a, b] of sk.segments) {
     if (a === node && b !== exclude) return b;
     if (b === node && a !== exclude) return a;
@@ -255,7 +270,10 @@ function otherNeighbour(sk: MedialAxisGraph, node: number, exclude: number): num
 
 function buildAdj(graph: MedialAxisGraph): number[][] {
   const adj: number[][] = Array.from({ length: graph.points.length }, () => []);
-  for (const [u, v] of graph.segments) { adj[u].push(v); adj[v].push(u); }
+  for (const [u, v] of graph.segments) {
+    adj[u].push(v);
+    adj[v].push(u);
+  }
   return adj;
 }
 
@@ -328,24 +346,33 @@ function sampleCompositeBezier(
   if (totalEst < 1e-6) return null;
 
   // Arc-length-proportional sample counts (at least 2 per segment)
-  const nWU = Math.max(2, Math.round(N_FIT_SAMPLES * lenWU / totalEst));
-  const nUV = Math.max(2, Math.round(N_FIT_SAMPLES * lenUV / totalEst));
-  const nVX = Math.max(2, Math.round(N_FIT_SAMPLES * lenVX / totalEst));
+  const nWU = Math.max(2, Math.round((N_FIT_SAMPLES * lenWU) / totalEst));
+  const nUV = Math.max(2, Math.round((N_FIT_SAMPLES * lenUV) / totalEst));
+  const nVX = Math.max(2, Math.round((N_FIT_SAMPLES * lenVX) / totalEst));
 
   // Sample each segment; skip the t=0 duplicate at UV and VX starts
   const pts: Vec2D[] = [];
-  for (let k = 0; k <= nWU; k++) pts.push(evalBezier(pW, cp1WU, cp2WU, pU, k / nWU));
-  for (let k = 1; k <= nUV; k++) pts.push(evalBezier(pU, cp1UV, cp2UV, pV, k / nUV));
-  for (let k = 1; k <= nVX; k++) pts.push(evalBezier(pV, cp1VX, cp2VX, pX, k / nVX));
+  for (let k = 0; k <= nWU; k++)
+    pts.push(evalBezier(pW, cp1WU, cp2WU, pU, k / nWU));
+  for (let k = 1; k <= nUV; k++)
+    pts.push(evalBezier(pU, cp1UV, cp2UV, pV, k / nUV));
+  for (let k = 1; k <= nVX; k++)
+    pts.push(evalBezier(pV, cp1VX, cp2VX, pX, k / nVX));
 
   // Compute global arc-length fractions
   const cumLen = new Float64Array(pts.length);
   for (let i = 1; i < pts.length; i++)
-    cumLen[i] = cumLen[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    cumLen[i] =
+      cumLen[i - 1] +
+      Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
   const totalLen = cumLen[pts.length - 1];
-  const ts = totalLen > 1e-6
-    ? Float64Array.from(cumLen, (c) => c / totalLen)
-    : Float64Array.from({ length: pts.length }, (_, i) => i / (pts.length - 1));
+  const ts =
+    totalLen > 1e-6
+      ? Float64Array.from(cumLen, (c) => c / totalLen)
+      : Float64Array.from(
+          { length: pts.length },
+          (_, i) => i / (pts.length - 1),
+        );
 
   return { samples: pts, ts };
 }
@@ -361,14 +388,20 @@ function bfsPath(from: number, to: number, adj: number[][]): number[] | null {
     for (const nb of adj[curr]) {
       if (parent[nb] !== -2) continue;
       parent[nb] = curr;
-      if (nb === to) { found = true; break outer; }
+      if (nb === to) {
+        found = true;
+        break outer;
+      }
       queue.push(nb);
     }
   }
   if (!found) return null;
   const path: number[] = [];
   let curr = to;
-  while (curr !== -1) { path.push(curr); curr = parent[curr]; }
+  while (curr !== -1) {
+    path.push(curr);
+    curr = parent[curr];
+  }
   path.reverse();
   return path;
 }

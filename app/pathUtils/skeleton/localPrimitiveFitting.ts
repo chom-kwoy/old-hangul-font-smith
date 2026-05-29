@@ -110,7 +110,7 @@ export function localPrimitiveFitting(
     w_penalty: options.w_penalty ?? 10000,
     max_progressions: options.max_progressions ?? 25,
     fine_progressions: options.fine_progressions ?? 5,
-    coarse_divisor: options.coarse_divisor ?? 8,
+    coarse_divisor: options.coarse_divisor ?? 4,
     expansion_rate: options.expansion_rate ?? 1.1,
     max_alternating_iters: options.max_alternating_iters ?? 15,
     min_absolute_growth: options.min_absolute_growth ?? 1.0,
@@ -169,7 +169,10 @@ export function localPrimitiveFitting(
   // Only fit vertex primitives for isolated vertices (degree 0).
   // Vertices that belong to edges are already covered by their edge capsule's cap fans.
   const vertexDegree = new Int32Array(skeleton.points.length);
-  for (const [a, b] of skeleton.segments) { vertexDegree[a]++; vertexDegree[b]++; }
+  for (const [a, b] of skeleton.segments) {
+    vertexDegree[a]++;
+    vertexDegree[b]++;
+  }
 
   for (let i = 0; i < skeleton.points.length; i++) {
     if (vertexDegree[i] > 0) continue;
@@ -346,6 +349,7 @@ function runProgressions(
 
     let rSum = 0;
     for (let k = 0; k < n; k++) rSum += r[k];
+
     if (rSum - prevRSum < n * 0.1) {
       if (++stagnantCount >= 2) break;
     } else {
@@ -356,6 +360,12 @@ function runProgressions(
     if (doResample && prog % 3 === 0 && prog < maxProgs - 1) {
       resamplePoints(n, scratch);
       computeMaxExtents(n, scratch, boundary);
+      // Clamp r_max to a minimum so near-tangential directions (where the inflated
+      // contour hugs the boundary) can't ratchet r down to zero across resample cycles.
+      // The 1-unit floor is well below clipPrimitivesToShape's 5-unit offsetDelta so any
+      // slight overshoot is absorbed there.
+      for (let k = 0; k < n; k++)
+        scratch.r_max[k] = Math.max(1.0, scratch.r_max[k]);
       prevRSum = 0;
       for (let k = 0; k < n; k++) prevRSum += r[k];
       stagnantCount = 0;
@@ -463,6 +473,8 @@ function fitSinglePrimitive(
 
   // === FINE PHASE (N directions, a few more progressions) ===
   computeMaxExtents(N, scratch, boundary);
+  for (let k = 0; k < N; k++)
+    scratch.r_max[k] = Math.max(1.0, scratch.r_max[k]);
   for (let k = 0; k < N; k++) {
     r_tgt[k] = r[k];
     r_init[k] = r[k];
