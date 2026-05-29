@@ -15,6 +15,8 @@ export interface MedialAxisGraph {
   // Cubic Bezier interior control points, one pair per segment (parallel to `segments`).
   // controlPoints[i] = [cp1, cp2] for segments[i].  Absent → treat as straight line.
   controlPoints?: [Vec2D, Vec2D][];
+  // Diagnostic: raw-path quartile samples [q1, mid, q3] per segment (parallel to `segments`).
+  rawPathSamples?: [Vec2D, Vec2D, Vec2D][];
 }
 
 /**

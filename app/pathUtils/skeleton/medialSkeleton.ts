@@ -20,6 +20,13 @@ export type SkeletonConstructionOptions = {
   centreThresholdValid: number;
   /** Number of sample points along each edge for centrality checks. Default: 12. */
   centreNSamp: number;
+  /**
+   * Tikhonov regularisation strength for the arc-length LSQ Bezier fit.
+   * λ = bezierLSQRegularization × (sumA² + sumB²) / 2, pulling cp1/cp2 toward
+   * the chord-line prior and preventing overfitting when raw nodes are clustered.
+   * 0 = no regularisation; 1 = equal weight between data and prior. Default: 0.5.
+   */
+  bezierLSQRegularization: number;
 };
 
 /**
@@ -39,11 +46,12 @@ export function constructMedialSkeleton(
   options: Partial<SkeletonConstructionOptions> = {},
 ): MedialAxisGraph {
   const opts: SkeletonConstructionOptions = {
-    maxTotalVertices:      options.maxTotalVertices      ?? 25,
-    maxBisectDepth:        options.maxBisectDepth        ?? 4,
-    centreThreshold:       options.centreThreshold       ?? CENTRE_THRESHOLD,
-    centreThresholdValid:  options.centreThresholdValid  ?? CENTRE_THRESHOLD_VALID,
-    centreNSamp:           options.centreNSamp           ?? CENTRE_N_SAMP,
+    maxTotalVertices:          options.maxTotalVertices          ?? 25,
+    maxBisectDepth:            options.maxBisectDepth            ?? 4,
+    centreThreshold:           options.centreThreshold           ?? CENTRE_THRESHOLD,
+    centreThresholdValid:      options.centreThresholdValid      ?? CENTRE_THRESHOLD_VALID,
+    centreNSamp:               options.centreNSamp               ?? CENTRE_N_SAMP,
+    bezierLSQRegularization:   options.bezierLSQRegularization   ?? 0.5,
   };
 
   // ---------------------------------------------------------
@@ -228,15 +236,24 @@ export function constructMedialSkeleton(
   // ---------------------------------------------------------
   const newSegments: [number, number][] = [];
   const finalControlPoints: [Vec2D, Vec2D][] = [];
+  const rawPathSamples: [Vec2D, Vec2D, Vec2D][] = [];
+  const segmentRawPaths: number[][] = []; // stored so leaf-snap can re-run bezierCPs
   const segmentSet = new Set<string>();
 
-  function addSegment(u: number, v: number, cp1: Vec2D, cp2: Vec2D): void {
+  function addSegment(u: number, v: number, cp1: Vec2D, cp2: Vec2D, rawPath: number[]): void {
     if (u === v) return;
     const key = u < v ? `${u}-${v}` : `${v}-${u}`;
     if (segmentSet.has(key)) return;
     segmentSet.add(key);
     newSegments.push([u, v]);
     finalControlPoints.push([cp1, cp2]);
+    segmentRawPaths.push(rawPath);
+    const n = rawPath.length;
+    rawPathSamples.push([
+      rawPoints[rawPath[Math.floor(n / 4)]],
+      rawPoints[rawPath[Math.floor(n / 2)]],
+      rawPoints[rawPath[Math.floor(3 * n / 4)]],
+    ]);
   }
 
   // Fallback: tangent-based control point estimation (arc-length look-ahead).
@@ -348,16 +365,23 @@ export function constructMedialSkeleton(
       sumARy += Ai * Ryi; sumBRy += Bi * Ryi;
     }
 
-    // Cramer's rule; fall back if matrix is ill-conditioned (rank < 2)
-    const det = sumA2 * sumB2 - sumAB * sumAB;
-    if (!(Math.abs(det) >= 1e-10 * sumA2 * sumB2)) {
+    // Tikhonov regularisation: add λ·‖cp − cp_nat‖² toward the chord-line prior.
+    // Prevents overfitting when raw nodes are unevenly clustered along the arc.
+    const lambda = opts.bezierLSQRegularization * (sumA2 + sumB2) / 2;
+    const cp1NatX = pA.x + (pB.x - pA.x) / 3,  cp1NatY = pA.y + (pB.y - pA.y) / 3;
+    const cp2NatX = pA.x + 2 * (pB.x - pA.x) / 3,  cp2NatY = pA.y + 2 * (pB.y - pA.y) / 3;
+    const rA2  = sumA2 + lambda,  rB2  = sumB2 + lambda;
+    const rARx = sumARx + lambda * cp1NatX,  rARy = sumARy + lambda * cp1NatY;
+    const rBRx = sumBRx + lambda * cp2NatX,  rBRy = sumBRy + lambda * cp2NatY;
+
+    // Cramer's rule; fall back if matrix is still ill-conditioned
+    const det = rA2 * rB2 - sumAB * sumAB;
+    if (!(Math.abs(det) >= 1e-10 * rA2 * rB2)) {
       return tangentBasedBezierCPs(rawPath, pA, pB);
     }
     return [
-      { x: (sumARx * sumB2 - sumBRx * sumAB) / det,
-        y: (sumARy * sumB2 - sumBRy * sumAB) / det },
-      { x: (sumA2  * sumBRx - sumAB  * sumARx) / det,
-        y: (sumA2  * sumBRy - sumAB  * sumARy) / det },
+      { x: (rARx * rB2  - rBRx * sumAB) / det,  y: (rARy * rB2  - rBRy * sumAB) / det },
+      { x: (rA2  * rBRx - sumAB * rARx) / det,   y: (rA2  * rBRy - sumAB * rARy) / det },
     ];
   }
 
@@ -388,7 +412,7 @@ export function constructMedialSkeleton(
     const [cp1, cp2] = bezierCPs(rawPath, pA, pB);
 
     if (depth >= maxDepth || finalPoints.length >= opts.maxTotalVertices) {
-      addSegment(idxA, idxB, cp1, cp2);
+      addSegment(idxA, idxB, cp1, cp2, rawPath);
       return;
     }
 
@@ -396,7 +420,7 @@ export function constructMedialSkeleton(
     const inside = !enforceInsideEdges || isEdgeInside(pA, pB, cp1, cp2);
 
     if (centred && inside) {
-      addSegment(idxA, idxB, cp1, cp2);
+      addSegment(idxA, idxB, cp1, cp2, rawPath);
       return;
     }
 
@@ -428,7 +452,7 @@ export function constructMedialSkeleton(
       }
     }
 
-    addSegment(idxA, idxB, cp1, cp2);
+    addSegment(idxA, idxB, cp1, cp2, rawPath);
   }
 
   for (const { path } of pairPaths) {
@@ -504,19 +528,16 @@ export function constructMedialSkeleton(
           (!enforceInsideEdges || isEdgeInside(rawPoints[rn], nbPt))) {
         finalPoints[seedOutIdx] = new paper.Point(rawPoints[rn]);
         directSnapRn = rn;
-        // The vertex moved: recompute CPs for all its incident edges using chord
-        // direction, since the previously-computed CPs were anchored at the old position.
+        // The vertex moved: recompute CPs for all its incident edges using the stored
+        // raw path and the new (post-snap) vertex positions.
         for (let segI = 0; segI < newSegments.length; segI++) {
           const [su, sv] = newSegments[segI];
           if (su !== seedOutIdx && sv !== seedOutIdx) continue;
           const pA2 = finalPoints[su], pB2 = finalPoints[sv];
-          const chd = Math.hypot(pB2.x - pA2.x, pB2.y - pA2.y);
-          if (chd < 1e-6) continue;
-          const s2 = chd / 3, dx2 = (pB2.x - pA2.x) / chd, dy2 = (pB2.y - pA2.y) / chd;
-          finalControlPoints[segI] = [
-            { x: pA2.x + dx2 * s2, y: pA2.y + dy2 * s2 },
-            { x: pB2.x - dx2 * s2, y: pB2.y - dy2 * s2 },
-          ];
+          const rawP = segmentRawPaths[segI];
+          // rawPath runs su→sv (same direction as pA2→pB2); no reversal needed.
+          const [newCp1, newCp2] = bezierCPs(rawP, pA2, pB2);
+          finalControlPoints[segI] = [newCp1, newCp2];
         }
         break;
       }
@@ -543,6 +564,7 @@ export function constructMedialSkeleton(
     points: finalPoints,
     segments: newSegments,
     controlPoints: finalControlPoints,
+    rawPathSamples,
   };
 }
 

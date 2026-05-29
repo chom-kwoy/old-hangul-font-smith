@@ -206,6 +206,29 @@ function renderSkeletonization(
     }
   }
 
+  // --- Raw path quartile samples (q1=orange, mid=magenta, q3=cyan) ---
+  if (fitted.rawPathSamples) {
+    const colors = ["orange", "magenta", "cyan"];
+    for (let i = 0; i < fitted.segments.length; i++) {
+      const samples = fitted.rawPathSamples[i];
+      if (!samples) continue;
+      for (let q = 0; q < 3; q++) {
+        const pt = samples[q];
+        canvas.add(
+          new FabricCircle({
+            left: tx(pt.x),
+            top: ty(pt.y),
+            radius: 2,
+            fill: colors[q],
+            stroke: "white",
+            strokeWidth: 1,
+            selectable: false,
+          }),
+        );
+      }
+    }
+  }
+
   // Edge index labels at Bezier midpoint (t=0.5) of each skeleton edge
   for (let i = 0; i < fitted.segments.length; i++) {
     const [u, v] = fitted.segments[i];
