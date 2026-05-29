@@ -604,6 +604,11 @@ export function constructMedialSkeleton(
   // Only direct-snap if tipR ≥ origR × 0.65; otherwise append as a stub leaf
   // (keeps the original wide-coverage disk while adding a tip for the cap).
 
+  // Reverse map: output vertex index → the raw node that created it.
+  // Used after direct-snap to re-run BFS for incident edge raw paths.
+  const outToRaw = new Map<number, number>();
+  for (const [rn, outIdx] of rawToOut) outToRaw.set(outIdx, rn);
+
   const outDegree = new Int32Array(finalPoints.length);
   for (const [u, v] of newSegments) {
     outDegree[u]++;
@@ -682,17 +687,34 @@ export function constructMedialSkeleton(
       ) {
         finalPoints[seedOutIdx] = new paper.Point(rawPoints[rn]);
         directSnapRn = rn;
-        // The vertex moved: recompute CPs for all its incident edges using the stored
-        // raw path and the new (post-snap) vertex positions.
+        // Register the snapped raw node so emitEdge can resolve it to seedOutIdx,
+        // and update the reverse map so subsequent edge re-BFS uses the new position.
+        rawToOut.set(directSnapRn, seedOutIdx);
+        outToRaw.set(seedOutIdx, directSnapRn);
+        // The vertex moved: re-run BFS between the actual final raw nodes of each
+        // incident edge so that raw paths, samples, and CPs all reflect the true
+        // medial-axis geometry between the snapped endpoint and its neighbour.
         for (let segI = 0; segI < newSegments.length; segI++) {
           const [su, sv] = newSegments[segI];
           if (su !== seedOutIdx && sv !== seedOutIdx) continue;
+          const suRaw =
+            su === seedOutIdx ? directSnapRn : outToRaw.get(su);
+          const svRaw =
+            sv === seedOutIdx ? directSnapRn : outToRaw.get(sv);
           const pA2 = finalPoints[su],
             pB2 = finalPoints[sv];
-          const rawP = segmentRawPaths[segI];
-          // rawPath runs su→sv (same direction as pA2→pB2); no reversal needed.
-          const [newCp1, newCp2] = bezierCPs(rawP, pA2, pB2);
-          finalControlPoints[segI] = [newCp1, newCp2];
+          if (suRaw !== undefined && svRaw !== undefined) {
+            const newRawPath =
+              bfsPath(suRaw, svRaw, rawAdj) ?? segmentRawPaths[segI];
+            segmentRawPaths[segI] = newRawPath;
+            const np = newRawPath.length;
+            rawPathSamples[segI] = [
+              rawPoints[newRawPath[Math.floor(np / 4)]],
+              rawPoints[newRawPath[Math.floor(np / 2)]],
+              rawPoints[newRawPath[Math.floor((3 * np) / 4)]],
+            ];
+          }
+          finalControlPoints[segI] = bezierCPs(segmentRawPaths[segI], pA2, pB2);
         }
         break;
       }
@@ -707,12 +729,17 @@ export function constructMedialSkeleton(
       if (tipRn !== directSnapRn) {
         getOrAddVertex(tipRn);
         const inSeed = (n: number) => nodeOwner[n] === si;
-        const stubPath = bfsPathFiltered(
-          seedIndices[si],
-          tipRn,
-          rawAdj,
-          inSeed,
-        );
+        // Start the stub BFS from the snapped raw node when a direct-snap occurred,
+        // so the stub raw path begins at the seed's actual final position.
+        // Fall back to the original seed raw node if the snapped node is not
+        // reachable from tipRn through seed-owned nodes.
+        const stubStart =
+          directSnapRn >= 0 ? directSnapRn : seedIndices[si];
+        const stubPath =
+          bfsPathFiltered(stubStart, tipRn, rawAdj, inSeed) ??
+          (directSnapRn >= 0
+            ? bfsPathFiltered(seedIndices[si], tipRn, rawAdj, inSeed)
+            : null);
         // Limit stub to 1 bisection: deeper recursion can't help since the
         // tip-side sub-segment always fails isEdgeCenterd (r→0 at the tip).
         if (stubPath) emitEdge(stubPath, 0, 1);
