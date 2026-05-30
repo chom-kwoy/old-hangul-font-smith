@@ -91,7 +91,6 @@ type Candidate = {
   cp1: Vec2D;
   cp2: Vec2D;
   residual: number;       // mean squared distance of samples to fitted Bezier (Infinity if no samples)
-  mergedRawPath: number[];
 };
 
 /**
@@ -138,10 +137,7 @@ function tryRemove(
     residual = Infinity;
   }
 
-  const mergedRawPath = bfsPath(rawKept, rawFar, rawAdj);
-  if (!mergedRawPath) return null;
-
-  return { removed, kept, farEnd, pKept, pFar, cp1, cp2, residual, mergedRawPath };
+  return { removed, kept, farEnd, pKept, pFar, cp1, cp2, residual };
 }
 
 function tryOneContraction(
@@ -190,7 +186,7 @@ function tryOneContraction(
 
     const simplified = buildContractedSkeleton(
       skeleton, chosen.removed, chosen.kept, chosen.farEnd,
-      chosen.mergedRawPath, rawPoints, chosen.cp1, chosen.cp2,
+      chosen.cp1, chosen.cp2,
     );
     const cov = computeCoverage(simplified, path, boundarySamples);
     if (cov >= baselineCoverage - opts.coverageTolerance) {
@@ -220,8 +216,6 @@ function buildContractedSkeleton(
   removed: number,
   a: number,
   b: number,
-  mergedRawPath: number[],
-  rawPoints: Vec2D[],
   cp1: Vec2D,
   cp2: Vec2D,
 ): MedialAxisGraph {
@@ -240,7 +234,6 @@ function buildContractedSkeleton(
   const newPoints: Vec2D[] = sk.points.filter((_, i) => i !== removed);
   const newSegments: [number, number][] = [];
   const newCPs: [Vec2D, Vec2D][] = [];
-  const newSamples: [Vec2D, Vec2D, Vec2D][] = [];
   const newVRN: number[] = sk.vertexRawNodes
     ? sk.points.map((_, i) => sk.vertexRawNodes![i]).filter((_, i) => i !== removed)
     : [];
@@ -250,25 +243,15 @@ function buildContractedSkeleton(
     const [p, q] = sk.segments[ei];
     newSegments.push([oldToNew[p], oldToNew[q]]);
     if (sk.controlPoints) newCPs.push(sk.controlPoints[ei]);
-    if (sk.rawPathSamples) newSamples.push(sk.rawPathSamples[ei]);
   }
 
   newSegments.push([oldToNew[a], oldToNew[b]]);
   if (sk.controlPoints) newCPs.push([cp1, cp2]);
-  if (sk.rawPathSamples) {
-    const n = mergedRawPath.length;
-    newSamples.push([
-      rawPoints[mergedRawPath[Math.floor(n / 4)]],
-      rawPoints[mergedRawPath[Math.floor(n / 2)]],
-      rawPoints[mergedRawPath[Math.floor((3 * n) / 4)]],
-    ]);
-  }
 
   return {
     points: newPoints,
     segments: newSegments,
     ...(sk.controlPoints ? { controlPoints: newCPs } : {}),
-    ...(sk.rawPathSamples ? { rawPathSamples: newSamples } : {}),
     ...(sk.vertexRawNodes ? { vertexRawNodes: newVRN } : {}),
   };
 }

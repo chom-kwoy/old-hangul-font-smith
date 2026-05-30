@@ -344,7 +344,6 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       const seeds = computeMedialSkeletonPoints(
         path,
         axis,
-        3.0,
         false,
         iterCallback,
       );

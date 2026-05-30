@@ -195,14 +195,12 @@ export function constructMedialSkeleton(
   // shapes the raw axis has a cycle, so after finding the first path we re-run
   // BFS with those edges excluded; if a second path exists it is the other side.
   const essentialRawNodes = new Set<number>(seedIndices);
-  const pairPaths: Array<{ seedA: number; seedB: number; path: number[] }> = [];
+  const pairPaths: number[][] = [];
 
   for (const key of adjacentPairs) {
     const [aStr, bStr] = key.split("-");
-    const seedA = parseInt(aStr),
-      seedB = parseInt(bStr);
-    const rawA = seedIndices[seedA];
-    const rawB = seedIndices[seedB];
+    const rawA = seedIndices[parseInt(aStr)];
+    const rawB = seedIndices[parseInt(bStr)];
 
     // Use unconstrained BFS so pair paths follow the true topological arms of the
     // raw medial axis.  The former A+B Voronoi constraint caused detours through
@@ -216,7 +214,7 @@ export function constructMedialSkeleton(
     for (const node of path1) {
       if (rawAdj[node].length >= 3) essentialRawNodes.add(node);
     }
-    pairPaths.push({ seedA, seedB, path: path1 });
+    pairPaths.push(path1);
 
     // Ring detection: build edge-exclusion set from path1, try to find a second path.
     // Use unconstrained BFS with edge exclusion so the ring's second side is also
@@ -232,7 +230,7 @@ export function constructMedialSkeleton(
       for (const node of path2) {
         if (rawAdj[node].length >= 3) essentialRawNodes.add(node);
       }
-      pairPaths.push({ seedA, seedB, path: path2 });
+      pairPaths.push(path2);
     }
   }
 
@@ -276,7 +274,6 @@ export function constructMedialSkeleton(
   // ---------------------------------------------------------
   const newSegments: [number, number][] = [];
   const finalControlPoints: [Vec2D, Vec2D][] = [];
-  const rawPathSamples: [Vec2D, Vec2D, Vec2D][] = [];
   const segmentRawPaths: number[][] = []; // stored so leaf-snap can re-run bezierCPs
   const segmentSet = new Set<string>();
 
@@ -294,12 +291,6 @@ export function constructMedialSkeleton(
     newSegments.push([u, v]);
     finalControlPoints.push([cp1, cp2]);
     segmentRawPaths.push(rawPath);
-    const n = rawPath.length;
-    rawPathSamples.push([
-      rawPoints[rawPath[Math.floor(n / 4)]],
-      rawPoints[rawPath[Math.floor(n / 2)]],
-      rawPoints[rawPath[Math.floor((3 * n) / 4)]],
-    ]);
   }
 
   // Thin wrapper around fitBezierCPs that captures rawPoints and regularization
@@ -435,7 +426,7 @@ export function constructMedialSkeleton(
     addSegment(idxA, idxB, cp1, cp2, rawPath);
   }
 
-  for (const { path } of pairPaths) {
+  for (const path of pairPaths) {
     // Identify where each essential node sits in the raw path, then emit
     // sub-paths between consecutive essential nodes.
     const chainPositions: number[] = [];
@@ -559,15 +550,8 @@ export function constructMedialSkeleton(
           const pA2 = finalPoints[su],
             pB2 = finalPoints[sv];
           if (suRaw !== undefined && svRaw !== undefined) {
-            const newRawPath =
+            segmentRawPaths[segI] =
               bfsPath(suRaw, svRaw, rawAdj) ?? segmentRawPaths[segI];
-            segmentRawPaths[segI] = newRawPath;
-            const np = newRawPath.length;
-            rawPathSamples[segI] = [
-              rawPoints[newRawPath[Math.floor(np / 4)]],
-              rawPoints[newRawPath[Math.floor(np / 2)]],
-              rawPoints[newRawPath[Math.floor((3 * np) / 4)]],
-            ];
           }
           finalControlPoints[segI] = bezierCPs(segmentRawPaths[segI], pA2, pB2);
         }
@@ -610,7 +594,6 @@ export function constructMedialSkeleton(
     points: finalPoints,
     segments: newSegments,
     controlPoints: finalControlPoints,
-    rawPathSamples,
     vertexRawNodes,
   };
 }

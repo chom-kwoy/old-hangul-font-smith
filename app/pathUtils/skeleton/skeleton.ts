@@ -60,7 +60,6 @@ export function skeletonize(
   const medialSkeletonPoints = computeMedialSkeletonPoints(
     paperPath,
     medialAxis,
-    undefined,
     verbose,
   );
 
@@ -414,17 +413,14 @@ export function removeRedundantLeafEdges(
   const oldToNewSeg = new Map<number, number>();
   const newSegments: [number, number][] = [];
   const newCPs: [Vec2D, Vec2D][] = [];
-  const newRawSamples: [Vec2D, Vec2D, Vec2D][] = [];
   for (let i = 0; i < fitted.segments.length; i++) {
     if (edgesToRemove.has(i)) continue;
     oldToNewSeg.set(i, newSegments.length);
     newSegments.push(fitted.segments[i]);
     if (fitted.controlPoints) newCPs.push(fitted.controlPoints[i]);
-    if (fitted.rawPathSamples) newRawSamples.push(fitted.rawPathSamples[i]);
   }
   fitted.segments = newSegments;
   if (fitted.controlPoints) fitted.controlPoints = newCPs;
-  if (fitted.rawPathSamples) fitted.rawPathSamples = newRawSamples;
 
   const newPrimitives: Primitive[] = [];
   for (const prim of fitted.primitives) {

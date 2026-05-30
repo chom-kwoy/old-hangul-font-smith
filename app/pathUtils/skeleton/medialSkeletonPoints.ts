@@ -53,7 +53,6 @@ export type SkeletonIterCallback = (
 export function computeMedialSkeletonPoints(
   path: paper.CompoundPath,
   medialAxis: MedialAxisGraph,
-  _tolerance: number = 3.0, // eslint-disable-line @typescript-eslint/no-unused-vars
   verbose: boolean = false,
   onIteration?: SkeletonIterCallback,
   options: Partial<SkeletonPointsOptions> = {},
