@@ -56,6 +56,13 @@ import {
 
 fs.mkdirSync("test_outputs", { recursive: true });
 
+// Toggle skeleton simplification via env var: SIMPLIFY=0 (or false/off/no) disables it.
+// Default: enabled.
+const SIMPLIFY_ENABLED = !/^(0|false|off|no)$/i.test(
+  process.env.SIMPLIFY ?? "",
+);
+console.log(`[test5] skeleton simplification: ${SIMPLIFY_ENABLED ? "ENABLED" : "DISABLED"}`);
+
 // ---------------------------------------------------------------------------
 // Rendering helper
 // ---------------------------------------------------------------------------
@@ -369,7 +376,9 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         iterCallback,
       );
       const skeleton = constructMedialSkeleton(seeds, axis, path, true);
-      const simplifiedSkeleton = simplifyMedialSkeleton(skeleton, axis, path);
+      const simplifiedSkeleton = SIMPLIFY_ENABLED
+        ? simplifyMedialSkeleton(skeleton, axis, path)
+        : skeleton;
       fitted = localPrimitiveFitting(path, simplifiedSkeleton);
       clipPrimitivesToShape(fitted, path);
     } catch (e) {

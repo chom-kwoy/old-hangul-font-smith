@@ -349,6 +349,21 @@ export function constructMedialSkeleton(
     const idxB = rawToOut.get(rawB)!;
     if (idxA === idxB) return;
 
+    // Top priority: if any interior raw node is already a skeleton vertex,
+    // split there unconditionally. Such a node is a topologically essential
+    // split point (junction or existing Steiner); routing the edge around it
+    // would falsely connect two endpoints across a junction. Runs before the
+    // centerd check, which would otherwise accept short stubs (e.g. between
+    // two raw tips of the same junction) that visually look centered but skip
+    // a real branch point.
+    for (let i = 1; i < rawPath.length - 1; i++) {
+      if (rawToOut.has(rawPath[i])) {
+        emitEdge(rawPath.slice(0, i + 1), depth + 1, maxDepth);
+        emitEdge(rawPath.slice(i), depth + 1, maxDepth);
+        return;
+      }
+    }
+
     const pA = finalPoints[idxA];
     const pB = finalPoints[idxB];
     const [cp1, cp2] = bezierCPs(rawPath, pA, pB);
