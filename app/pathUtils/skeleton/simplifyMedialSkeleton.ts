@@ -157,9 +157,17 @@ function tryOneContraction(
     const vIs2 = deg[v] === 2;
     if (!uIs2 && !vIs2) continue;
 
+    // Hard fail rather than silently skip: a missing vertexRawNodes entry means
+    // constructMedialSkeleton produced a vertex without a raw axis mapping, which
+    // was the latent bug fixed in 8f16946. Silent skip would let that regress.
     const rawU = skeleton.vertexRawNodes?.[u] ?? -1;
     const rawV = skeleton.vertexRawNodes?.[v] ?? -1;
-    if (rawU < 0 || rawV < 0) continue;
+    if (rawU < 0 || rawV < 0) {
+      throw new Error(
+        `simplifyMedialSkeleton: edge ${ei} (v${u}-v${v}) has missing raw node ` +
+          `mapping (rawU=${rawU}, rawV=${rawV}). constructMedialSkeleton must populate vertexRawNodes.`,
+      );
+    }
 
     const pU = skeleton.points[u], pV = skeleton.points[v];
 

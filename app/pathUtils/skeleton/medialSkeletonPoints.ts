@@ -2,6 +2,7 @@ import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import paper from "paper";
 
 import {
+  FlatBoundary,
   buildFlatBoundary,
   nearestDistFlatBoundary,
   sampleBoundary,
@@ -77,6 +78,9 @@ export function computeMedialSkeletonPoints(
     medialAxisR[i] = nearestDistFlatBoundary(p.x, p.y, flatBoundary);
   }
 
+  // Precompute axis adjacency once for graph-distance Voronoi cells in E_centrality.
+  const axisAdj = buildAdjacencyList(medialAxis);
+
   // Precompute maxDim² for E_centrality normalization (paper normalizes to [0,1])
   let axisMinX = Infinity, axisMaxX = -Infinity, axisMinY = Infinity, axisMaxY = -Infinity;
   for (const p of medialAxis.points) {
@@ -106,7 +110,7 @@ export function computeMedialSkeletonPoints(
 
     // Step 10: Nelder-Mead over freeV (flat x array: [x0,y0, x1,y1, ...])
     // Pre-compute projections + inscribed radii for frozen seeds once per outer iter.
-    const frozenProj = frozenV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR));
+    const frozenProj = frozenV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR, flatBoundary));
     const projFrozen = frozenProj.map((r) => r.point);
     const inscribedFrozen = frozenProj.map((r) => r.inscribed);
 
@@ -118,7 +122,7 @@ export function computeMedialSkeletonPoints(
         const currentFree = flatToPoints(x);
         return computeEnergyPartial(
           projFrozen, inscribedFrozen,
-          currentFree, medialAxis, boundarySamples, medialAxisR, normSq,
+          currentFree, medialAxis, axisAdj, boundarySamples, medialAxisR, flatBoundary, normSq,
           opts.c1, opts.c2,
         );
       },
@@ -132,7 +136,9 @@ export function computeMedialSkeletonPoints(
 
     // Evaluate true coverage using fitted primitives (paper's E_coverage metric).
     // Called once per outer iteration — not inside NM where it would be too slow.
-    const skeleton = constructMedialSkeleton(V, medialAxis, path);
+    // enforceInsideEdges=true matches the final skeletonize() pipeline so the
+    // optimizer evaluates the same constraint the consumer applies.
+    const skeleton = constructMedialSkeleton(V, medialAxis, path, true);
     const fitted = localPrimitiveFitting(path, skeleton, {}, flatBoundary);
     const { coverage: trueCov, uncovered } = coverageAndUncovered(boundarySamples, fitted.primitives);
 
@@ -157,7 +163,7 @@ export function computeMedialSkeletonPoints(
     if (willStop) break;
 
     frozenV = V.slice();
-    V = [...frozenV, ...pickNewSeeds(uncovered, V, medialAxis, nNew)];
+    V = [...frozenV, ...pickNewSeeds(uncovered, V, medialAxis, axisAdj, nNew)];
   }
 
   return V;
@@ -175,18 +181,20 @@ function computeEnergyPartial(
   inscribedFrozen: number[],
   freeV: paper.Point[],
   medialAxis: MedialAxisGraph,
+  axisAdj: number[][],
   boundarySamples: paper.Point[],
   medialAxisR: Float64Array,
+  flatBoundary: FlatBoundary,
   normSq: number,
   c1: number,
   c2: number,
 ): number {
-  const freeProjected = freeV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR));
+  const freeProjected = freeV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR, flatBoundary));
   const projFree = freeProjected.map((r) => r.point);
   const inscribedFree = freeProjected.map((r) => r.inscribed);
   const projV = [...projFrozen, ...projFree];
   const inscribed = [...inscribedFrozen, ...inscribedFree];
-  return computeEnergyCore(projV, inscribed, medialAxis, boundarySamples, medialAxisR, normSq, c1, c2);
+  return computeEnergyCore(projV, inscribed, medialAxis, axisAdj, boundarySamples, medialAxisR, normSq, c1, c2);
 }
 
 
@@ -194,6 +202,7 @@ function computeEnergyCore(
   projV: paper.Point[],
   inscribed: number[],
   medialAxis: MedialAxisGraph,
+  axisAdj: number[][],
   boundarySamples: paper.Point[],
   medialAxisR: Float64Array,
   normSq: number,
@@ -221,22 +230,53 @@ function computeEnergyCore(
 
   // E_centrality: radius-weighted centroid of each seed's Voronoi cell on M.
   // Pulls each seed toward the thick-axis center of its region (away from thin junctions).
-  // Normalized by maxDim² so c1=1 balances correctly (paper normalizes to [0,1]).
+  // Uses graph-distance Voronoi cells (matches constructMedialSkeleton); Euclidean
+  // nearest-seed would let a seed near a junction own axis nodes across the junction
+  // and bias the centroid toward unrelated arms.
+  const numNodes = medialAxis.points.length;
+  const nodeOwner = new Int32Array(numNodes).fill(-1);
+  const distToSeed = new Float64Array(numNodes).fill(Infinity);
+  const pq = new MinPriorityQueue<{ d: number; u: number; o: number }>((x) => x.d);
+  for (let i = 0; i < nSeeds; i++) {
+    let bestNode = 0, bestSq = Infinity;
+    for (let k = 0; k < numNodes; k++) {
+      const dx = medialAxis.points[k].x - projV[i].x;
+      const dy = medialAxis.points[k].y - projV[i].y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < bestSq) { bestSq = dSq; bestNode = k; }
+    }
+    if (distToSeed[bestNode] > 0) {
+      distToSeed[bestNode] = 0;
+      nodeOwner[bestNode] = i;
+      pq.push({ d: 0, u: bestNode, o: i });
+    }
+  }
+  while (!pq.isEmpty()) {
+    const { d, u, o } = pq.pop()!;
+    if (d > distToSeed[u] + 1e-5) continue;
+    for (const v of axisAdj[u]) {
+      const ru = medialAxis.points[u], rv = medialAxis.points[v];
+      const w = Math.hypot(ru.x - rv.x, ru.y - rv.y);
+      const nd = d + w;
+      if (nd < distToSeed[v]) {
+        distToSeed[v] = nd;
+        nodeOwner[v] = o;
+        pq.push({ d: nd, u: v, o });
+      }
+    }
+  }
+
   const cellWX = new Float64Array(nSeeds);
   const cellWY = new Float64Array(nSeeds);
   const cellW = new Float64Array(nSeeds);
-  for (let mu = 0; mu < medialAxis.points.length; mu++) {
+  for (let mu = 0; mu < numNodes; mu++) {
+    const owner = nodeOwner[mu];
+    if (owner < 0) continue;
     const pu = medialAxis.points[mu];
     const rmu = medialAxisR[mu];
-    let best = 0, bestDistSq = Infinity;
-    for (let i = 0; i < nSeeds; i++) {
-      const dx = pu.x - projV[i].x, dy = pu.y - projV[i].y;
-      const dSq = dx * dx + dy * dy;
-      if (dSq < bestDistSq) { bestDistSq = dSq; best = i; }
-    }
-    cellWX[best] += pu.x * rmu;
-    cellWY[best] += pu.y * rmu;
-    cellW[best] += rmu;
+    cellWX[owner] += pu.x * rmu;
+    cellWY[owner] += pu.y * rmu;
+    cellW[owner] += rmu;
   }
   let eCentrality = 0;
   for (let i = 0; i < nSeeds; i++) {
@@ -362,22 +402,53 @@ function pickNewSeeds(
   uncovered: paper.Point[],
   currentV: paper.Point[],
   medialAxis: MedialAxisGraph,
+  axisAdj: number[][],
   n: number,
 ): paper.Point[] {
-  // Pick n uncovered points that are farthest from existing V (and seeds picked so far).
+  // Pick n uncovered points that are farthest from existing V (and seeds picked so far)
+  // by GRAPH distance on the medial axis — matches farthestPointSeeds' metric and
+  // constructMedialSkeleton's Voronoi-cell definition. Each iteration runs one
+  // multi-source Dijkstra from current refs anchored to their nearest axis node.
+  const pts = medialAxis.points;
+  const numNodes = pts.length;
   const newSeeds: paper.Point[] = [];
   const remaining = [...uncovered];
   const refs: paper.Point[] = [...currentV];
 
+  const nearestNode = (p: paper.Point): number => {
+    let best = 0, bestSq = Infinity;
+    for (let i = 0; i < numNodes; i++) {
+      const dx = pts[i].x - p.x, dy = pts[i].y - p.y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < bestSq) { bestSq = dSq; best = i; }
+    }
+    return best;
+  };
+
   for (let k = 0; k < n && remaining.length > 0; k++) {
+    // Multi-source Dijkstra from each ref's nearest axis node.
+    const dist = new Float64Array(numNodes).fill(Infinity);
+    const pq = new MinPriorityQueue<{ d: number; u: number }>((x) => x.d);
+    for (const r of refs) {
+      const a = nearestNode(r);
+      if (dist[a] > 0) { dist[a] = 0; pq.push({ d: 0, u: a }); }
+    }
+    while (!pq.isEmpty()) {
+      const { d, u } = pq.pop()!;
+      if (d > dist[u] + 1e-5) continue;
+      for (const v of axisAdj[u]) {
+        const w = Math.hypot(pts[u].x - pts[v].x, pts[u].y - pts[v].y);
+        const nd = d + w;
+        if (nd < dist[v]) { dist[v] = nd; pq.push({ d: nd, u: v }); }
+      }
+    }
+
+    // For each remaining uncovered point, look up its nearest axis node's distance.
     let maxDist = -1, bestIdx = 0;
     for (let i = 0; i < remaining.length; i++) {
-      let minD = Infinity;
-      for (const r of refs) {
-        const d = Math.hypot(remaining[i].x - r.x, remaining[i].y - r.y);
-        if (d < minD) minD = d;
-      }
-      if (minD > maxDist) { maxDist = minD; bestIdx = i; }
+      const node = nearestNode(remaining[i]);
+      const d = dist[node];
+      if (d > maxDist) { maxDist = d; bestIdx = i; }
     }
     const proj = projectToMedialAxis(remaining[bestIdx], medialAxis).point;
     newSeeds.push(proj);
@@ -409,6 +480,7 @@ function projectToMedialAxis(
   pt: paper.Point,
   medialAxis: MedialAxisGraph,
   medialAxisR?: Float64Array,
+  flatBoundary?: FlatBoundary,
 ): { point: paper.Point; inscribed: number } {
   const pts = medialAxis.points;
   let bestX = pts[0].x, bestY = pts[0].y, minDist = Infinity;
@@ -423,9 +495,16 @@ function projectToMedialAxis(
     const d = Math.hypot(pt.x - cx, pt.y - cy);
     if (d < minDist) { minDist = d; bestX = cx; bestY = cy; bestI1 = i1; bestI2 = i2; bestT = t; }
   }
-  const inscribed = medialAxisR
-    ? (1 - bestT) * medialAxisR[bestI1] + bestT * medialAxisR[bestI2]
-    : 0;
+  // If flatBoundary is provided, query the true inscribed radius at the projected
+  // point — accurate but ~5–10× costlier per call. Otherwise fall back to linear
+  // interpolation between segment endpoints, which is exact only at endpoints and
+  // can drift by up to half the segment length mid-segment.
+  let inscribed = 0;
+  if (flatBoundary) {
+    inscribed = nearestDistFlatBoundary(bestX, bestY, flatBoundary);
+  } else if (medialAxisR) {
+    inscribed = (1 - bestT) * medialAxisR[bestI1] + bestT * medialAxisR[bestI2];
+  }
   return { point: new paper.Point(bestX, bestY), inscribed };
 }
 

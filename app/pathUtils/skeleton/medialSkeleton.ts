@@ -103,7 +103,11 @@ export function constructMedialSkeleton(
       const w = Math.sqrt((rv.x - ru.x) ** 2 + (rv.y - ru.y) ** 2);
       if (!Number.isFinite(w)) continue;
       const nd = dist + w;
-      if (nd < distToSeed[v]) {
+      // Tie-break by lower seed index for determinism across PQ implementations.
+      if (
+        nd < distToSeed[v] ||
+        (nd === distToSeed[v] && owner < nodeOwner[v])
+      ) {
         distToSeed[v] = nd;
         nodeOwner[v] = owner;
         pq.push({ dist: nd, u: v, owner });
@@ -111,60 +115,71 @@ export function constructMedialSkeleton(
     }
   }
 
-  // Step 1.5: Enforce single connected component per Voronoi cell
-  for (let seedIdx = 0; seedIdx < selectedPoints.length; seedIdx++) {
-    const seedRaw = seedIndices[seedIdx];
-    const mainCC = new Set<number>([seedRaw]);
-    const bfsQ = [seedRaw];
-    while (bfsQ.length > 0) {
-      const curr = bfsQ.shift()!;
-      for (const nb of rawAdj[curr]) {
-        if (!mainCC.has(nb) && nodeOwner[nb] === seedIdx) {
-          mainCC.add(nb);
-          bfsQ.push(nb);
-        }
-      }
-    }
-    const orphanVisited = new Set<number>();
-    for (let i = 0; i < numNodes; i++) {
-      if (nodeOwner[i] !== seedIdx || mainCC.has(i) || orphanVisited.has(i))
-        continue;
-      const cc: number[] = [];
-      const ccQ = [i];
-      orphanVisited.add(i);
-      while (ccQ.length > 0) {
-        const curr = ccQ.shift()!;
-        cc.push(curr);
+  // Step 1.5: Enforce single connected component per Voronoi cell.
+  // Iterate until a full pass produces no orphan reassignments — a single pass
+  // can create second-order orphans when a seed's orphan gets reassigned to
+  // another seed but is geographically disjoint from that seed's main cell.
+  const MAX_ORPHAN_PASSES = 10;
+  for (let pass = 0; pass < MAX_ORPHAN_PASSES; pass++) {
+    let changed = false;
+    for (let seedIdx = 0; seedIdx < selectedPoints.length; seedIdx++) {
+      const seedRaw = seedIndices[seedIdx];
+      const mainCC = new Set<number>([seedRaw]);
+      const bfsQ = [seedRaw];
+      while (bfsQ.length > 0) {
+        const curr = bfsQ.shift()!;
         for (const nb of rawAdj[curr]) {
-          if (!orphanVisited.has(nb) && nodeOwner[nb] === seedIdx) {
-            orphanVisited.add(nb);
-            ccQ.push(nb);
+          if (!mainCC.has(nb) && nodeOwner[nb] === seedIdx) {
+            mainCC.add(nb);
+            bfsQ.push(nb);
           }
         }
       }
-      let cx = 0,
-        cy = 0;
-      for (const n of cc) {
-        cx += rawPoints[n].x;
-        cy += rawPoints[n].y;
-      }
-      cx /= cc.length;
-      cy /= cc.length;
-      let minD = Infinity,
-        nearest = seedIdx;
-      for (let s = 0; s < selectedPoints.length; s++) {
-        if (s === seedIdx) continue;
-        const d = Math.hypot(
-          selectedPoints[s].x - cx,
-          selectedPoints[s].y - cy,
-        );
-        if (d < minD) {
-          minD = d;
-          nearest = s;
+      const orphanVisited = new Set<number>();
+      for (let i = 0; i < numNodes; i++) {
+        if (nodeOwner[i] !== seedIdx || mainCC.has(i) || orphanVisited.has(i))
+          continue;
+        const cc: number[] = [];
+        const ccQ = [i];
+        orphanVisited.add(i);
+        while (ccQ.length > 0) {
+          const curr = ccQ.shift()!;
+          cc.push(curr);
+          for (const nb of rawAdj[curr]) {
+            if (!orphanVisited.has(nb) && nodeOwner[nb] === seedIdx) {
+              orphanVisited.add(nb);
+              ccQ.push(nb);
+            }
+          }
+        }
+        let cx = 0,
+          cy = 0;
+        for (const n of cc) {
+          cx += rawPoints[n].x;
+          cy += rawPoints[n].y;
+        }
+        cx /= cc.length;
+        cy /= cc.length;
+        let minD = Infinity,
+          nearest = seedIdx;
+        for (let s = 0; s < selectedPoints.length; s++) {
+          if (s === seedIdx) continue;
+          const d = Math.hypot(
+            selectedPoints[s].x - cx,
+            selectedPoints[s].y - cy,
+          );
+          if (d < minD) {
+            minD = d;
+            nearest = s;
+          }
+        }
+        if (nearest !== seedIdx) {
+          for (const n of cc) nodeOwner[n] = nearest;
+          changed = true;
         }
       }
-      for (const n of cc) nodeOwner[n] = nearest;
     }
+    if (!changed) break;
   }
 
   const flatBoundary = buildFlatBoundary(originalPath);

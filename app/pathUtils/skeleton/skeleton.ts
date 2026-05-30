@@ -308,16 +308,33 @@ export function clipPrimitivesToShape(
  *
  * A "leaf edge" qualifies when:
  *   1. one endpoint has degree 1, the other has degree ≥ 2; AND
- *   2. its chord length is < 1/5 of at least one neighbouring edge's chord
- *      length (only "stubby" leaves are candidates — a long arm that
- *      happens to be covered is left alone); AND
+ *   2. its primitive area is < `areaRatio` × (some neighbour's primitive area)
+ *      — only leaves whose actual footprint is much smaller than a neighbour's
+ *      are candidates. Area is the right measure (not chord length): for
+ *      wildly-curving beziers the chord can be tiny while the primitive
+ *      polygon sweeps a large area, and vice versa. AND
  *   3. ≥ containmentThreshold (default 0.999) of its primitive area is
  *      contained in the union of all neighbouring edge primitives.
  */
 export function removeRedundantLeafEdges(
   fitted: FittedMedialAxisGraph,
   containmentThreshold: number = 0.999,
-  lengthRatio: number = 1 / 5,
+  areaRatio: number = 1 / 5,
+): void {
+  // Repeated single-pass until quiescent — removing one leaf can promote a
+  // mid-chain vertex to a new leaf candidate. Bounded to avoid pathological loops.
+  const MAX_PASSES = 10;
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const startEdgeCount = fitted.segments.length;
+    removeRedundantLeafEdgesPass(fitted, containmentThreshold, areaRatio);
+    if (fitted.segments.length === startEdgeCount) break;
+  }
+}
+
+function removeRedundantLeafEdgesPass(
+  fitted: FittedMedialAxisGraph,
+  containmentThreshold: number,
+  areaRatio: number,
 ): void {
   const degree = computeDegrees(fitted);
 
@@ -336,19 +353,23 @@ export function removeRedundantLeafEdges(
     incidentEdges[v].push(i);
   }
 
-  const chordLen = (eIdx: number): number => {
-    const [a, b] = fitted.segments[eIdx];
-    const pa = fitted.points[a];
-    const pb = fitted.points[b];
-    return Math.hypot(pa.x - pb.x, pa.y - pb.y);
-  };
-
   const makePath = (pts: Vec2D[]): paper.Path =>
     new paper.Path({
       segments: pts.map((p) => new paper.Point(p.x, p.y)),
       closed: true,
       insert: false,
     });
+
+  // Pre-compute area of every edge primitive once (reused by both the area gate
+  // and the containment computation).
+  const primArea = new Map<number, number>();
+  for (const [edgeIdx, prim] of edgePrim) {
+    const pts = primitivePts(prim);
+    if (pts.length < 3) continue;
+    const p = makePath(pts);
+    primArea.set(edgeIdx, Math.abs(p.area));
+    p.remove();
+  }
 
   const edgesToRemove = new Set<number>();
 
@@ -364,17 +385,19 @@ export function removeRedundantLeafEdges(
     const leafPts = primitivePts(leafPrim);
     if (leafPts.length < 3) continue;
 
-    // Length check: leaf must be much shorter than at least one neighbour.
-    const leafLen = chordLen(i);
-    let lengthOk = false;
+    // Area check: leaf primitive must be much smaller than at least one neighbour.
+    const leafArea = primArea.get(i) ?? 0;
+    if (leafArea <= 0) continue;
+    let areaOk = false;
     for (const j of incidentEdges[otherVertex]) {
       if (j === i) continue;
-      if (leafLen < chordLen(j) * lengthRatio) {
-        lengthOk = true;
+      const nbArea = primArea.get(j) ?? 0;
+      if (leafArea < nbArea * areaRatio) {
+        areaOk = true;
         break;
       }
     }
-    if (!lengthOk) continue;
+    if (!areaOk) continue;
 
     // Build the union of all neighbouring edge primitive polygons.
     let unionPath: paper.PathItem | null = null;
@@ -397,31 +420,64 @@ export function removeRedundantLeafEdges(
     if (!unionPath) continue;
 
     const leafPath = makePath(leafPts);
-    const leafArea = Math.abs(leafPath.area);
     // Boolean subtract: leaf − union = part of leaf outside any neighbour.
     const diff = leafPath.subtract(unionPath, { insert: false });
     const remaining = Math.abs(diff.area);
     diff.remove();
     unionPath.remove();
     leafPath.remove();
-    const containedFrac = leafArea > 0 ? 1 - remaining / leafArea : 1;
+    const containedFrac = 1 - remaining / leafArea;
     if (containedFrac >= containmentThreshold) edgesToRemove.add(i);
   }
 
   if (edgesToRemove.size === 0) return;
 
+  // Pass 1: build new segments and identify which vertices remain referenced.
   const oldToNewSeg = new Map<number, number>();
   const newSegments: [number, number][] = [];
   const newCPs: [Vec2D, Vec2D][] = [];
+  const vertexStillUsed = new Uint8Array(fitted.points.length);
   for (let i = 0; i < fitted.segments.length; i++) {
     if (edgesToRemove.has(i)) continue;
     oldToNewSeg.set(i, newSegments.length);
     newSegments.push(fitted.segments[i]);
     if (fitted.controlPoints) newCPs.push(fitted.controlPoints[i]);
+    const [u, v] = fitted.segments[i];
+    vertexStillUsed[u] = 1;
+    vertexStillUsed[v] = 1;
+  }
+  // Also keep vertices that still have a vertex (disk) primitive.
+  for (const prim of fitted.primitives) {
+    if (prim.type === "point") vertexStillUsed[prim.elementIdx] = 1;
+  }
+
+  // Pass 2: drop orphaned vertices and remap remaining vertex indices.
+  const oldToNewVertex = new Int32Array(fitted.points.length).fill(-1);
+  const newPoints: paper.Point[] = [];
+  for (let i = 0; i < fitted.points.length; i++) {
+    if (!vertexStillUsed[i]) continue;
+    oldToNewVertex[i] = newPoints.length;
+    newPoints.push(fitted.points[i]);
+  }
+  fitted.points = newPoints;
+
+  // Remap segment endpoints to new vertex indices.
+  for (let i = 0; i < newSegments.length; i++) {
+    const [u, v] = newSegments[i];
+    newSegments[i] = [oldToNewVertex[u], oldToNewVertex[v]];
   }
   fitted.segments = newSegments;
   if (fitted.controlPoints) fitted.controlPoints = newCPs;
 
+  if (fitted.vertexRawNodes) {
+    const newVRN: number[] = [];
+    for (let i = 0; i < oldToNewVertex.length; i++) {
+      if (oldToNewVertex[i] >= 0) newVRN.push(fitted.vertexRawNodes[i]);
+    }
+    fitted.vertexRawNodes = newVRN;
+  }
+
+  // Filter and remap primitives (drop removed edges, remap vertex/edge elementIdx).
   const newPrimitives: Primitive[] = [];
   for (const prim of fitted.primitives) {
     if (prim.type === "edge") {
@@ -431,7 +487,10 @@ export function removeRedundantLeafEdges(
         elementIdx: oldToNewSeg.get(prim.elementIdx)!,
       });
     } else {
-      newPrimitives.push(prim);
+      // "point" primitive — must still reference a kept vertex
+      const newIdx = oldToNewVertex[prim.elementIdx];
+      if (newIdx < 0) continue;
+      newPrimitives.push({ ...prim, elementIdx: newIdx });
     }
   }
   fitted.primitives = newPrimitives;
