@@ -608,8 +608,14 @@ export function constructMedialSkeleton(
     }
   }
 
+  // Iterate the authoritative rawToOut map: leaf-snap stubs add new vertices
+  // and Steiner points via getOrAddVertex without updating outToRaw, so using
+  // outToRaw here would leave those vertices' raw mapping as -1 (which then
+  // makes simplifyMedialSkeleton silently skip their incident edges).
+  // For duplicate outIdx (direct-snap rewrites a seed's raw node), the
+  // insertion-ordered Map iteration leaves the direct-snap entry winning.
   const vertexRawNodes = new Array<number>(finalPoints.length).fill(-1);
-  for (const [outIdx, rn] of outToRaw) vertexRawNodes[outIdx] = rn;
+  for (const [rn, outIdx] of rawToOut) vertexRawNodes[outIdx] = rn;
 
   return {
     points: finalPoints,
