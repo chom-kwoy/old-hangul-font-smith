@@ -41,7 +41,10 @@ import {
   computeMedialSkeletonPoints,
 } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
-import { clipPrimitivesToShape } from "@/app/pathUtils/skeleton/skeleton";
+import {
+  clipPrimitivesToShape,
+  removeRedundantLeafEdges,
+} from "@/app/pathUtils/skeleton/skeleton";
 
 import {
   TEST_PATHS,
@@ -381,6 +384,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         : skeleton;
       fitted = localPrimitiveFitting(path, simplifiedSkeleton);
       clipPrimitivesToShape(fitted, path);
+      removeRedundantLeafEdges(fitted);
     } catch (e) {
       error = e;
     }

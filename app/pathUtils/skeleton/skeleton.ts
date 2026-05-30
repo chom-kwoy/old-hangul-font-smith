@@ -84,6 +84,9 @@ export function skeletonize(
   // Post-process: offset → smooth → clip to shape boundary
   clipPrimitivesToShape(fitted, paperPath);
 
+  // Drop leaf edges whose primitive is fully covered by a neighbour.
+  removeRedundantLeafEdges(fitted);
+
   return fitted;
 }
 
@@ -293,6 +296,123 @@ export function clipPrimitivesToShape(
     offsetPath.remove();
     clipped.remove();
   }
+}
+
+/**
+ * Post-processing step: remove leaf edges whose fitted primitive is fully
+ * contained inside a neighbouring edge's primitive. Such leaf edges add no
+ * coverage — the neighbour already covers their footprint — and merely
+ * introduce extra topology. Call after clipPrimitivesToShape so the
+ * containment test uses the final clipped polygons.
+ *
+ * A "leaf edge" is an edge whose one endpoint has degree 1 and the other
+ * has degree ≥ 2. The leaf primitive is considered contained when the
+ * fraction (leaf area − leaf-outside-neighbour area) / leaf area ≥
+ * containmentThreshold (default 0.999). A tight threshold avoids removing
+ * a leaf that contributes a small but real piece of boundary coverage.
+ */
+export function removeRedundantLeafEdges(
+  fitted: FittedMedialAxisGraph,
+  containmentThreshold: number = 0.999,
+): void {
+  const degree = new Int32Array(fitted.points.length);
+  for (const [u, v] of fitted.segments) {
+    degree[u]++;
+    degree[v]++;
+  }
+
+  const edgePrim = new Map<number, Primitive>();
+  for (const prim of fitted.primitives) {
+    if (prim.type === "edge") edgePrim.set(prim.elementIdx, prim);
+  }
+
+  const incidentEdges: number[][] = Array.from(
+    { length: fitted.points.length },
+    () => [],
+  );
+  for (let i = 0; i < fitted.segments.length; i++) {
+    const [u, v] = fitted.segments[i];
+    incidentEdges[u].push(i);
+    incidentEdges[v].push(i);
+  }
+
+  const makePath = (pts: Vec2D[]): paper.Path =>
+    new paper.Path({
+      segments: pts.map((p) => new paper.Point(p.x, p.y)),
+      closed: true,
+      insert: false,
+    });
+
+  const edgesToRemove = new Set<number>();
+
+  for (let i = 0; i < fitted.segments.length; i++) {
+    const [u, v] = fitted.segments[i];
+    let otherVertex: number;
+    if (degree[u] === 1 && degree[v] >= 2) otherVertex = v;
+    else if (degree[v] === 1 && degree[u] >= 2) otherVertex = u;
+    else continue;
+
+    const leafPrim = edgePrim.get(i);
+    if (!leafPrim) continue;
+    const leafPts = primitivePts(leafPrim);
+    if (leafPts.length < 3) continue;
+
+    const leafPath = makePath(leafPts);
+    const leafArea = Math.abs(leafPath.area);
+    let redundant = false;
+    for (const j of incidentEdges[otherVertex]) {
+      if (j === i || edgesToRemove.has(j)) continue;
+      const nbPrim = edgePrim.get(j);
+      if (!nbPrim) continue;
+      const nbPts = primitivePts(nbPrim);
+      if (nbPts.length < 3) continue;
+      const nbPath = makePath(nbPts);
+      // Boolean subtract: leaf − neighbour = part of leaf outside neighbour.
+      // If that's tiny relative to leaf, leaf is contained.
+      const diff = leafPath.subtract(nbPath, { insert: false });
+      const remaining = Math.abs(diff.area);
+      diff.remove();
+      nbPath.remove();
+      const containedFrac = leafArea > 0 ? 1 - remaining / leafArea : 1;
+      if (containedFrac >= containmentThreshold) {
+        redundant = true;
+        break;
+      }
+    }
+    leafPath.remove();
+    if (redundant) edgesToRemove.add(i);
+  }
+
+  if (edgesToRemove.size === 0) return;
+
+  const oldToNewSeg = new Map<number, number>();
+  const newSegments: [number, number][] = [];
+  const newCPs: [Vec2D, Vec2D][] = [];
+  const newRawSamples: [Vec2D, Vec2D, Vec2D][] = [];
+  for (let i = 0; i < fitted.segments.length; i++) {
+    if (edgesToRemove.has(i)) continue;
+    oldToNewSeg.set(i, newSegments.length);
+    newSegments.push(fitted.segments[i]);
+    if (fitted.controlPoints) newCPs.push(fitted.controlPoints[i]);
+    if (fitted.rawPathSamples) newRawSamples.push(fitted.rawPathSamples[i]);
+  }
+  fitted.segments = newSegments;
+  if (fitted.controlPoints) fitted.controlPoints = newCPs;
+  if (fitted.rawPathSamples) fitted.rawPathSamples = newRawSamples;
+
+  const newPrimitives: Primitive[] = [];
+  for (const prim of fitted.primitives) {
+    if (prim.type === "edge") {
+      if (edgesToRemove.has(prim.elementIdx)) continue;
+      newPrimitives.push({
+        ...prim,
+        elementIdx: oldToNewSeg.get(prim.elementIdx)!,
+      });
+    } else {
+      newPrimitives.push(prim);
+    }
+  }
+  fitted.primitives = newPrimitives;
 }
 
 function minkowskiSum(
