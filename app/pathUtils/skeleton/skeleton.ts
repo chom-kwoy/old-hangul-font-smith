@@ -300,20 +300,24 @@ export function clipPrimitivesToShape(
 
 /**
  * Post-processing step: remove leaf edges whose fitted primitive is fully
- * contained inside a neighbouring edge's primitive. Such leaf edges add no
- * coverage — the neighbour already covers their footprint — and merely
- * introduce extra topology. Call after clipPrimitivesToShape so the
- * containment test uses the final clipped polygons.
+ * contained inside the union of their neighbouring edges' primitives. Such
+ * leaf edges add no coverage — the neighbours collectively already cover
+ * their footprint — and merely introduce extra topology. Call after
+ * clipPrimitivesToShape so the containment test uses the final clipped
+ * polygons.
  *
- * A "leaf edge" is an edge whose one endpoint has degree 1 and the other
- * has degree ≥ 2. The leaf primitive is considered contained when the
- * fraction (leaf area − leaf-outside-neighbour area) / leaf area ≥
- * containmentThreshold (default 0.999). A tight threshold avoids removing
- * a leaf that contributes a small but real piece of boundary coverage.
+ * A "leaf edge" qualifies when:
+ *   1. one endpoint has degree 1, the other has degree ≥ 2; AND
+ *   2. its chord length is < 1/5 of at least one neighbouring edge's chord
+ *      length (only "stubby" leaves are candidates — a long arm that
+ *      happens to be covered is left alone); AND
+ *   3. ≥ containmentThreshold (default 0.999) of its primitive area is
+ *      contained in the union of all neighbouring edge primitives.
  */
 export function removeRedundantLeafEdges(
   fitted: FittedMedialAxisGraph,
   containmentThreshold: number = 0.999,
+  lengthRatio: number = 1 / 5,
 ): void {
   const degree = new Int32Array(fitted.points.length);
   for (const [u, v] of fitted.segments) {
@@ -336,6 +340,13 @@ export function removeRedundantLeafEdges(
     incidentEdges[v].push(i);
   }
 
+  const chordLen = (eIdx: number): number => {
+    const [a, b] = fitted.segments[eIdx];
+    const pa = fitted.points[a];
+    const pb = fitted.points[b];
+    return Math.hypot(pa.x - pb.x, pa.y - pb.y);
+  };
+
   const makePath = (pts: Vec2D[]): paper.Path =>
     new paper.Path({
       segments: pts.map((p) => new paper.Point(p.x, p.y)),
@@ -357,9 +368,20 @@ export function removeRedundantLeafEdges(
     const leafPts = primitivePts(leafPrim);
     if (leafPts.length < 3) continue;
 
-    const leafPath = makePath(leafPts);
-    const leafArea = Math.abs(leafPath.area);
-    let redundant = false;
+    // Length check: leaf must be much shorter than at least one neighbour.
+    const leafLen = chordLen(i);
+    let lengthOk = false;
+    for (const j of incidentEdges[otherVertex]) {
+      if (j === i) continue;
+      if (leafLen < chordLen(j) * lengthRatio) {
+        lengthOk = true;
+        break;
+      }
+    }
+    if (!lengthOk) continue;
+
+    // Build the union of all neighbouring edge primitive polygons.
+    let unionPath: paper.PathItem | null = null;
     for (const j of incidentEdges[otherVertex]) {
       if (j === i || edgesToRemove.has(j)) continue;
       const nbPrim = edgePrim.get(j);
@@ -367,20 +389,27 @@ export function removeRedundantLeafEdges(
       const nbPts = primitivePts(nbPrim);
       if (nbPts.length < 3) continue;
       const nbPath = makePath(nbPts);
-      // Boolean subtract: leaf − neighbour = part of leaf outside neighbour.
-      // If that's tiny relative to leaf, leaf is contained.
-      const diff = leafPath.subtract(nbPath, { insert: false });
-      const remaining = Math.abs(diff.area);
-      diff.remove();
-      nbPath.remove();
-      const containedFrac = leafArea > 0 ? 1 - remaining / leafArea : 1;
-      if (containedFrac >= containmentThreshold) {
-        redundant = true;
-        break;
+      if (unionPath === null) {
+        unionPath = nbPath;
+      } else {
+        const merged = unionPath.unite(nbPath, { insert: false });
+        unionPath.remove();
+        nbPath.remove();
+        unionPath = merged;
       }
     }
+    if (!unionPath) continue;
+
+    const leafPath = makePath(leafPts);
+    const leafArea = Math.abs(leafPath.area);
+    // Boolean subtract: leaf − union = part of leaf outside any neighbour.
+    const diff = leafPath.subtract(unionPath, { insert: false });
+    const remaining = Math.abs(diff.area);
+    diff.remove();
+    unionPath.remove();
     leafPath.remove();
-    if (redundant) edgesToRemove.add(i);
+    const containedFrac = leafArea > 0 ? 1 - remaining / leafArea : 1;
+    if (containedFrac >= containmentThreshold) edgesToRemove.add(i);
   }
 
   if (edgesToRemove.size === 0) return;
