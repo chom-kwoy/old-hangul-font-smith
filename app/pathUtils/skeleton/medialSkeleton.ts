@@ -7,9 +7,14 @@ import {
   nearestDistFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
 import {
+  evalBezier,
   fitBezierCPs,
-  tangentFallbackCPs,
 } from "@/app/pathUtils/skeleton/bezierFitting";
+import {
+  bfsPath,
+  buildAdjacencyList,
+  computeDegrees,
+} from "@/app/pathUtils/skeleton/graphUtils";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { Vec2D } from "@/app/utils/types";
 
@@ -54,10 +59,9 @@ export function constructMedialSkeleton(
   const opts: SkeletonConstructionOptions = {
     maxTotalVertices: options.maxTotalVertices ?? 25,
     maxBisectDepth: options.maxBisectDepth ?? 4,
-    centerThreshold: options.centerThreshold ?? CENTER_THRESHOLD,
-    centerThresholdValid:
-      options.centerThresholdValid ?? CENTER_THRESHOLD_VALID,
-    centerNSamp: options.centerNSamp ?? CENTER_N_SAMP,
+    centerThreshold: options.centerThreshold ?? 0.35,
+    centerThresholdValid: options.centerThresholdValid ?? 0.25,
+    centerNSamp: options.centerNSamp ?? 12,
     bezierLSQRegularization: options.bezierLSQRegularization ?? 0.5,
   };
 
@@ -298,16 +302,8 @@ export function constructMedialSkeleton(
     ]);
   }
 
-  // Thin wrappers around the standalone functions in bezierFitting.ts that
-  // capture rawPoints and regularization from the enclosing scope.
-  function tangentBasedBezierCPs(
-    rawPath: number[],
-    pA: Vec2D,
-    pB: Vec2D,
-  ): [Vec2D, Vec2D] {
-    return tangentFallbackCPs(rawPath, rawPoints, pA, pB);
-  }
-
+  // Thin wrapper around fitBezierCPs that captures rawPoints and regularization
+  // from the enclosing scope.
   function bezierCPs(rawPath: number[], pA: Vec2D, pB: Vec2D): [Vec2D, Vec2D] {
     return fitBezierCPs(
       rawPath,
@@ -326,7 +322,7 @@ export function constructMedialSkeleton(
     cp2?: Vec2D,
   ): boolean {
     for (let k = 1; k < opts.centerNSamp; k++) {
-      const { x, y } = evalBone(pA, pB, cp1, cp2, k / opts.centerNSamp);
+      const { x, y } = evalBezier(pA, cp1, cp2, pB, k / opts.centerNSamp);
       if (!originalPath.contains(new paper.Point(x, y))) return false;
     }
     return true;
@@ -467,16 +463,10 @@ export function constructMedialSkeleton(
   // Only direct-snap if tipR ≥ origR × 0.65; otherwise append as a stub leaf
   // (keeps the original wide-coverage disk while adding a tip for the cap).
 
-  // Reverse map: output vertex index → the raw node that created it.
-  // Used after direct-snap to re-run BFS for incident edge raw paths.
-  const outToRaw = new Map<number, number>();
-  for (const [rn, outIdx] of rawToOut) outToRaw.set(outIdx, rn);
-
-  const outDegree = new Int32Array(finalPoints.length);
-  for (const [u, v] of newSegments) {
-    outDegree[u]++;
-    outDegree[v]++;
-  }
+  const outDegree = computeDegrees({
+    points: finalPoints,
+    segments: newSegments,
+  });
 
   const nSeeds = selectedPoints.length;
   for (let si = 0; si < nSeeds; si++) {
@@ -551,18 +541,21 @@ export function constructMedialSkeleton(
       ) {
         finalPoints[seedOutIdx] = new paper.Point(rawPoints[rn]);
         directSnapRn = rn;
-        // Register the snapped raw node so emitEdge can resolve it to seedOutIdx,
-        // and update the reverse map so subsequent edge re-BFS uses the new position.
+        // Register the snapped raw node so emitEdge can resolve it to seedOutIdx.
         rawToOut.set(directSnapRn, seedOutIdx);
-        outToRaw.set(seedOutIdx, directSnapRn);
+        // Build a fresh reverse map for the incident-edge re-BFS below; rebuilt
+        // here (rather than maintained globally) so we never read a stale entry —
+        // leaf-snap stubs and Steiner inserts during recursion also mutate rawToOut.
+        const outToRaw = new Map<number, number>();
+        for (const [rn2, outIdx] of rawToOut) outToRaw.set(outIdx, rn2);
         // The vertex moved: re-run BFS between the actual final raw nodes of each
         // incident edge so that raw paths, samples, and CPs all reflect the true
         // medial-axis geometry between the snapped endpoint and its neighbour.
         for (let segI = 0; segI < newSegments.length; segI++) {
           const [su, sv] = newSegments[segI];
           if (su !== seedOutIdx && sv !== seedOutIdx) continue;
-          const suRaw = su === seedOutIdx ? directSnapRn : outToRaw.get(su);
-          const svRaw = sv === seedOutIdx ? directSnapRn : outToRaw.get(sv);
+          const suRaw = outToRaw.get(su);
+          const svRaw = outToRaw.get(sv);
           const pA2 = finalPoints[su],
             pB2 = finalPoints[sv];
           if (suRaw !== undefined && svRaw !== undefined) {
@@ -608,10 +601,6 @@ export function constructMedialSkeleton(
     }
   }
 
-  // Iterate the authoritative rawToOut map: leaf-snap stubs add new vertices
-  // and Steiner points via getOrAddVertex without updating outToRaw, so using
-  // outToRaw here would leave those vertices' raw mapping as -1 (which then
-  // makes simplifyMedialSkeleton silently skip their incident edges).
   // For duplicate outIdx (direct-snap rewrites a seed's raw node), the
   // insertion-ordered Map iteration leaves the direct-snap entry winning.
   const vertexRawNodes = new Array<number>(finalPoints.length).fill(-1);
@@ -629,37 +618,6 @@ export function constructMedialSkeleton(
 // ---------------------------------------------------------
 // Helper Functions
 // ---------------------------------------------------------
-
-// BFS shortest path from `from` to `to`; returns node sequence or null if unreachable.
-function bfsPath(from: number, to: number, adj: number[][]): number[] | null {
-  if (from === to) return [from];
-  const parent = new Int32Array(adj.length).fill(-2);
-  parent[from] = -1;
-  const queue = [from];
-  let found = false;
-  outer: while (queue.length > 0) {
-    const curr = queue.shift()!;
-    for (const nb of adj[curr]) {
-      if (parent[nb] === -2) {
-        parent[nb] = curr;
-        if (nb === to) {
-          found = true;
-          break outer;
-        }
-        queue.push(nb);
-      }
-    }
-  }
-  if (!found) return null;
-  const path: number[] = [];
-  let curr = to;
-  while (curr !== -1) {
-    path.push(curr);
-    curr = parent[curr];
-  }
-  path.reverse();
-  return path;
-}
 
 // BFS shortest path constrained to nodes passing nodeFilter (endpoints always included).
 // Optional excludeEdges set (keys "u-v" with u<v) skips those edges entirely.
@@ -703,124 +661,19 @@ function bfsPathFiltered(
   return path;
 }
 
-// Max inscribed-radius node strictly between nodeA and nodeB on BFS shortest path.
-function findMaxRSteinerId(
-  nodeA: number,
-  nodeB: number,
-  adj: number[][],
-  nodeR: Float64Array,
-): number {
-  if (nodeA === nodeB) return -1;
-  const n = adj.length;
-  const parent = new Int32Array(n).fill(-2);
-  parent[nodeA] = -1;
-  const queue = [nodeA];
-  let found = false;
-  outer: while (queue.length > 0) {
-    const curr = queue.shift()!;
-    for (const nb of adj[curr]) {
-      if (parent[nb] === -2) {
-        parent[nb] = curr;
-        if (nb === nodeB) {
-          found = true;
-          break outer;
-        }
-        queue.push(nb);
-      }
-    }
-  }
-  if (!found) return -1;
-  let maxR = -1,
-    best = -1;
-  let curr = parent[nodeB];
-  while (curr !== nodeA && curr !== -1) {
-    if (nodeR[curr] > maxR) {
-      maxR = nodeR[curr];
-      best = curr;
-    }
-    curr = parent[curr];
-  }
-  return best;
-}
-
-// First degree-3+ node on BFS shortest path from nodeA to nodeB (excluding endpoints).
-function findBranchSteinerId(
-  nodeA: number,
-  nodeB: number,
-  adj: number[][],
-): number {
-  if (nodeA === nodeB) return -1;
-  const n = adj.length;
-  const parent = new Int32Array(n).fill(-2);
-  parent[nodeA] = -1;
-  const queue = [nodeA];
-  let found = false;
-  outer: while (queue.length > 0) {
-    const curr = queue.shift()!;
-    for (const nb of adj[curr]) {
-      if (parent[nb] === -2) {
-        parent[nb] = curr;
-        if (nb === nodeB) {
-          found = true;
-          break outer;
-        }
-        queue.push(nb);
-      }
-    }
-  }
-  if (!found) return -1;
-  let curr = parent[nodeB];
-  while (curr !== nodeA && curr !== -1) {
-    if (adj[curr].length >= 3) return curr;
-    curr = parent[curr];
-  }
-  if (adj[nodeA].length >= 3) return nodeA;
-  return -1;
-}
-
-const CENTER_THRESHOLD = 0.35;
-const CENTER_THRESHOLD_VALID = 0.25;
-const CENTER_N_SAMP = 12;
-
-// Evaluate a point on the bone curve at t ∈ [0,1].
-// Uses the cubic Bezier when cp1/cp2 are given, otherwise linear interpolation.
-function evalBone(
-  pA: Vec2D,
-  pB: Vec2D,
-  cp1: Vec2D | undefined,
-  cp2: Vec2D | undefined,
-  t: number,
-): { x: number; y: number } {
-  if (!cp1 || !cp2)
-    return { x: pA.x + t * (pB.x - pA.x), y: pA.y + t * (pB.y - pA.y) };
-  const u = 1 - t;
-  return {
-    x:
-      u * u * u * pA.x +
-      3 * u * u * t * cp1.x +
-      3 * u * t * t * cp2.x +
-      t * t * t * pB.x,
-    y:
-      u * u * u * pA.y +
-      3 * u * u * t * cp1.y +
-      3 * u * t * t * cp2.y +
-      t * t * t * pB.y,
-  };
-}
-
 function isEdgeCenterd(
   pA: Vec2D,
   pB: Vec2D,
   fb: FlatBoundary,
-  threshold = CENTER_THRESHOLD,
-  nSamp = CENTER_N_SAMP,
+  threshold: number,
+  nSamp: number,
   cp1?: Vec2D,
   cp2?: Vec2D,
 ): boolean {
   let minDist = Infinity,
     maxDist = 0;
   for (let k = 0; k <= nSamp; k++) {
-    const { x, y } = evalBone(pA, pB, cp1, cp2, k / nSamp);
+    const { x, y } = evalBezier(pA, cp1, cp2, pB, k / nSamp);
     const d = nearestDistFlatBoundary(x, y, fb);
     if (d < minDist) minDist = d;
     if (d > maxDist) maxDist = d;
@@ -843,15 +696,6 @@ function isGraphConnected(adj: number[][]): boolean {
     }
   }
   return visited.size === n;
-}
-
-function buildAdjacencyList(graph: MedialAxisGraph): number[][] {
-  const adj: number[][] = Array.from({ length: graph.points.length }, () => []);
-  for (const [u, v] of graph.segments) {
-    adj[u].push(v);
-    adj[v].push(u);
-  }
-  return adj;
 }
 
 function getNearestNodeIndex(pt: paper.Point, nodes: Vec2D[]): number {

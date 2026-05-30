@@ -6,6 +6,11 @@ import {
   fitBezierCPs,
   fitBezierCPsFromSamples,
 } from "@/app/pathUtils/skeleton/bezierFitting";
+import {
+  bfsPath,
+  buildAdjacencyList,
+  computeDegrees,
+} from "@/app/pathUtils/skeleton/graphUtils";
 import { localPrimitiveFitting } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
@@ -52,7 +57,7 @@ export function simplifyMedialSkeleton(
 ): MedialAxisGraph {
   const opts: SimplifySkeletonOptions = { ...DEFAULTS, ...options };
   const rawPoints = rawMedialAxis.points;
-  const rawAdj = buildAdj(rawMedialAxis);
+  const rawAdj = buildAdjacencyList(rawMedialAxis);
 
   const boundarySamples = sampleBoundary(path, { step: 10 }).points.map(
     (p) => new paper.Point(p.x, p.y),
@@ -311,24 +316,12 @@ function computeResidual(
   return sum / samples.length;
 }
 
-function computeDegrees(sk: MedialAxisGraph): Int32Array {
-  const deg = new Int32Array(sk.points.length);
-  for (const [a, b] of sk.segments) { deg[a]++; deg[b]++; }
-  return deg;
-}
-
 function otherNeighbour(sk: MedialAxisGraph, node: number, exclude: number): number {
   for (const [a, b] of sk.segments) {
     if (a === node && b !== exclude) return b;
     if (b === node && a !== exclude) return a;
   }
   return -1;
-}
-
-function buildAdj(graph: MedialAxisGraph): number[][] {
-  const adj: number[][] = Array.from({ length: graph.points.length }, () => []);
-  for (const [u, v] of graph.segments) { adj[u].push(v); adj[v].push(u); }
-  return adj;
 }
 
 function findEdgeIndex(sk: MedialAxisGraph, a: number, b: number): number {
@@ -403,25 +396,3 @@ function sampleTwoSegments(
   return { samples: pts, ts };
 }
 
-function bfsPath(from: number, to: number, adj: number[][]): number[] | null {
-  if (from === to) return [from];
-  const parent = new Int32Array(adj.length).fill(-2);
-  parent[from] = -1;
-  const queue = [from];
-  let found = false;
-  outer: while (queue.length > 0) {
-    const curr = queue.shift()!;
-    for (const nb of adj[curr]) {
-      if (parent[nb] !== -2) continue;
-      parent[nb] = curr;
-      if (nb === to) { found = true; break outer; }
-      queue.push(nb);
-    }
-  }
-  if (!found) return null;
-  const path: number[] = [];
-  let curr = to;
-  while (curr !== -1) { path.push(curr); curr = parent[curr]; }
-  path.reverse();
-  return path;
-}

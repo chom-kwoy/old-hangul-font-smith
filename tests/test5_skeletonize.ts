@@ -15,17 +15,15 @@ import {
   Line as FabricLine,
   Path as FabricPath,
   Polygon as FabricPolygon,
-  Polyline as FabricPolyline,
   Text as FabricText,
   StaticCanvas,
 } from "fabric/node";
 import * as fs from "node:fs";
 import paper from "paper";
 
-import {
-  FlatBoundary,
-  nearestDistFlatBoundary,
-} from "@/app/pathUtils/flatBoundary";
+import { nearestDistFlatBoundary } from "@/app/pathUtils/flatBoundary";
+import { evalBezier } from "@/app/pathUtils/skeleton/bezierFitting";
+import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import {
   FittedMedialAxisGraph,
   localPrimitiveFitting,
@@ -281,49 +279,21 @@ function renderSkeletonization(
 
   // --- Uncovered boundary samples (red dots) ---
   if (boundarySamples) {
-    for (const s of boundarySamples) {
-      const covered = fitted.primitives.some((prim) => {
-        const pts = primitivePts(prim);
-        const N = pts.length;
-        let inside = false;
-        for (let i = 0, j = N - 1; i < N; j = i++) {
-          if (
-            pts[i].y > s.y !== pts[j].y > s.y &&
-            s.x <
-              ((pts[j].x - pts[i].x) * (s.y - pts[i].y)) /
-                (pts[j].y - pts[i].y) +
-                pts[i].x
-          )
-            inside = !inside;
-        }
-        if (inside) return true;
-        for (let i = 0, j = N - 1; i < N; j = i++) {
-          const ax = pts[j].x,
-            ay = pts[j].y,
-            bx = pts[i].x,
-            by = pts[i].y;
-          const ddx = bx - ax,
-            ddy = by - ay;
-          const lenSq = ddx * ddx + ddy * ddy;
-          let t =
-            lenSq > 1e-10 ? ((s.x - ax) * ddx + (s.y - ay) * ddy) / lenSq : 0;
-          t = Math.max(0, Math.min(1, t));
-          if (Math.hypot(s.x - (ax + t * ddx), s.y - (ay + t * ddy)) < 1.0)
-            return true;
-        }
-        return false;
-      });
-      if (!covered) {
-        canvas.add(
-          new FabricCircle({
-            left: tx(s.x),
-            top: ty(s.y),
-            radius: 5,
-            fill: "red",
-            selectable: false,
-          }),
-        );
-      }
+    const { uncovered } = coverageAndUncovered(
+      boundarySamples,
+      fitted.primitives,
+      1.0,
+    );
+    for (const s of uncovered) {
+      canvas.add(
+        new FabricCircle({
+          left: tx(s.x),
+          top: ty(s.y),
+          radius: 5,
+          fill: "red",
+          selectable: false,
+        }),
+      );
     }
   }
 
@@ -411,31 +381,6 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         `${fitted.primitives.length} prims`,
       );
 
-      // Evaluate a point on a skeleton edge at parameter t ∈ [0,1].
-      // Uses the cubic Bezier if control points are present, otherwise linear.
-      function evalEdgeCurve(
-        pu: { x: number; y: number },
-        pv: { x: number; y: number },
-        cp: [{ x: number; y: number }, { x: number; y: number }] | undefined,
-        t: number,
-      ): { x: number; y: number } {
-        if (!cp)
-          return { x: pu.x + t * (pv.x - pu.x), y: pu.y + t * (pv.y - pu.y) };
-        const u = 1 - t;
-        return {
-          x:
-            u * u * u * pu.x +
-            3 * u * u * t * cp[0].x +
-            3 * u * t * t * cp[1].x +
-            t * t * t * pv.x,
-          y:
-            u * u * u * pu.y +
-            3 * u * u * t * cp[0].y +
-            3 * u * t * t * cp[1].y +
-            t * t * t * pv.y,
-        };
-      }
-
       // Worst centrality ratio: min over all edges of
       //   (closest boundary distance from any point on the edge bone)
       //   / (mean r of that edge's fitted primitive)
@@ -466,7 +411,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         let minBoundaryDist = Infinity;
         const N_SAMP = 20;
         for (let k = 0; k <= N_SAMP; k++) {
-          const { x, y } = evalEdgeCurve(pu, pv, cp, k / N_SAMP);
+          const { x, y } = evalBezier(pu, cp?.[0], cp?.[1], pv, k / N_SAMP);
           minBoundaryDist = Math.min(
             minBoundaryDist,
             nearestDistFlatBoundary(x, y, flatBoundary),
@@ -499,7 +444,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           const cp = fitted.controlPoints?.[i];
           for (let k = 1; k < N_SAMP; k++) {
             const t = k / N_SAMP;
-            const { x, y } = evalEdgeCurve(pu, pv, cp, t);
+            const { x, y } = evalBezier(pu, cp?.[0], cp?.[1], pv, t);
             if (!path.contains(new paper.Point(x, y))) {
               outsideEdge = i;
               outsideT = t;

@@ -2,11 +2,11 @@ import { MinPriorityQueue } from "@datastructures-js/priority-queue";
 import paper from "paper";
 
 import {
-  FlatBoundary,
   buildFlatBoundary,
   nearestDistFlatBoundary,
   sampleBoundary,
 } from "@/app/pathUtils/flatBoundary";
+import { buildAdjacencyList } from "@/app/pathUtils/skeleton/graphUtils";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import {
   Primitive,
@@ -119,7 +119,7 @@ export function computeMedialSkeletonPoints(
         const currentFree = flatToPoints(x);
         return computeEnergyPartial(
           projFrozen, inscribedFrozen,
-          currentFree, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq,
+          currentFree, medialAxis, boundarySamples, medialAxisR, normSq,
           opts.c1, opts.c2,
         );
       },
@@ -178,7 +178,6 @@ function computeEnergyPartial(
   medialAxis: MedialAxisGraph,
   boundarySamples: paper.Point[],
   medialAxisR: Float64Array,
-  flatBoundary: FlatBoundary,
   normSq: number,
   c1: number,
   c2: number,
@@ -188,7 +187,7 @@ function computeEnergyPartial(
   const inscribedFree = freeProjected.map((r) => r.inscribed);
   const projV = [...projFrozen, ...projFree];
   const inscribed = [...inscribedFrozen, ...inscribedFree];
-  return computeEnergyCore(projV, inscribed, medialAxis, boundarySamples, medialAxisR, flatBoundary, normSq, c1, c2);
+  return computeEnergyCore(projV, inscribed, medialAxis, boundarySamples, medialAxisR, normSq, c1, c2);
 }
 
 
@@ -198,7 +197,6 @@ function computeEnergyCore(
   medialAxis: MedialAxisGraph,
   boundarySamples: paper.Point[],
   medialAxisR: Float64Array,
-  _flatBoundary: FlatBoundary,
   normSq: number,
   c1: number,
   c2: number,
@@ -264,7 +262,7 @@ function farthestPointSeeds(
   const pts = medialAxis.points;
   if (pts.length === 0) return [];
 
-  const adj = buildGraphAdj(medialAxis);
+  const adj = buildAdjacencyList(medialAxis);
   const seeds: number[] = [0]; // start with first node
   const distToSeeds = new Float64Array(pts.length).fill(Infinity);
 
@@ -367,22 +365,24 @@ function pickNewSeeds(
   medialAxis: MedialAxisGraph,
   n: number,
 ): paper.Point[] {
-  // Pick n uncovered points that are farthest from existing V
+  // Pick n uncovered points that are farthest from existing V (and seeds picked so far).
   const newSeeds: paper.Point[] = [];
   const remaining = [...uncovered];
+  const refs: paper.Point[] = [...currentV];
 
   for (let k = 0; k < n && remaining.length > 0; k++) {
-    const allRef = [...currentV, ...newSeeds];
     let maxDist = -1, bestIdx = 0;
     for (let i = 0; i < remaining.length; i++) {
       let minD = Infinity;
-      for (const r of allRef) {
-        minD = Math.min(minD, Math.hypot(remaining[i].x - r.x, remaining[i].y - r.y));
+      for (const r of refs) {
+        const d = Math.hypot(remaining[i].x - r.x, remaining[i].y - r.y);
+        if (d < minD) minD = d;
       }
       if (minD > maxDist) { maxDist = minD; bestIdx = i; }
     }
     const proj = projectToMedialAxis(remaining[bestIdx], medialAxis).point;
     newSeeds.push(proj);
+    refs.push(proj);
     remaining.splice(bestIdx, 1);
   }
   return newSeeds;
@@ -438,15 +438,6 @@ function deduplicateSeeds(V: paper.Point[], minSep: number): paper.Point[] {
       out.push(p);
   }
   return out;
-}
-
-function buildGraphAdj(medialAxis: MedialAxisGraph): number[][] {
-  const adj: number[][] = Array.from({ length: medialAxis.points.length }, () => []);
-  for (const [u, v] of medialAxis.segments) {
-    adj[u].push(v);
-    adj[v].push(u);
-  }
-  return adj;
 }
 
 function dijkstraFrom(

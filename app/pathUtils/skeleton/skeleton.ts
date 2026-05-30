@@ -12,6 +12,7 @@ import {
   fabricPathDataToPaper,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
+import { computeDegrees } from "@/app/pathUtils/skeleton/graphUtils";
 import {
   FittedMedialAxisGraph,
   Primitive,
@@ -319,11 +320,7 @@ export function removeRedundantLeafEdges(
   containmentThreshold: number = 0.999,
   lengthRatio: number = 1 / 5,
 ): void {
-  const degree = new Int32Array(fitted.points.length);
-  for (const [u, v] of fitted.segments) {
-    degree[u]++;
-    degree[v]++;
-  }
+  const degree = computeDegrees(fitted);
 
   const edgePrim = new Map<number, Primitive>();
   for (const prim of fitted.primitives) {

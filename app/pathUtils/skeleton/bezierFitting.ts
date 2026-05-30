@@ -3,14 +3,21 @@ import { Vec2D } from "@/app/utils/types";
 // Number of alternating re-parameterisation iterations (solve → foot-project → repeat).
 const N_REFIT_ITERS = 10;
 
-/** Evaluate a point on a cubic Bezier at t ∈ [0, 1]. */
+/**
+ * Evaluate a point on a cubic Bezier at t ∈ [0, 1].
+ * When either control point is undefined, falls back to linear interpolation
+ * between pA and pB — handy when callers may or may not have CPs available.
+ */
 export function evalBezier(
   pA: Vec2D,
-  cp1: Vec2D,
-  cp2: Vec2D,
+  cp1: Vec2D | undefined,
+  cp2: Vec2D | undefined,
   pB: Vec2D,
   t: number,
 ): Vec2D {
+  if (!cp1 || !cp2) {
+    return { x: pA.x + t * (pB.x - pA.x), y: pA.y + t * (pB.y - pA.y) };
+  }
   const u = 1 - t;
   return {
     x:

@@ -25,9 +25,9 @@ export function reconstructShapeFromMSD(
     createPathFromPrimitive,
   );
 
-  // 2. Efficiently Union All Shapes
-  // A linear loop of .unite() can be slow. A divide-and-conquer approach is faster,
-  // but for <500 primitives, reduce() is acceptable.
+  // 2. Union all primitives.
+  // Linear .unite() loop is O(N²) in worst case; for <500 primitives that is
+  // acceptable. Switch to divide-and-conquer if profiling shows this dominates.
   let reconstructedShape = primitiveShapes[0];
 
   for (let i = 1; i < primitiveShapes.length; i++) {
