@@ -17,7 +17,8 @@ import {
   FittedMedialAxisGraph,
   Primitive,
   localPrimitiveFitting,
-  primitivePts,
+  primitivePath,
+  primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
@@ -216,14 +217,15 @@ function scalePathImpl(
 
 function getPrimitivePoints(primitives: Primitive[]) {
   return primitives.map((primitive) =>
-    primitivePts(primitive).map((p) => new paper.Point(p.x, p.y)),
+    primitivePolygon(primitive).map((p) => new paper.Point(p.x, p.y)),
   );
 }
 
 /**
  * Post-processing step: for each fitted primitive, expand outward (Clipper offset),
  * smooth (Catmull-Rom), then clip back to the original shape boundary (paper.js intersect).
- * Stores the result in prim.clippedPts, which all downstream consumers respect via primitivePts().
+ * Stores the result in prim.clippedPath (bezier-exact). primitivePath() returns
+ * it for boolean ops; primitivePolygon() samples it for flat-polygon consumers.
  */
 export function clipPrimitivesToShape(
   fitted: FittedMedialAxisGraph,
@@ -233,7 +235,6 @@ export function clipPrimitivesToShape(
   const clipperScale = 10000;
 
   for (const prim of fitted.primitives) {
-    const n = prim.origins.length;
     const pts = prim.origins.map((o, i) => ({
       x: o.x + prim.directions[i].x * prim.radii[i],
       y: o.y + prim.directions[i].y * prim.radii[i],
@@ -284,13 +285,10 @@ export function clipPrimitivesToShape(
         : (clipped as paper.Path);
 
     if (resultPath.segments.length >= 3) {
-      const M = 2 * n;
-      const len = resultPath.length;
-      prim.clippedPts = Array.from({ length: M }, (_, k) => {
-        const pt =
-          resultPath.getPointAt((k / M) * len) ?? resultPath.firstSegment.point;
-        return { x: pt.x, y: pt.y };
-      });
+      // Store only the bezier-exact path. primitivePolygon() samples this on
+      // demand for consumers that still need a flat polygon (PIP, rendering
+      // to non-bezier contexts).
+      prim.clippedPath = resultPath.clone({ insert: false }) as paper.Path;
     }
 
     offsetPath.remove();
@@ -361,13 +359,6 @@ function removeRedundantLeafEdgesPass(
     return Math.hypot(pa.x - pb.x, pa.y - pb.y);
   };
 
-  const makePath = (pts: Vec2D[]): paper.Path =>
-    new paper.Path({
-      segments: pts.map((p) => new paper.Point(p.x, p.y)),
-      closed: true,
-      insert: false,
-    });
-
   const edgesToRemove = new Set<number>();
 
   for (let i = 0; i < fitted.segments.length; i++) {
@@ -379,8 +370,6 @@ function removeRedundantLeafEdgesPass(
 
     const leafPrim = edgePrim.get(i);
     if (!leafPrim) continue;
-    const leafPts = primitivePts(leafPrim);
-    if (leafPts.length < 3) continue;
 
     // Chord check: leaf must be topologically much shorter than a neighbour.
     const leafLen = chordLen(i);
@@ -394,15 +383,13 @@ function removeRedundantLeafEdgesPass(
     }
     if (!chordOk) continue;
 
-    // Build the union of all neighbouring edge primitive polygons.
+    // Build the union of all neighbouring edge primitive paths.
     let unionPath: paper.PathItem | null = null;
     for (const j of incidentEdges[otherVertex]) {
       if (j === i || edgesToRemove.has(j)) continue;
       const nbPrim = edgePrim.get(j);
       if (!nbPrim) continue;
-      const nbPts = primitivePts(nbPrim);
-      if (nbPts.length < 3) continue;
-      const nbPath = makePath(nbPts);
+      const nbPath = primitivePath(nbPrim);
       if (unionPath === null) {
         unionPath = nbPath;
       } else {
@@ -414,7 +401,7 @@ function removeRedundantLeafEdgesPass(
     }
     if (!unionPath) continue;
 
-    const leafPath = makePath(leafPts);
+    const leafPath = primitivePath(leafPrim);
     const leafArea = Math.abs(leafPath.area);
     // Boolean subtract: leaf − union = part of leaf outside any neighbour.
     // PathItem.area isn't in @types but both Path and CompoundPath expose it;

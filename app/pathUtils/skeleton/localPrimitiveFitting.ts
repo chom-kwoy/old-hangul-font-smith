@@ -10,6 +10,8 @@ import { computeDegrees } from "@/app/pathUtils/skeleton/graphUtils";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { Vec2D } from "@/app/utils/types";
 
+const DEFAULT_POLYGON_RESOLUTION = 256;
+
 // --- Interfaces ---
 
 export interface FittedMedialAxisGraph extends MedialAxisGraph {
@@ -27,14 +29,58 @@ export interface Primitive {
   directions: Vec2D[];
   radii: number[];
 
-  // Set by clipPrimitivesToShape() after the full pipeline.
-  // When present, overrides origins+directions*radii for all downstream rendering and coverage use.
-  clippedPts?: Vec2D[];
+  // Bezier-exact representation of the post-clip primitive boundary, set by
+  // clipPrimitivesToShape() after the full pipeline. When present, this is the
+  // authoritative source for primitive geometry; primitivePolygon() samples
+  // from it on demand and primitivePath() clones it for boolean operations.
+  clippedPath?: paper.PathItem;
 }
 
-/** Returns the canonical polygon vertices for a primitive, using clippedPts when available. */
-export function primitivePts(prim: Primitive): Vec2D[] {
-  if (prim.clippedPts) return prim.clippedPts;
+/** Returns the canonical closed paper.PathItem for a primitive.
+ *
+ * Prefers `clippedPath` (bezier-exact, post-clip). Otherwise constructs a
+ * Catmull-Rom-smoothed path from `origins + directions × radii`.
+ *
+ * Caller owns the returned path and is responsible for calling .remove()
+ * when done — paper.js paths default to insert=true on the active project. */
+export function primitivePath(prim: Primitive): paper.Path {
+  if (prim.clippedPath) {
+    // Defensive clone: callers may .remove() the returned path; the canonical
+    // clippedPath should stay alive on the primitive.
+    return prim.clippedPath.clone({ insert: false }) as paper.Path;
+  }
+  const pts = prim.origins.map((o, i) => ({
+    x: o.x + prim.directions[i].x * prim.radii[i],
+    y: o.y + prim.directions[i].y * prim.radii[i],
+  }));
+  const p = new paper.Path({
+    segments: pts.map((q) => new paper.Point(q.x, q.y)),
+    closed: true,
+    insert: false,
+  });
+  p.smooth({ type: "catmull-rom", factor: 0.5 });
+  return p;
+}
+
+/** Returns the closed polygon vertices for a primitive.
+ *
+ * Samples uniformly along `clippedPath` when present; otherwise falls back to
+ * raw `origins + directions × radii` (no smoothing — caller must request a
+ * smoother source via primitivePath() if needed). */
+export function primitivePolygon(
+  prim: Primitive,
+  nSamples = DEFAULT_POLYGON_RESOLUTION,
+): Vec2D[] {
+  if (prim.clippedPath) {
+    const path = prim.clippedPath as paper.Path;
+    const len = path.length;
+    if (len > 0) {
+      return Array.from({ length: nSamples }, (_, k) => {
+        const pt = path.getPointAt((k / nSamples) * len) ?? path.firstSegment.point;
+        return { x: pt.x, y: pt.y };
+      });
+    }
+  }
   return prim.origins.map((o, i) => ({
     x: o.x + prim.directions[i].x * prim.radii[i],
     y: o.y + prim.directions[i].y * prim.radii[i],

@@ -10,7 +10,7 @@ import {
 } from "@/app/pathUtils/flatBoundary";
 import {
   Primitive,
-  primitivePts,
+  primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import * as testPaths from "@/app/testpage/testPaths";
 import { initDrawContexts } from "@/app/utils/init";
@@ -137,7 +137,7 @@ function primCovers(
   prim: Primitive,
   delta: number,
 ): boolean {
-  const pts = primitivePts(prim);
+  const pts = primitivePolygon(prim);
   const N = pts.length;
   const vx = new Float64Array(N);
   const vy = new Float64Array(N);

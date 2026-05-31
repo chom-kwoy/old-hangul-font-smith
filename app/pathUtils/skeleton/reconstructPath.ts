@@ -1,6 +1,6 @@
 import paper from "paper";
 
-import { FittedMedialAxisGraph, Primitive, primitivePts } from "./localPrimitiveFitting";
+import { FittedMedialAxisGraph, Primitive, primitivePath } from "./localPrimitiveFitting";
 
 /**
  * Reconstructs the 2D shape boundary from the Medial Skeletal Diagram.
@@ -60,21 +60,10 @@ export function reconstructShapeFromMSD(
 
 /**
  * Converts a mathematical Primitive (origins, dirs, radii) into a Paper.js Path.
- * When prim.clippedPts is set (by clipPrimitivesToShape), uses those vertices directly
- * and skips the smooth step since they are already smooth+clipped bezier samples.
+ * Delegates to primitivePath which returns the stored clippedPath when present
+ * (post-clip bezier-exact) or builds a Catmull-Rom-smoothed path from
+ * origins+directions*radii otherwise.
  */
 function createPathFromPrimitive(prim: Primitive): paper.Path {
-  const pts = primitivePts(prim);
-  const path = new paper.Path({
-    segments: pts.map(p => new paper.Point(p.x, p.y)),
-    closed: true,
-    insert: false,
-  });
-
-  if (!prim.clippedPts) {
-    // Not yet post-processed — apply Catmull-Rom smoothing
-    path.smooth({ type: "catmull-rom", factor: 0.5 });
-  }
-
-  return path;
+  return primitivePath(prim);
 }

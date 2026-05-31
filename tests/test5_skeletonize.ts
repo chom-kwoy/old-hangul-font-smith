@@ -27,7 +27,7 @@ import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoi
 import {
   FittedMedialAxisGraph,
   localPrimitiveFitting,
-  primitivePts,
+  primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
   MedialAxisGraph,
@@ -147,7 +147,7 @@ function renderSkeletonization(
 
   // --- 2. Fitted primitives (under edges so edges stay visible) ---
   for (const prim of fitted.primitives) {
-    const pts = primitivePts(prim).map((p) => ({ x: tx(p.x), y: ty(p.y) }));
+    const pts = primitivePolygon(prim).map((p) => ({ x: tx(p.x), y: ty(p.y) }));
 
     if (prim.type === "edge") {
       canvas.add(
