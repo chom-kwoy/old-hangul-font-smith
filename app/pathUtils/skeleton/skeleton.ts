@@ -406,7 +406,7 @@ function removeRedundantLeafEdgesPass(
       if (unionPath === null) {
         unionPath = nbPath;
       } else {
-        const merged = unionPath.unite(nbPath, { insert: false });
+        const merged: paper.PathItem = unionPath.unite(nbPath, { insert: false });
         unionPath.remove();
         nbPath.remove();
         unionPath = merged;
@@ -417,8 +417,10 @@ function removeRedundantLeafEdgesPass(
     const leafPath = makePath(leafPts);
     const leafArea = Math.abs(leafPath.area);
     // Boolean subtract: leaf − union = part of leaf outside any neighbour.
+    // PathItem.area isn't in @types but both Path and CompoundPath expose it;
+    // cast through `as paper.Path` is the same pattern used at line 280 above.
     const diff = leafPath.subtract(unionPath, { insert: false });
-    const remaining = Math.abs(diff.area);
+    const remaining = Math.abs((diff as paper.Path).area);
     diff.remove();
     unionPath.remove();
     leafPath.remove();
@@ -449,7 +451,7 @@ function removeRedundantLeafEdgesPass(
 
   // Pass 2: drop orphaned vertices and remap remaining vertex indices.
   const oldToNewVertex = new Int32Array(fitted.points.length).fill(-1);
-  const newPoints: paper.Point[] = [];
+  const newPoints: Vec2D[] = [];
   for (let i = 0; i < fitted.points.length; i++) {
     if (!vertexStillUsed[i]) continue;
     oldToNewVertex[i] = newPoints.length;
