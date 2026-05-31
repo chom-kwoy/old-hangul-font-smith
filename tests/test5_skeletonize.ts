@@ -14,7 +14,6 @@ import {
   Circle as FabricCircle,
   Line as FabricLine,
   Path as FabricPath,
-  Polygon as FabricPolygon,
   Text as FabricText,
   StaticCanvas,
 } from "fabric/node";
@@ -27,6 +26,7 @@ import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoi
 import {
   FittedMedialAxisGraph,
   localPrimitiveFitting,
+  primitivePath,
   primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
@@ -146,12 +146,19 @@ function renderSkeletonization(
   }
 
   // --- 2. Fitted primitives (under edges so edges stay visible) ---
+  // Render the primitive's bezier path directly (via SVG path data) so curves
+  // appear smooth at native quality, not polygon-approximated.
   for (const prim of fitted.primitives) {
-    const pts = primitivePolygon(prim).map((p) => ({ x: tx(p.x), y: ty(p.y) }));
+    const path = primitivePath(prim);
+    // Map path coords into canvas coords: (x,y) → (scl*x + ox, scl*y + oy).
+    path.transform(new paper.Matrix(scl, 0, 0, scl, ox, oy));
+    const d = path.pathData;
+    path.remove();
+    if (!d) continue;
 
     if (prim.type === "edge") {
       canvas.add(
-        new FabricPolygon(pts, {
+        new FabricPath(d, {
           fill: fillColor(prim.elementIdx),
           stroke: strokeColor(prim.elementIdx),
           strokeWidth: 1,
@@ -162,7 +169,7 @@ function renderSkeletonization(
     } else {
       // vertex disk (this should only appear for 0-degree vertices)
       canvas.add(
-        new FabricPolygon(pts, {
+        new FabricPath(d, {
           fill: "rgba(255,100,100,1.0)",
           stroke: "rgba(255,0,0,1.0)",
           strokeWidth: 3,
