@@ -308,25 +308,26 @@ export function clipPrimitivesToShape(
  *
  * A "leaf edge" qualifies when:
  *   1. one endpoint has degree 1, the other has degree ≥ 2; AND
- *   2. its primitive area is < `areaRatio` × (some neighbour's primitive area)
- *      — only leaves whose actual footprint is much smaller than a neighbour's
- *      are candidates. Area is the right measure (not chord length): for
- *      wildly-curving beziers the chord can be tiny while the primitive
- *      polygon sweeps a large area, and vice versa. AND
+ *   2. its chord length is < `chordRatio` × (some neighbour's chord length)
+ *      — only "topologically stubby" leaves are candidates. Chord is the right
+ *      gate (not primitive area): the simplifier can compress a long axis chain
+ *      into a tiny chord with control points pulled far away, producing a
+ *      huge-area primitive that's exactly the redundant case we want to catch.
+ *      AND
  *   3. ≥ containmentThreshold (default 0.999) of its primitive area is
  *      contained in the union of all neighbouring edge primitives.
  */
 export function removeRedundantLeafEdges(
   fitted: FittedMedialAxisGraph,
   containmentThreshold: number = 0.999,
-  areaRatio: number = 1 / 5,
+  chordRatio: number = 1 / 5,
 ): void {
   // Repeated single-pass until quiescent — removing one leaf can promote a
   // mid-chain vertex to a new leaf candidate. Bounded to avoid pathological loops.
   const MAX_PASSES = 10;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     const startEdgeCount = fitted.segments.length;
-    removeRedundantLeafEdgesPass(fitted, containmentThreshold, areaRatio);
+    removeRedundantLeafEdgesPass(fitted, containmentThreshold, chordRatio);
     if (fitted.segments.length === startEdgeCount) break;
   }
 }
@@ -334,7 +335,7 @@ export function removeRedundantLeafEdges(
 function removeRedundantLeafEdgesPass(
   fitted: FittedMedialAxisGraph,
   containmentThreshold: number,
-  areaRatio: number,
+  chordRatio: number,
 ): void {
   const degree = computeDegrees(fitted);
 
@@ -353,23 +354,19 @@ function removeRedundantLeafEdgesPass(
     incidentEdges[v].push(i);
   }
 
+  const chordLen = (eIdx: number): number => {
+    const [a, b] = fitted.segments[eIdx];
+    const pa = fitted.points[a];
+    const pb = fitted.points[b];
+    return Math.hypot(pa.x - pb.x, pa.y - pb.y);
+  };
+
   const makePath = (pts: Vec2D[]): paper.Path =>
     new paper.Path({
       segments: pts.map((p) => new paper.Point(p.x, p.y)),
       closed: true,
       insert: false,
     });
-
-  // Pre-compute area of every edge primitive once (reused by both the area gate
-  // and the containment computation).
-  const primArea = new Map<number, number>();
-  for (const [edgeIdx, prim] of edgePrim) {
-    const pts = primitivePts(prim);
-    if (pts.length < 3) continue;
-    const p = makePath(pts);
-    primArea.set(edgeIdx, Math.abs(p.area));
-    p.remove();
-  }
 
   const edgesToRemove = new Set<number>();
 
@@ -385,19 +382,17 @@ function removeRedundantLeafEdgesPass(
     const leafPts = primitivePts(leafPrim);
     if (leafPts.length < 3) continue;
 
-    // Area check: leaf primitive must be much smaller than at least one neighbour.
-    const leafArea = primArea.get(i) ?? 0;
-    if (leafArea <= 0) continue;
-    let areaOk = false;
+    // Chord check: leaf must be topologically much shorter than a neighbour.
+    const leafLen = chordLen(i);
+    let chordOk = false;
     for (const j of incidentEdges[otherVertex]) {
       if (j === i) continue;
-      const nbArea = primArea.get(j) ?? 0;
-      if (leafArea < nbArea * areaRatio) {
-        areaOk = true;
+      if (leafLen < chordLen(j) * chordRatio) {
+        chordOk = true;
         break;
       }
     }
-    if (!areaOk) continue;
+    if (!chordOk) continue;
 
     // Build the union of all neighbouring edge primitive polygons.
     let unionPath: paper.PathItem | null = null;
@@ -420,13 +415,14 @@ function removeRedundantLeafEdgesPass(
     if (!unionPath) continue;
 
     const leafPath = makePath(leafPts);
+    const leafArea = Math.abs(leafPath.area);
     // Boolean subtract: leaf − union = part of leaf outside any neighbour.
     const diff = leafPath.subtract(unionPath, { insert: false });
     const remaining = Math.abs(diff.area);
     diff.remove();
     unionPath.remove();
     leafPath.remove();
-    const containedFrac = 1 - remaining / leafArea;
+    const containedFrac = leafArea > 0 ? 1 - remaining / leafArea : 1;
     if (containedFrac >= containmentThreshold) edgesToRemove.add(i);
   }
 

@@ -246,15 +246,26 @@ function buildContractedSkeleton(
     ? sk.points.map((_, i) => sk.vertexRawNodes![i]).filter((_, i) => i !== removed)
     : [];
 
+  // Track which (a, b) pairs (by old indices) already exist among kept segments
+  // so we can skip adding the contraction's new edge as a duplicate.
+  const keptEdgeKeys = new Set<string>();
   for (let ei = 0; ei < sk.segments.length; ei++) {
     if (removedSegs.has(ei)) continue;
     const [p, q] = sk.segments[ei];
+    keptEdgeKeys.add(p < q ? `${p}-${q}` : `${q}-${p}`);
     newSegments.push([oldToNew[p], oldToNew[q]]);
     if (sk.controlPoints) newCPs.push(sk.controlPoints[ei]);
   }
 
-  newSegments.push([oldToNew[a], oldToNew[b]]);
-  if (sk.controlPoints) newCPs.push([cp1, cp2]);
+  // Only add the contracted edge if (a, b) doesn't already exist — otherwise
+  // the 3-cycle a–removed–b–a would produce two parallel segments between a
+  // and b. The existing edge's bezier already represents the direct path;
+  // skipping the new one keeps the existing geometry.
+  const newKey = a < b ? `${a}-${b}` : `${b}-${a}`;
+  if (!keptEdgeKeys.has(newKey)) {
+    newSegments.push([oldToNew[a], oldToNew[b]]);
+    if (sk.controlPoints) newCPs.push([cp1, cp2]);
+  }
 
   return {
     points: newPoints,

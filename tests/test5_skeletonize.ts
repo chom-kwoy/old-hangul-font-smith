@@ -393,6 +393,35 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         vertexDegree[u]++;
         vertexDegree[v]++;
       }
+      // Invariant: every degree-0 vertex must have a point primitive (i.e. it
+      // was isolated from the start of localPrimitiveFitting). Any degree-0
+      // vertex WITHOUT a point primitive is a leftover orphan from edge removal.
+      const hasPointPrim = new Uint8Array(fitted.points.length);
+      for (const p of fitted.primitives)
+        if (p.type === "point") hasPointPrim[p.elementIdx] = 1;
+      let leftoverOrphans = 0;
+      for (let i = 0; i < fitted.points.length; i++)
+        if (vertexDegree[i] === 0 && !hasPointPrim[i]) leftoverOrphans++;
+      check(
+        "no leftover orphan vertices (only originally-isolated kept)",
+        leftoverOrphans === 0,
+        `${leftoverOrphans} orphans`,
+      );
+      // Invariant: no two segments share the same unordered endpoint pair.
+      // Parallel duplicate edges came from simplifier contractions in 3-cycles
+      // before the dedup fix.
+      const segKeys = new Set<string>();
+      let dupEdges = 0;
+      for (const [u, v] of fitted.segments) {
+        const k = u < v ? `${u}-${v}` : `${v}-${u}`;
+        if (segKeys.has(k)) dupEdges++;
+        else segKeys.add(k);
+      }
+      check(
+        "no duplicate parallel edges",
+        dupEdges === 0,
+        `${dupEdges} duplicates`,
+      );
       let worstRatio = Infinity;
       let worstEdgeIdx = -1;
       for (let i = 0; i < fitted.segments.length; i++) {
