@@ -20,6 +20,7 @@ import {
   primitivePath,
   primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import { clipPrimitivesToVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
@@ -82,11 +83,19 @@ export function skeletonize(
   // Fit primitives (expandable circles) to each skeleton component
   const fitted = localPrimitiveFitting(paperPath, simplifiedSkeleton);
 
+  // Drop leaf edges whose primitive is fully covered by a neighbour.
+  // Runs before clipPrimitivesToShape so the containment check uses the raw
+  // origins+directions*radii primitives (smoothed via Catmull-Rom inside
+  // primitivePath) rather than the post-clip paths.
+  removeRedundantLeafEdges(fitted);
+
   // Post-process: offset → smooth → clip to shape boundary
   clipPrimitivesToShape(fitted, paperPath);
 
-  // Drop leaf edges whose primitive is fully covered by a neighbour.
-  removeRedundantLeafEdges(fitted);
+  // Carve each primitive's coverage into its Voronoi cell so neighbouring
+  // primitives share bit-exact polygon boundaries and we can identify the
+  // shared segments for coordinated deformation downstream.
+  clipPrimitivesToVoronoiCells(fitted, paperPath.bounds);
 
   return fitted;
 }

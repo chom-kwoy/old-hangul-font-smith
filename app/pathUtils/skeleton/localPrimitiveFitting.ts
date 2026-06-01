@@ -18,6 +18,21 @@ export interface FittedMedialAxisGraph extends MedialAxisGraph {
   primitives: Primitive[];
 }
 
+/** Classification of a single curve (between two consecutive segments) of a
+ * primitive's `clippedPath` after Voronoi-cell clipping.
+ *
+ * - `bezier` — non-linear segment from the original primitive's boundary;
+ *   unique to this primitive.
+ * - `outer`  — linear segment along a Voronoi cell edge whose other side is
+ *   the bounding rectangle (no neighbouring primitive on the far side).
+ * - `shared` — linear segment along a Voronoi cell edge whose far side is
+ *   another primitive's cell. Bit-exact identical (same Float64 endpoints)
+ *   to the matching `shared` segment in `fitted.primitives[neighbour]`. */
+export type BoundaryTag =
+  | { kind: "bezier" }
+  | { kind: "outer" }
+  | { kind: "shared"; neighbour: number };
+
 export interface Primitive {
   type: "point" | "edge";
   elementIdx: number; // Index into `points` (if type="point") or `segments` (if type="edge")
@@ -34,6 +49,11 @@ export interface Primitive {
   // authoritative source for primitive geometry; primitivePolygon() samples
   // from it on demand and primitivePath() clones it for boolean operations.
   clippedPath?: paper.PathItem;
+
+  // Per-curve classification of `clippedPath`. Set by clipPrimitivesToVoronoiCells.
+  // Parallel to `clippedPath.curves`: boundaryTags[i] describes the curve from
+  // segments[i] to segments[(i+1) % n].
+  boundaryTags?: BoundaryTag[];
 }
 
 /** Returns the canonical closed paper.PathItem for a primitive.

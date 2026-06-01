@@ -27,7 +27,6 @@ import {
   FittedMedialAxisGraph,
   localPrimitiveFitting,
   primitivePath,
-  primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
   MedialAxisGraph,
@@ -43,6 +42,7 @@ import {
   clipPrimitivesToShape,
   removeRedundantLeafEdges,
 } from "@/app/pathUtils/skeleton/skeleton";
+import { clipPrimitivesToVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
 
 import {
   TEST_PATHS,
@@ -359,8 +359,9 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         ? simplifyMedialSkeleton(skeleton, axis, path)
         : skeleton;
       fitted = localPrimitiveFitting(path, simplifiedSkeleton);
-      clipPrimitivesToShape(fitted, path);
       removeRedundantLeafEdges(fitted);
+      clipPrimitivesToShape(fitted, path);
+      clipPrimitivesToVoronoiCells(fitted, path.bounds);
     } catch (e) {
       error = e;
     }
@@ -429,6 +430,106 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         dupEdges === 0,
         `${dupEdges} duplicates`,
       );
+
+      // --- Voronoi-clip invariants ---
+      // Build edge-primitive adjacency: two edge primitives are neighbours if
+      // their skeleton segments share a vertex.
+      const edgePrims = fitted.primitives.filter((p) => p.type === "edge");
+      const edgeVerts = (p: (typeof edgePrims)[number]) =>
+        fitted.segments[p.elementIdx];
+      const shareVertex = (
+        a: (typeof edgePrims)[number],
+        b: (typeof edgePrims)[number],
+      ) => {
+        const [a0, a1] = edgeVerts(a);
+        const [b0, b1] = edgeVerts(b);
+        return a0 === b0 || a0 === b1 || a1 === b0 || a1 === b1;
+      };
+
+      // 1. Non-neighbouring primitives must not overlap (positive area).
+      let maxNonNbrOverlap = 0;
+      for (let a = 0; a < edgePrims.length; a++) {
+        for (let b = a + 1; b < edgePrims.length; b++) {
+          if (shareVertex(edgePrims[a], edgePrims[b])) continue;
+          const pa = primitivePath(edgePrims[a]);
+          const pb = primitivePath(edgePrims[b]);
+          const inter = pa.intersect(pb, { insert: false });
+          maxNonNbrOverlap = Math.max(
+            maxNonNbrOverlap,
+            Math.abs((inter as paper.Path).area),
+          );
+          inter.remove();
+          pa.remove();
+          pb.remove();
+        }
+      }
+      check(
+        "non-neighbour primitives don't overlap",
+        maxNonNbrOverlap < 1.0,
+        `max overlap ${maxNonNbrOverlap.toFixed(3)} em²`,
+      );
+
+      // 2. boundaryTags parity: one tag per curve of clippedPath.
+      let tagParityOk = true;
+      for (const p of fitted.primitives) {
+        if (!p.clippedPath || !p.boundaryTags) continue;
+        const nCurves = (p.clippedPath as paper.Path).curves.length;
+        if (p.boundaryTags.length !== nCurves) tagParityOk = false;
+      }
+      check("boundaryTags parallel to clippedPath curves", tagParityOk, "");
+
+      // 3. Shared boundary bit-exactness: a curve tagged shared:n in primitive p
+      // must have a matching reversed-endpoint curve tagged shared:(p's index)
+      // in primitive n, with identical Float64 coordinates.
+      type SharedSeg = {
+        primIdx: number;
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+      };
+      const sharedCurves = new Map<string, SharedSeg[]>();
+      for (let pi = 0; pi < fitted.primitives.length; pi++) {
+        const p = fitted.primitives[pi];
+        if (!p.clippedPath || !p.boundaryTags) continue;
+        const curves = (p.clippedPath as paper.Path).curves;
+        for (let ci = 0; ci < p.boundaryTags.length; ci++) {
+          const tag = p.boundaryTags[ci];
+          if (tag.kind !== "shared") continue;
+          const c = curves[ci];
+          // key by unordered primitive pair
+          const key = pi < tag.neighbour ? `${pi}-${tag.neighbour}` : `${tag.neighbour}-${pi}`;
+          if (!sharedCurves.has(key)) sharedCurves.set(key, []);
+          sharedCurves.get(key)!.push({
+            primIdx: pi,
+            x1: c.point1.x, y1: c.point1.y, x2: c.point2.x, y2: c.point2.y,
+          });
+        }
+      }
+      // Count unmatched segments per source primitive (→ its edge number).
+      const unmatchedByEdge = new Map<number, number>();
+      for (const segs of sharedCurves.values()) {
+        for (const s of segs) {
+          const hasMatch = segs.some(
+            (o) =>
+              o.x1 === s.x2 && o.y1 === s.y2 && o.x2 === s.x1 && o.y2 === s.y1,
+          );
+          if (!hasMatch) {
+            const edgeNum = fitted.primitives[s.primIdx].elementIdx;
+            unmatchedByEdge.set(edgeNum, (unmatchedByEdge.get(edgeNum) ?? 0) + 1);
+          }
+        }
+      }
+      const sharedExact = unmatchedByEdge.size === 0;
+      const unmatchedDetail = [...unmatchedByEdge.entries()]
+        .map(([edge, n]) => `edge ${edge}: ${n} seg(s)`)
+        .join(", ");
+      check(
+        "shared boundaries are bit-exact between neighbours",
+        sharedExact,
+        unmatchedDetail,
+      );
+
       let worstRatio = Infinity;
       let worstEdgeIdx = -1;
       for (let i = 0; i < fitted.segments.length; i++) {
