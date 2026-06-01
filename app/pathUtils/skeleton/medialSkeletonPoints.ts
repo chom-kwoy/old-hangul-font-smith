@@ -81,6 +81,14 @@ export function computeMedialSkeletonPoints(
   // Precompute axis adjacency once for graph-distance Voronoi cells in E_centrality.
   const axisAdj = buildAdjacencyList(medialAxis);
 
+  // Reusable scratch for the per-eval centrality Dijkstra — allocated once and
+  // reset each call to avoid 2 typed-array + 1 PQ allocation per NM evaluation.
+  const centralityScratch: CentralityScratch = {
+    nodeOwner: new Int32Array(medialAxis.points.length),
+    distToSeed: new Float64Array(medialAxis.points.length),
+    pq: new MinPriorityQueue<{ d: number; u: number; o: number }>((x) => x.d),
+  };
+
   // Precompute maxDim² for E_centrality normalization (paper normalizes to [0,1])
   let axisMinX = Infinity, axisMaxX = -Infinity, axisMinY = Infinity, axisMaxY = -Infinity;
   for (const p of medialAxis.points) {
@@ -123,7 +131,7 @@ export function computeMedialSkeletonPoints(
         return computeEnergyPartial(
           projFrozen, inscribedFrozen,
           currentFree, medialAxis, axisAdj, boundarySamples, medialAxisR, flatBoundary, normSq,
-          opts.c1, opts.c2,
+          opts.c1, opts.c2, centralityScratch,
         );
       },
       x0,
@@ -174,6 +182,14 @@ export function computeMedialSkeletonPoints(
 // Full primitive fitting is NOT called here; it runs once after optimization.
 // ---------------------------------------------------------------------------
 
+// Pre-allocated buffers for the per-eval centrality Dijkstra, reused across all
+// NM evaluations to avoid per-call typed-array and priority-queue allocations.
+type CentralityScratch = {
+  nodeOwner: Int32Array; // size = medialAxis.points.length
+  distToSeed: Float64Array; // size = medialAxis.points.length
+  pq: MinPriorityQueue<{ d: number; u: number; o: number }>;
+};
+
 // Variant used inside the NM loop: frozen seeds are pre-projected; only free seeds
 // need projection each call.
 function computeEnergyPartial(
@@ -188,13 +204,14 @@ function computeEnergyPartial(
   normSq: number,
   c1: number,
   c2: number,
+  scratch: CentralityScratch,
 ): number {
   const freeProjected = freeV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR, flatBoundary));
   const projFree = freeProjected.map((r) => r.point);
   const inscribedFree = freeProjected.map((r) => r.inscribed);
   const projV = [...projFrozen, ...projFree];
   const inscribed = [...inscribedFrozen, ...inscribedFree];
-  return computeEnergyCore(projV, inscribed, medialAxis, axisAdj, boundarySamples, medialAxisR, normSq, c1, c2);
+  return computeEnergyCore(projV, inscribed, medialAxis, axisAdj, boundarySamples, medialAxisR, normSq, c1, c2, scratch);
 }
 
 
@@ -208,6 +225,7 @@ function computeEnergyCore(
   normSq: number,
   c1: number,
   c2: number,
+  scratch: CentralityScratch,
 ): number {
   if (projV.length === 0) return 0;
   const nSeeds = projV.length;
@@ -234,9 +252,10 @@ function computeEnergyCore(
   // nearest-seed would let a seed near a junction own axis nodes across the junction
   // and bias the centroid toward unrelated arms.
   const numNodes = medialAxis.points.length;
-  const nodeOwner = new Int32Array(numNodes).fill(-1);
-  const distToSeed = new Float64Array(numNodes).fill(Infinity);
-  const pq = new MinPriorityQueue<{ d: number; u: number; o: number }>((x) => x.d);
+  const { nodeOwner, distToSeed, pq } = scratch;
+  nodeOwner.fill(-1);
+  distToSeed.fill(Infinity);
+  pq.clear();
   for (let i = 0; i < nSeeds; i++) {
     let bestNode = 0, bestSq = Infinity;
     for (let k = 0; k < numNodes; k++) {
