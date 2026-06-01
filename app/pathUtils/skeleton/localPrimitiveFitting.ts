@@ -165,13 +165,10 @@ type ScratchBuffers = {
   newRTgt: Float64Array;
 };
 
-export function localPrimitiveFitting(
-  path: paper.CompoundPath,
-  medialSkeleton: MedialAxisGraph,
-  options: Partial<PrimitiveFittingOptions> = {},
-  prebuiltBoundary?: FlatBoundary,
-): FittedMedialAxisGraph {
-  const opts = {
+function resolveFittingOptions(
+  options: Partial<PrimitiveFittingOptions>,
+): PrimitiveFittingOptions {
+  return {
     num_directions: options.num_directions ?? 128,
     w_expansion: options.w_expansion ?? 0.1,
     w_penalty: options.w_penalty ?? 10000,
@@ -182,18 +179,10 @@ export function localPrimitiveFitting(
     max_alternating_iters: options.max_alternating_iters ?? 15,
     min_absolute_growth: options.min_absolute_growth ?? 1.0,
   };
+}
 
-  const skeleton = {
-    ...medialSkeleton,
-    primitives: [] as Primitive[],
-  } as FittedMedialAxisGraph;
-
-  // 2. Flatten boundary once for fast ray intersection throughout all primitives
-  const flatBoundary = prebuiltBoundary ?? buildFlatBoundary(path);
-
-  // 3. Prepare Optimization Buffers (Shared for all primitives)
-  const N = opts.num_directions;
-  const scratch: ScratchBuffers = {
+function allocScratch(N: number, boundaryCount: number): ScratchBuffers {
+  return {
     cp: new Float64Array(N),
     dp: new Float64Array(N),
     y: new Float64Array(N),
@@ -202,7 +191,7 @@ export function localPrimitiveFitting(
     T_diag_adj: new Float64Array(N),
     d: new Float64Array(N),
     rhs: new Float64Array(N),
-    tested: new Uint32Array(flatBoundary.count),
+    tested: new Uint32Array(boundaryCount),
     genBox: { gen: 0 },
     origX: new Float64Array(N),
     origY: new Float64Array(N),
@@ -222,6 +211,63 @@ export function localPrimitiveFitting(
     newR: new Float64Array(N),
     newRTgt: new Float64Array(N),
   };
+}
+
+/** Geometry of one fitted primitive (without type/elementIdx). */
+type FittedGeometry = Pick<Primitive, "origins" | "directions" | "radii">;
+
+/**
+ * Reusable single-edge primitive fitter. Allocates the flat boundary and
+ * scratch buffers once; `fitEdge` then fits one capsule primitive on demand.
+ * Used by simplifyMedialSkeleton to refit only the merged edge per contraction
+ * candidate instead of re-fitting the whole skeleton.
+ */
+export type EdgeFitter = {
+  readonly flatBoundary: FlatBoundary;
+  fitEdge(pA: Vec2D, pB: Vec2D, cp1?: Vec2D, cp2?: Vec2D): FittedGeometry;
+};
+
+export function createEdgeFitter(
+  path: paper.CompoundPath,
+  options: Partial<PrimitiveFittingOptions> = {},
+  prebuiltBoundary?: FlatBoundary,
+): EdgeFitter {
+  const opts = resolveFittingOptions(options);
+  const flatBoundary = prebuiltBoundary ?? buildFlatBoundary(path);
+  const N = opts.num_directions;
+  const scratch = allocScratch(N, flatBoundary.count);
+  return {
+    flatBoundary,
+    fitEdge(pA, pB, cp1, cp2) {
+      generateCapsuleDiscretization(
+        pA.x, pA.y, pB.x, pB.y, N,
+        scratch.origX, scratch.origY, scratch.dirX, scratch.dirY,
+        cp1, cp2,
+      );
+      return fitSinglePrimitive(N, flatBoundary, opts, scratch);
+    },
+  };
+}
+
+export function localPrimitiveFitting(
+  path: paper.CompoundPath,
+  medialSkeleton: MedialAxisGraph,
+  options: Partial<PrimitiveFittingOptions> = {},
+  prebuiltBoundary?: FlatBoundary,
+): FittedMedialAxisGraph {
+  const opts = resolveFittingOptions(options);
+
+  const skeleton = {
+    ...medialSkeleton,
+    primitives: [] as Primitive[],
+  } as FittedMedialAxisGraph;
+
+  // 2. Flatten boundary once for fast ray intersection throughout all primitives
+  const flatBoundary = prebuiltBoundary ?? buildFlatBoundary(path);
+
+  // 3. Prepare Optimization Buffers (Shared for all primitives)
+  const N = opts.num_directions;
+  const scratch = allocScratch(N, flatBoundary.count);
 
   // Pre-compute uniform circle directions for vertex primitives (once)
   const circDirX = new Float64Array(N);

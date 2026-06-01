@@ -11,7 +11,12 @@ import {
   buildAdjacencyList,
   computeDegrees,
 } from "@/app/pathUtils/skeleton/graphUtils";
-import { localPrimitiveFitting } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import {
+  EdgeFitter,
+  Primitive,
+  createEdgeFitter,
+  localPrimitiveFitting,
+} from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import { Vec2D } from "@/app/utils/types";
@@ -63,12 +68,34 @@ export function simplifyMedialSkeleton(
     (p) => new paper.Point(p.x, p.y),
   );
 
+  // Incremental coverage state: a single-edge fitter plus the current set of
+  // fitted primitives. Each contraction merges two edges into one, so only the
+  // merged edge needs re-fitting — the rest are unchanged. coverage() then
+  // recomputes the boundary-sample fraction over the maintained set, avoiding a
+  // full localPrimitiveFitting per candidate.
+  const fitter = createEdgeFitter(path);
+  const baseline = localPrimitiveFitting(path, skeleton, {}, fitter.flatBoundary);
+  // Edge primitives keyed by sorted endpoint coordinates (stable across the
+  // index churn that buildContractedSkeleton introduces). Vertex (disk)
+  // primitives are constant — contractions only touch degree-2 chain edges.
+  const edgePrims = new Map<string, Primitive>();
+  const vertexPrims: Primitive[] = [];
+  for (const prim of baseline.primitives) {
+    if (prim.type === "edge") {
+      const [u, v] = skeleton.segments[prim.elementIdx];
+      edgePrims.set(edgeKey(skeleton.points[u], skeleton.points[v]), prim);
+    } else {
+      vertexPrims.push(prim);
+    }
+  }
+
   let current = skeleton;
-  let baselineCoverage = computeCoverage(current, path, boundarySamples);
+  let baselineCoverage = coverageOf(edgePrims, vertexPrims, boundarySamples);
 
   while (true) {
     const result = tryOneContraction(
-      current, rawPoints, rawAdj, path, boundarySamples, baselineCoverage, opts,
+      current, rawPoints, rawAdj, path, boundarySamples, baselineCoverage,
+      opts, fitter, edgePrims, vertexPrims,
     );
     if (!result) break;
     current = result.skeleton;
@@ -76,6 +103,23 @@ export function simplifyMedialSkeleton(
   }
 
   return current;
+}
+
+/** Sorted-endpoint coordinate key for an edge, stable across vertex reindexing. */
+function edgeKey(a: Vec2D, b: Vec2D): string {
+  const ka = `${Math.round(a.x * 1e3)},${Math.round(a.y * 1e3)}`;
+  const kb = `${Math.round(b.x * 1e3)},${Math.round(b.y * 1e3)}`;
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+}
+
+/** Coverage fraction of boundary samples over the maintained primitive set. */
+function coverageOf(
+  edgePrims: Map<string, Primitive>,
+  vertexPrims: Primitive[],
+  boundarySamples: paper.Point[],
+): number {
+  const prims = [...edgePrims.values(), ...vertexPrims];
+  return coverageAndUncovered(boundarySamples, prims).coverage;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +192,9 @@ function tryOneContraction(
   boundarySamples: paper.Point[],
   baselineCoverage: number,
   opts: SimplifySkeletonOptions,
+  fitter: EdgeFitter,
+  edgePrims: Map<string, Primitive>,
+  vertexPrims: Primitive[],
 ): { skeleton: MedialAxisGraph; coverage: number } | null {
   const deg = computeDegrees(skeleton);
 
@@ -192,12 +239,41 @@ function tryOneContraction(
 
     if (!isMergedEdgeInside(chosen.pKept, chosen.cp1, chosen.cp2, chosen.pFar, path, opts)) continue;
 
+    // Build the contracted skeleton, then derive its primitive set incrementally:
+    // every surviving edge reuses its maintained primitive (geometry unchanged),
+    // and only genuinely-new edge(s) — normally just the merged one — are refit.
+    // Reading the actual contracted topology (rather than guessing "remove 2, add
+    // 1") keeps this exact under buildContractedSkeleton's edge dedup / removal.
     const simplified = buildContractedSkeleton(
       skeleton, chosen.removed, chosen.kept, chosen.farEnd,
       chosen.cp1, chosen.cp2,
     );
-    const cov = computeCoverage(simplified, path, boundarySamples);
+
+    const candidateMap = new Map<string, Primitive>();
+    for (let se = 0; se < simplified.segments.length; se++) {
+      const [su, sv] = simplified.segments[se];
+      const k = edgeKey(simplified.points[su], simplified.points[sv]);
+      if (candidateMap.has(k)) continue;
+      let prim = edgePrims.get(k);
+      if (!prim) {
+        const cp = simplified.controlPoints?.[se];
+        const geom = fitter.fitEdge(
+          simplified.points[su], simplified.points[sv], cp?.[0], cp?.[1],
+        );
+        prim = { type: "edge", elementIdx: -1, ...geom };
+      }
+      candidateMap.set(k, prim);
+    }
+    const cov = coverageAndUncovered(boundarySamples, [
+      ...candidateMap.values(),
+      ...vertexPrims,
+    ]).coverage;
+
     if (cov >= baselineCoverage - opts.coverageTolerance) {
+      // Commit the maintained primitive set = exactly the contracted topology.
+      edgePrims.clear();
+      for (const [k, prim] of candidateMap) edgePrims.set(k, prim);
+
       const pRem = skeleton.points[chosen.removed];
       const tag = candA && candB ? (chosen === candA ? "A" : "B")
                 : candA          ? "A only"
@@ -278,15 +354,6 @@ function buildContractedSkeleton(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function computeCoverage(
-  skeleton: MedialAxisGraph,
-  path: paper.CompoundPath,
-  boundarySamples: paper.Point[],
-): number {
-  const fitted = localPrimitiveFitting(path, skeleton);
-  return coverageAndUncovered(boundarySamples, fitted.primitives).coverage;
-}
 
 function isMergedEdgeInside(
   pA: Vec2D, cp1: Vec2D, cp2: Vec2D, pB: Vec2D,
