@@ -32,25 +32,20 @@ const DEFAULTS: VoronoiClipOptions = {
 };
 
 /**
- * Replaces each primitive's `clippedPath` with `clippedPath ∩ V_i`, where
- * V_i is the primitive's Voronoi cell on the plane partitioned by samples
- * drawn from every primitive's geometry.
+ * Computes the merged Voronoi cell (a polygon paper.PathItem) for each
+ * primitive. Exposed for debugging/visualisation (drawing the raw Voronoi
+ * partition) and reused internally by clipPrimitivesToVoronoiCells.
  *
- * After this runs, adjacent primitives' shared boundary segments are
- * bit-exact identical (paper.js preserves linear-segment endpoint anchors
- * during boolean intersect; the polygon V_i edges feed those endpoints
- * unchanged into both sides' results). Each primitive's `boundaryTags`
- * field is populated with one tag per curve indicating whether that
- * curve is unique bezier, an outer (no-neighbour) polygon edge, or a
- * polygon edge shared with a specific neighbour primitive.
- *
- * Must run after `clipPrimitivesToShape` has populated `clippedPath`.
+ * Returns null if there are too few samples to form a Voronoi diagram.
+ * Caller owns the returned cell paths and must .remove() them.
  */
-export function clipPrimitivesToVoronoiCells(
+export function computePrimitiveVoronoiCells(
   fitted: FittedMedialAxisGraph,
   bounds: paper.Rectangle,
   options: Partial<VoronoiClipOptions> = {},
-): void {
+): {
+  cellPaths: Map<number, paper.PathItem>;
+} | null {
   const opts: VoronoiClipOptions = { ...DEFAULTS, ...options };
 
   // 1. Sample features.
@@ -58,7 +53,7 @@ export function clipPrimitivesToVoronoiCells(
   for (let pi = 0; pi < fitted.primitives.length; pi++) {
     samplePrimitive(fitted, pi, opts, samples);
   }
-  if (samples.length < 2) return;
+  if (samples.length < 2) return null;
 
   // 2. Compute Voronoi on the padded bounding rectangle.
   const xmin = bounds.left - opts.boundsPadding;
@@ -74,29 +69,10 @@ export function clipPrimitivesToVoronoiCells(
   const delaunay = new Delaunay(flat);
   const voronoi = delaunay.voronoi([xmin, ymin, xmax, ymax]);
 
-  // 3. Collect cell polygons and build a canonical vertex → primitive-set map.
+  // 3. Collect cell polygons.
   const cellPolys: ([number, number][] | null)[] = new Array(samples.length);
   for (let i = 0; i < samples.length; i++) {
     cellPolys[i] = voronoi.cellPolygon(i) as [number, number][] | null;
-  }
-
-  const snapKey = (x: number, y: number) =>
-    `${Math.round(x / opts.vertexSnapTolerance)},${Math.round(y / opts.vertexSnapTolerance)}`;
-
-  const vertexToPrims = new Map<string, Set<number>>();
-  for (let i = 0; i < samples.length; i++) {
-    const poly = cellPolys[i];
-    if (!poly) continue;
-    const primIdx = samples[i].primIdx;
-    for (const [x, y] of poly) {
-      const key = snapKey(x, y);
-      let set = vertexToPrims.get(key);
-      if (!set) {
-        set = new Set();
-        vertexToPrims.set(key, set);
-      }
-      set.add(primIdx);
-    }
   }
 
   // 4. Build a merged Voronoi-cell paper.Path per primitive.
@@ -106,50 +82,172 @@ export function clipPrimitivesToVoronoiCells(
     fitted.primitives.length,
   );
 
-  // 5. Intersect each primitive's clippedPath with its cell path, then tag.
-  for (let pi = 0; pi < fitted.primitives.length; pi++) {
-    const prim = fitted.primitives[pi];
-    if (!prim.clippedPath) continue;
-    const cellPath = cellPaths.get(pi);
-    if (!cellPath) continue;
+  return { cellPaths };
+}
 
-    const intersected = prim.clippedPath.intersect(cellPath, {
-      insert: false,
-    });
+/**
+ * Partitions the fitted primitives' coverage into non-overlapping regions by
+ * a capsule-restricted Voronoi rule: a point belongs to edge i iff capsule_i
+ * covers it AND edge i is the nearest skeleton among primitives whose capsule
+ * covers it.
+ *
+ * Concretely, with CLAIMED_j = capsule_j ∩ cell_j (each primitive's first-tier
+ * Voronoi territory), each primitive's region is computed as
+ *
+ *     region_i = capsule_i  \  ⋃_{j≠i} CLAIMED_j
+ *
+ * This keeps every region inside the union of capsules (glyph-aware — no
+ * exclaves), heals the junction gaps where one capsule fell short of the
+ * bisector (the short side's territory stays with the capsule that does cover
+ * it), and makes genuinely-shared boundaries symmetric: the straight bisector
+ * segment that primitive i exposes by subtracting CLAIMED_j is the exact same
+ * cell-edge that primitive j keeps as part of CLAIMED_j, so both reference
+ * identical Float64 coordinates.
+ *
+ * Each primitive's `boundaryTags` is populated, one tag per clippedPath curve:
+ * - bezier: non-linear boundary unique to this primitive (capsule/shape edge).
+ * - shared:n: straight bisector segment that primitive n mirrors exactly.
+ * - outer: straight boundary with no mirror (a sole-coverage tail or a
+ *   straight bit of the capsule/shape edge).
+ *
+ * Must run after `clipPrimitivesToShape` has populated `clippedPath`.
+ */
+export function clipPrimitivesToVoronoiCells(
+  fitted: FittedMedialAxisGraph,
+  bounds: paper.Rectangle,
+  options: Partial<VoronoiClipOptions> = {},
+): void {
+  const opts: VoronoiClipOptions = { ...DEFAULTS, ...options };
+  const computed = computePrimitiveVoronoiCells(fitted, bounds, opts);
+  if (!computed) return;
+  const { cellPaths } = computed;
 
-    let resultPath: paper.Path | null = null;
-    if (intersected instanceof paper.CompoundPath) {
-      // Pick the largest connected component.
-      const children = intersected.children as paper.Path[];
-      let best: paper.Path | null = null;
-      let bestArea = 0;
-      for (const c of children) {
-        const a = Math.abs((c as paper.Path).area);
-        if (a > bestArea) {
-          bestArea = a;
-          best = c as paper.Path;
-        }
-      }
-      if (best) resultPath = best.clone({ insert: false }) as paper.Path;
-      intersected.remove();
-    } else if (intersected instanceof paper.Path) {
-      resultPath = intersected;
-    }
+  const n = fitted.primitives.length;
 
-    if (!resultPath || resultPath.segments.length < 3) {
-      resultPath?.remove();
-      continue;
-    }
+  // Capture the pre-Voronoi capsules (clipPrimitivesToShape output). Cloned so
+  // we can overwrite prim.clippedPath while still referencing the original.
+  const capsules: (paper.PathItem | null)[] = fitted.primitives.map((p) =>
+    p.clippedPath ? (p.clippedPath.clone({ insert: false }) as paper.PathItem) : null,
+  );
 
-    const tags = classifyCurves(resultPath, vertexToPrims, snapKey, pi);
-
-    prim.clippedPath.remove();
-    prim.clippedPath = resultPath;
-    prim.boundaryTags = tags;
+  // CLAIMED_i = capsule_i ∩ cell_i (largest connected component).
+  const claimed: (paper.Path | null)[] = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const cap = capsules[i];
+    const cell = cellPaths.get(i);
+    if (!cap || !cell) continue;
+    claimed[i] = largestComponent(cap.intersect(cell, { insert: false }));
   }
 
-  // Clean up.
+  // region_i = capsule_i \ ⋃_{j≠i} CLAIMED_j.
+  // Non-overlapping CLAIMED_j (distant primitives) are skipped by bounds test,
+  // so the subtraction only touches genuine neighbours.
+  const regions: (paper.Path | null)[] = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const cap = capsules[i];
+    if (!cap) continue;
+    let region: paper.PathItem = cap.clone({ insert: false }) as paper.PathItem;
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue;
+      const cj = claimed[j];
+      if (!cj) continue;
+      if (!region.bounds.intersects(cj.bounds)) continue;
+      const sub = region.subtract(cj, { insert: false });
+      region.remove();
+      region = sub;
+    }
+    regions[i] = largestComponent(region);
+  }
+
+  // Commit regions, replacing each primitive's clippedPath.
+  for (let i = 0; i < n; i++) {
+    const region = regions[i];
+    if (!region || region.segments.length < 3) {
+      region?.remove();
+      continue;
+    }
+    fitted.primitives[i].clippedPath?.remove();
+    fitted.primitives[i].clippedPath = region;
+  }
+
+  // Tag boundary curves by cross-referencing mirrored straight segments.
+  tagAllBoundaries(fitted, opts.vertexSnapTolerance);
+
+  // Clean up intermediates.
   for (const p of cellPaths.values()) p.remove();
+  for (const c of capsules) c?.remove();
+  for (const c of claimed) c?.remove();
+}
+
+/** Returns the largest-area connected component of a boolean result as an
+ * owned, un-inserted paper.Path; consumes the input item. */
+function largestComponent(item: paper.PathItem | null): paper.Path | null {
+  if (!item) return null;
+  if (item instanceof paper.CompoundPath) {
+    let best: paper.Path | null = null;
+    let bestArea = 0;
+    for (const c of item.children as paper.Path[]) {
+      const a = Math.abs(c.area);
+      if (a > bestArea) {
+        bestArea = a;
+        best = c;
+      }
+    }
+    const res = best ? (best.clone({ insert: false }) as paper.Path) : null;
+    item.remove();
+    return res;
+  }
+  if (item instanceof paper.Path) return item;
+  return null;
+}
+
+/**
+ * Tags every primitive's clippedPath curves. A straight curve is "shared:n" iff
+ * primitive n's clippedPath contains the exact reversed straight curve (same
+ * snapped endpoints, opposite direction) — which is guaranteed for genuine
+ * bisector segments by construction of region_i. Straight curves without a
+ * mirror are "outer" (sole-coverage tails / straight capsule edges); non-linear
+ * curves are "bezier".
+ */
+function tagAllBoundaries(
+  fitted: FittedMedialAxisGraph,
+  snapTol: number,
+): void {
+  const snap = (v: number) => Math.round(v / snapTol);
+  const segKey = (x1: number, y1: number, x2: number, y2: number) =>
+    `${snap(x1)},${snap(y1)}|${snap(x2)},${snap(y2)}`;
+
+  // Map every directed straight curve (by snapped endpoints) → owning primitive.
+  const owner = new Map<string, number>();
+  for (let i = 0; i < fitted.primitives.length; i++) {
+    const cp = fitted.primitives[i].clippedPath as paper.Path | undefined;
+    if (!cp) continue;
+    for (const c of cp.curves) {
+      if (!c.isStraight()) continue;
+      owner.set(segKey(c.point1.x, c.point1.y, c.point2.x, c.point2.y), i);
+    }
+  }
+
+  for (let i = 0; i < fitted.primitives.length; i++) {
+    const prim = fitted.primitives[i];
+    const cp = prim.clippedPath as paper.Path | undefined;
+    if (!cp) continue;
+    const tags: BoundaryTag[] = [];
+    for (const c of cp.curves) {
+      if (!c.isStraight()) {
+        tags.push({ kind: "bezier" });
+        continue;
+      }
+      const revKey = segKey(c.point2.x, c.point2.y, c.point1.x, c.point1.y);
+      const j = owner.get(revKey);
+      if (j !== undefined && j !== i) {
+        tags.push({ kind: "shared", neighbour: j });
+      } else {
+        tags.push({ kind: "outer" });
+      }
+    }
+    prim.boundaryTags = tags;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -244,46 +342,4 @@ function buildPerPrimitiveCellPaths(
     if (merged) result.set(pi, merged);
   }
   return result;
-}
-
-function classifyCurves(
-  path: paper.Path,
-  vertexToPrims: Map<string, Set<number>>,
-  snapKey: (x: number, y: number) => string,
-  selfPrim: number,
-): BoundaryTag[] {
-  const tags: BoundaryTag[] = [];
-  for (const curve of path.curves) {
-    if (!curve.isStraight()) {
-      tags.push({ kind: "bezier" });
-      continue;
-    }
-    const k1 = snapKey(curve.point1.x, curve.point1.y);
-    const k2 = snapKey(curve.point2.x, curve.point2.y);
-    const p1 = vertexToPrims.get(k1);
-    const p2 = vertexToPrims.get(k2);
-    if (!p1 || !p2) {
-      // Linear segment but at least one endpoint isn't a canonical Voronoi
-      // vertex — must be a paper.js-introduced linear curve (e.g. very low
-      // curvature segment treated as straight). Fall back to "bezier".
-      tags.push({ kind: "bezier" });
-      continue;
-    }
-    // Both endpoints are canonical Voronoi vertices. Look for a primitive
-    // that touches both vertices and isn't this primitive — that's the
-    // neighbour sharing this edge.
-    let neighbour = -1;
-    for (const a of p1) {
-      if (a !== selfPrim && p2.has(a)) {
-        neighbour = a;
-        break;
-      }
-    }
-    if (neighbour < 0) {
-      tags.push({ kind: "outer" });
-    } else {
-      tags.push({ kind: "shared", neighbour });
-    }
-  }
-  return tags;
 }
