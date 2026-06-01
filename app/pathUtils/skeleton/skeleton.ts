@@ -5,13 +5,13 @@ import {
   JoinType,
   PolyFillType,
 } from "js-angusj-clipper/web";
-import * as clipperLib from "js-angusj-clipper/web";
 import paper from "paper";
 
 import {
   fabricPathDataToPaper,
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
+import { clipper } from "@/app/pathUtils/loadClipper";
 import { computeDegrees } from "@/app/pathUtils/skeleton/graphUtils";
 import {
   FittedMedialAxisGraph,
@@ -26,12 +26,6 @@ import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
 import { Vec2D } from "@/app/utils/types";
-
-// initialize the clipper library
-const clipper = await clipperLib.loadNativeClipperLibInstanceAsync(
-  // let it autodetect which one to use, but also available WasmOnly and AsmJsOnly
-  clipperLib.NativeClipperLibRequestedFormat.WasmWithAsmJsFallback,
-);
 
 export function skeletonize(
   path: TSimplePathData,

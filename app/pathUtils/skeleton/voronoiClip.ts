@@ -1,11 +1,18 @@
 import { Delaunay } from "d3-delaunay";
+import { ClipType, PolyFillType } from "js-angusj-clipper/web";
 import paper from "paper";
 
+import { clipper } from "@/app/pathUtils/loadClipper";
 import { evalBezier } from "@/app/pathUtils/skeleton/bezierFitting";
 import {
   BoundaryTag,
   FittedMedialAxisGraph,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+
+// Coordinate scale for Clipper's integer arithmetic. 1e6 → a 1e-6 grid; cell
+// vertices round to it, but every primitive rounds the *same* shared Voronoi
+// vertices identically, so adjacent cells stay coincident.
+const CLIPPER_SCALE = 1e6;
 
 interface Sample {
   x: number;
@@ -311,35 +318,57 @@ function buildPerPrimitiveCellPaths(
 
   const result = new Map<number, paper.PathItem>();
   for (let pi = 0; pi < nPrimitives; pi++) {
-    const indices = byPrim[pi];
-    let merged: paper.PathItem | null = null;
-    for (const si of indices) {
+    // Dissolve all of this primitive's sample cells into one region with a
+    // single Clipper Union over integer-scaled polygons. (Folding them with
+    // pairwise paper.unite is O(cells²) and was 95% of the clip's runtime.)
+    const subjectInputs: { data: { x: number; y: number }[]; closed: boolean }[] =
+      [];
+    for (const si of byPrim[pi]) {
       const poly = cellPolys[si];
       if (!poly || poly.length < 3) continue;
-      // d3-delaunay closes the polygon by repeating the first vertex; drop it.
-      const segs: paper.Point[] = [];
       const last = poly.length - 1;
       const closesItself =
         poly[0][0] === poly[last][0] && poly[0][1] === poly[last][1];
       const stop = closesItself ? last : poly.length;
+      const data: { x: number; y: number }[] = [];
       for (let k = 0; k < stop; k++) {
-        segs.push(new paper.Point(poly[k][0], poly[k][1]));
+        data.push({
+          x: Math.round(poly[k][0] * CLIPPER_SCALE),
+          y: Math.round(poly[k][1] * CLIPPER_SCALE),
+        });
       }
-      const cellP = new paper.Path({
-        segments: segs,
-        closed: true,
-        insert: false,
-      });
-      if (merged === null) {
-        merged = cellP;
-      } else {
-        const united: paper.PathItem = merged.unite(cellP, { insert: false });
-        merged.remove();
-        cellP.remove();
-        merged = united;
-      }
+      subjectInputs.push({ data, closed: true });
     }
-    if (merged) result.set(pi, merged);
+    if (subjectInputs.length === 0) continue;
+
+    const union = clipper.clipToPaths({
+      clipType: ClipType.Union,
+      subjectFillType: PolyFillType.NonZero,
+      subjectInputs,
+    });
+    if (!union || union.length === 0) continue;
+
+    // Build a paper path from the union rings (one ring → Path; multiple →
+    // CompoundPath, which paper's boolean ops handle directly).
+    const rings = union
+      .filter((ring) => ring.length >= 3)
+      .map(
+        (ring) =>
+          new paper.Path({
+            segments: ring.map(
+              (p) =>
+                new paper.Point(p.x / CLIPPER_SCALE, p.y / CLIPPER_SCALE),
+            ),
+            closed: true,
+            insert: false,
+          }),
+      );
+    if (rings.length === 0) continue;
+    const cellPath: paper.PathItem =
+      rings.length === 1
+        ? rings[0]
+        : new paper.CompoundPath({ children: rings, insert: false });
+    result.set(pi, cellPath);
   }
   return result;
 }
