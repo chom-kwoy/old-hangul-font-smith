@@ -34,6 +34,84 @@ export function evalBezier(
 }
 
 /**
+ * Tangent (first derivative B'(t)) of a cubic Bezier at t ∈ [0, 1].
+ * Falls back to the chord direction (pB − pA) when CPs are undefined (linear).
+ * Not normalised — magnitude is the speed; callers normalise as needed.
+ */
+export function bezierTangent(
+  pA: Vec2D,
+  cp1: Vec2D | undefined,
+  cp2: Vec2D | undefined,
+  pB: Vec2D,
+  t: number,
+): Vec2D {
+  if (!cp1 || !cp2) {
+    return { x: pB.x - pA.x, y: pB.y - pA.y };
+  }
+  const u = 1 - t;
+  return {
+    x:
+      3 *
+      (u * u * (cp1.x - pA.x) +
+        2 * u * t * (cp2.x - cp1.x) +
+        t * t * (pB.x - cp2.x)),
+    y:
+      3 *
+      (u * u * (cp1.y - pA.y) +
+        2 * u * t * (cp2.y - cp1.y) +
+        t * t * (pB.y - cp2.y)),
+  };
+}
+
+/**
+ * Foot-point parameter t* ∈ [0,1] on the cubic Bezier (pA,cp1,cp2,pB) nearest
+ * to q. Coarse-samples for a good seed, then Newton-refines. The seed avoids
+ * the Newton local-minimum trap near caps/loops.
+ *
+ * Optional `seed`: when projecting a continuous sequence of points (e.g. a path),
+ * pass the previous point's t* so the refinement stays on the same branch
+ * instead of jumping; the coarse search is still run and the closer of the two
+ * seeds is used.
+ */
+export function footParamOnBezier(
+  q: Vec2D,
+  pA: Vec2D,
+  cp1: Vec2D | undefined,
+  cp2: Vec2D | undefined,
+  pB: Vec2D,
+  seed?: number,
+  coarseSamples = 24,
+): number {
+  // Linear bone: exact closed-form projection onto the segment pA→pB.
+  if (!cp1 || !cp2) {
+    const dx = pB.x - pA.x, dy = pB.y - pA.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-12) return 0;
+    const t = ((q.x - pA.x) * dx + (q.y - pA.y) * dy) / lenSq;
+    return Math.max(0, Math.min(1, t));
+  }
+
+  // Coarse seed: nearest of `coarseSamples+1` uniform samples (plus the optional
+  // provided seed), then a Newton refinement from the better starting point.
+  let bestT = 0;
+  let bestD = Infinity;
+  const consider = (t: number) => {
+    const b = evalBezier(pA, cp1, cp2, pB, t);
+    const d = (b.x - q.x) ** 2 + (b.y - q.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      bestT = t;
+    }
+  };
+  for (let k = 0; k <= coarseSamples; k++) consider(k / coarseSamples);
+  if (seed !== undefined) consider(Math.max(0, Math.min(1, seed)));
+
+  return projectOnBezier(
+    q.x, q.y, pA.x, pA.y, cp1.x, cp1.y, cp2.x, cp2.y, pB.x, pB.y, bestT,
+  );
+}
+
+/**
  * Newton foot-point projection: returns t* ∈ [0,1] on B(t; pA,c1,c2,pB)
  * nearest to (px, py), starting from t0.
  */
