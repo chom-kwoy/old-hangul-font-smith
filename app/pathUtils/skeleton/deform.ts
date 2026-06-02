@@ -45,7 +45,7 @@ type AnchorMember = { edge: number; t: number; a: number; b: number };
 
 type PointEnc =
   | { kind: "single"; m: AnchorMember }
-  | { kind: "shared"; members: AnchorMember[] };
+  | { kind: "shared"; members: AnchorMember[]; jointIdx: number | null };
 
 // Polar handle relative to the owning edge's tangent at the anchor's foot.
 // null when the handle is zero (straight segment).
@@ -202,11 +202,29 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
         let point: PointEnc;
         if (sharers && sharers.size >= 2) {
           const members: AnchorMember[] = [];
+          const edges: number[] = [];
           for (const spi of sharers) {
             const e = fitted.primitives[spi].elementIdx;
+            edges.push(e);
             members.push(e === ownEdge ? own : encodeAnchor(q, e));
           }
-          point = { kind: "shared", members };
+          // The shared bone joint = skeleton vertex common to all member edges.
+          let candidates = new Set(segments[edges[0]]);
+          for (let i = 1; i < edges.length; i++) {
+            const ends = new Set(segments[edges[i]]);
+            candidates = new Set([...candidates].filter((v) => ends.has(v)));
+          }
+          let jointIdx: number | null = null;
+          let best = Infinity;
+          for (const idx of candidates) {
+            const p = fitted.points[idx];
+            const d2 = (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+            if (d2 < best) {
+              best = d2;
+              jointIdx = idx;
+            }
+          }
+          point = { kind: "shared", members, jointIdx };
         } else {
           point = { kind: "single", m: own };
         }
@@ -286,16 +304,29 @@ function warpPoint(
   segments: [number, number][],
 ): Vec2D {
   if (enc.kind === "single") return warpAnchor(enc.m, sPrime, segments);
-  // Shared: average the warp from every sharing edge (identical on both sides
-  // ⇒ the shared boundary stays coincident).
-  let sx = 0, sy = 0;
-  for (const m of enc.members) {
-    const p = warpAnchor(m, sPrime, segments);
-    sx += p.x;
-    sy += p.y;
+  // Shared: warp via every sharing edge, then re-expand to the average
+  // joint-distance so sharp corners keep their stroke width. The plain position
+  // average pulls inward when the bones' tangents diverge; rescaling its
+  // distance to the shared joint to the mean member radius restores the width.
+  // Identical on both sides (same members + joint) ⇒ boundary stays coincident,
+  // and a no-op at S'=S (every P_m = Q) ⇒ identity preserved exactly.
+  const Ps = enc.members.map((m) => warpAnchor(m, sPrime, segments));
+  const k = Ps.length;
+  let qx = 0, qy = 0;
+  for (const p of Ps) {
+    qx += p.x;
+    qy += p.y;
   }
-  const k = enc.members.length;
-  return { x: sx / k, y: sy / k };
+  const Q = { x: qx / k, y: qy / k };
+  if (enc.jointIdx == null) return Q; // no common joint → plain average
+  const J = sPrime.points[enc.jointIdx];
+  let R = 0;
+  for (const p of Ps) R += Math.hypot(p.x - J.x, p.y - J.y);
+  R /= k;
+  const dx = Q.x - J.x, dy = Q.y - J.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return Q; // anchor sits on the joint
+  return { x: J.x + (R * dx) / len, y: J.y + (R * dy) / len };
 }
 
 function warpHandle(
