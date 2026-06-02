@@ -8,24 +8,10 @@ import {
   buildFlatBoundary,
   sampleBoundary,
 } from "@/app/pathUtils/flatBoundary";
-import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import {
-  FittedMedialAxisGraph,
   Primitive,
-  localPrimitiveFitting,
   primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
-import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
-import {
-  SkeletonIterCallback,
-  computeMedialSkeletonPoints,
-} from "@/app/pathUtils/skeleton/medialSkeletonPoints";
-import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
-import {
-  clipPrimitivesToShape,
-  removeRedundantLeafEdges,
-} from "@/app/pathUtils/skeleton/skeleton";
-import { clipPrimitivesToVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
 import * as testPaths from "@/app/testpage/testPaths";
 import { initDrawContexts } from "@/app/utils/init";
 
@@ -182,37 +168,6 @@ function primCovers(
       return true;
   }
   return false;
-}
-
-// ---------------------------------------------------------------------------
-// Full skeleton pipeline (shared by test5 / test6)
-// ---------------------------------------------------------------------------
-
-/**
- * Runs the complete skeleton → fitted-glyph pipeline:
- *   extractMedialAxis → computeMedialSkeletonPoints → constructMedialSkeleton
- *     → [simplifyMedialSkeleton] → localPrimitiveFitting → removeRedundantLeafEdges
- *     → clipPrimitivesToShape → clipPrimitivesToVoronoiCells
- *
- * `simplify` (default true) toggles the contraction pass; `onIteration` forwards
- * the Nelder-Mead iteration callback (used by test5 to log NM eval counts).
- */
-export function buildFittedGlyph(
-  path: paper.CompoundPath,
-  opts: { simplify?: boolean; onIteration?: SkeletonIterCallback } = {},
-): FittedMedialAxisGraph {
-  const simplify = opts.simplify ?? true;
-  const axis = extractMedialAxis(path);
-  const seeds = computeMedialSkeletonPoints(path, axis, false, opts.onIteration);
-  const skeleton = constructMedialSkeleton(seeds, axis, path, true);
-  const simplified = simplify
-    ? simplifyMedialSkeleton(skeleton, axis, path)
-    : skeleton;
-  const fitted = localPrimitiveFitting(path, simplified);
-  removeRedundantLeafEdges(fitted);
-  clipPrimitivesToShape(fitted, path);
-  clipPrimitivesToVoronoiCells(fitted, path.bounds);
-  return fitted;
 }
 
 // ---------------------------------------------------------------------------

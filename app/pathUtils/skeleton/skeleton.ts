@@ -23,15 +23,36 @@ import {
 import { clipPrimitivesToVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
-import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+import {
+  SkeletonIterCallback,
+  computeMedialSkeletonPoints,
+} from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
 import { Vec2D } from "@/app/utils/types";
 
-export function skeletonize(
-  path: TSimplePathData,
-  verbose: boolean = false,
+export type SkeletonizeOptions = {
+  /** Verbose console logging of intermediate stages. Default: false. */
+  verbose?: boolean;
+  /** Run the degree-2 chain contraction pass. Default: true. */
+  simplify?: boolean;
+  /** Forwarded to the Nelder-Mead seed optimiser for per-iteration callbacks. */
+  onIteration?: SkeletonIterCallback;
+};
+
+/**
+ * Core skeletonization pipeline on a paper.CompoundPath:
+ *   extractMedialAxis → computeMedialSkeletonPoints → constructMedialSkeleton
+ *     → [simplifyMedialSkeleton] → localPrimitiveFitting → removeRedundantLeafEdges
+ *     → clipPrimitivesToShape → clipPrimitivesToVoronoiCells
+ *
+ * `skeletonize` (which takes fabric TSimplePathData) is a thin wrapper around
+ * this; tests call it directly with a paper path.
+ */
+export function skeletonizePath(
+  paperPath: paper.CompoundPath,
+  options: SkeletonizeOptions = {},
 ): FittedMedialAxisGraph {
-  const paperPath = fabricPathDataToPaper(path);
+  const { verbose = false, simplify = true, onIteration } = options;
 
   // Use delaunay triangulation to find the medial axis
   const medialAxis = extractMedialAxis(paperPath);
@@ -57,6 +78,7 @@ export function skeletonize(
     paperPath,
     medialAxis,
     verbose,
+    onIteration,
   );
 
   // Connect the medial skeleton points to each other to form a connected graph
@@ -68,11 +90,9 @@ export function skeletonize(
   );
 
   // Contract degree-2 chain edges that don't contribute topological structure
-  const simplifiedSkeleton = simplifyMedialSkeleton(
-    medialSkeleton,
-    medialAxis,
-    paperPath,
-  );
+  const simplifiedSkeleton = simplify
+    ? simplifyMedialSkeleton(medialSkeleton, medialAxis, paperPath)
+    : medialSkeleton;
 
   // Fit primitives (expandable circles) to each skeleton component
   const fitted = localPrimitiveFitting(paperPath, simplifiedSkeleton);
@@ -92,6 +112,13 @@ export function skeletonize(
   clipPrimitivesToVoronoiCells(fitted, paperPath.bounds);
 
   return fitted;
+}
+
+export function skeletonize(
+  path: TSimplePathData,
+  verbose: boolean = false,
+): FittedMedialAxisGraph {
+  return skeletonizePath(fabricPathDataToPaper(path), { verbose });
 }
 
 export type PathScaleOptions = {

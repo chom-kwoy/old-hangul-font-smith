@@ -34,12 +34,12 @@ import {
   SkeletonIterCallback,
   coverageAndUncovered,
 } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+import { skeletonizePath } from "@/app/pathUtils/skeleton/skeleton";
 import { computePrimitiveVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
 
 import {
   TEST_PATHS,
   analyzeSharedBoundaries,
-  buildFittedGlyph,
   check,
   coverageFraction,
   finish,
@@ -367,7 +367,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     let error: unknown = null;
     const t0 = Date.now();
     try {
-      fitted = buildFittedGlyph(path, {
+      fitted = skeletonizePath(path, {
         simplify: SIMPLIFY_ENABLED,
         onIteration: iterCallback,
       });

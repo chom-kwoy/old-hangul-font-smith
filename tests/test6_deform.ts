@@ -19,11 +19,11 @@ import {
   deformOutline,
 } from "@/app/pathUtils/skeleton/deform";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import { skeletonizePath } from "@/app/pathUtils/skeleton/skeleton";
 
 import {
   TEST_PATHS,
   analyzeSharedBoundaries,
-  buildFittedGlyph,
   check,
   finish,
   suite,
@@ -89,7 +89,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     let fitted: FittedMedialAxisGraph | null = null;
     let error: unknown = null;
     try {
-      fitted = buildFittedGlyph(path);
+      fitted = skeletonizePath(path);
     } catch (e) {
       error = e;
     }
