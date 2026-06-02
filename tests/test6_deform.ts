@@ -169,6 +169,55 @@ function edgePathData(
   return cmds.join(" ");
 }
 
+/** Draw a bone control net: anchor dots at vertices + control-point dots with
+ *  dashed handle lines (vertex u → cp1, vertex v → cp2 per edge). */
+function drawBoneControlNet(
+  canvas: StaticCanvas,
+  pts: { x: number; y: number }[],
+  cps: [{ x: number; y: number }, { x: number; y: number }][] | undefined,
+  segments: [number, number][],
+  tx: (x: number) => number,
+  ty: (y: number) => number,
+  color: string,
+): void {
+  if (cps) {
+    for (let e = 0; e < segments.length; e++) {
+      const cp = cps[e];
+      if (!cp) continue;
+      const [u, v] = segments[e];
+      for (const [anchor, c] of [
+        [pts[u], cp[0]] as const,
+        [pts[v], cp[1]] as const,
+      ]) {
+        canvas.add(
+          new FabricLine([tx(anchor.x), ty(anchor.y), tx(c.x), ty(c.y)], {
+            stroke: color,
+            strokeWidth: 1,
+            strokeDashArray: [3, 2],
+            selectable: false,
+          }),
+        );
+        canvas.add(
+          new FabricCircle({
+            left: tx(c.x), top: ty(c.y), radius: 2,
+            fill: color,
+            originX: "center", originY: "center", selectable: false,
+          }),
+        );
+      }
+    }
+  }
+  for (const p of pts) {
+    canvas.add(
+      new FabricCircle({
+        left: tx(p.x), top: ty(p.y), radius: 2.5,
+        fill: color,
+        originX: "center", originY: "center", selectable: false,
+      }),
+    );
+  }
+}
+
 /** Render original (faint) vs deformed (solid) outline + skeleton + the move. */
 function renderDeform(
   label: string,
@@ -240,6 +289,17 @@ function renderDeform(
       ),
       { fill: "", stroke: "rgba(230,130,0,0.95)", strokeWidth: 1.5, selectable: false },
     ),
+  );
+
+  // Bone anchors + handles for the deformed skeleton (orange control net).
+  drawBoneControlNet(
+    canvas,
+    edit.skeleton.points,
+    edit.skeleton.controlPoints,
+    fitted.segments,
+    tx,
+    ty,
+    "rgba(230,130,0,0.9)",
   );
 
   // The moved vertex: from (hollow) → to (filled) with a connecting line.
