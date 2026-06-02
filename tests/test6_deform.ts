@@ -6,10 +6,9 @@
  *   2) identity warp deform(S, S, C) must reproduce the original primitives
  *      (anchors + handles bit-close)
  *   3) a random edit S' (move one random skeleton vertex in a random direction
- *      by 10–100px, seeded per-glyph): each capsule is warped by its own frame
- *      and seams are stitched with quads. Checks: the stitched outline is closed
- *      and bezier, the stitch quads never reduce coverage, and at identity the
- *      quads are degenerate. Rendered to test_outputs/deform_*.png
+ *      by 10–100px, seeded per-glyph) must keep shared boundaries coincident
+ *      (no gap/overlap) and produce a closed, non-degenerate bezier outline;
+ *      the original vs deformed outline is rendered to test_outputs/deform_*.png
  */
 import {
   Circle as FabricCircle,
@@ -26,7 +25,6 @@ import {
   applyDeform,
   boneLinks,
   buildDeformRig,
-  buildStitchQuads,
   deformOutline,
   unionDeformedPrimitives,
 } from "@/app/pathUtils/skeleton/deform";
@@ -436,28 +434,21 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     const edit = randomEdit(fitted, rng);
     const moveDist = Math.hypot(edit.to.x - edit.from.x, edit.to.y - edit.from.y);
 
-    // Pre-deform Voronoi shared boundaries still coincide (clipping untouched).
     const baseGap = analyzeSharedBoundaries(fitted.primitives).maxGap;
+    const warped = applyDeform(rig, edit.skeleton);
+    const editGap = analyzeSharedBoundaries(warped).maxGap;
     check(
       "shared boundaries coincident on original (≤1e-6)",
       baseGap <= 1e-6,
       `${baseGap.toExponential(2)}`,
     );
-
-    // At identity the seam strips collapse (A'=B'), so stitch quads vanish.
-    const idQuadArea = buildStitchQuads(rig, identity).reduce(
-      (s, q) => s + Math.abs(q.area),
-      0,
-    );
     check(
-      "identity stitch quads degenerate (area ≈ 0)",
-      idQuadArea <= 1e-6,
-      `total quad area ${idQuadArea.toExponential(2)}`,
+      "shared boundaries stay coincident after deform (≤1e-6)",
+      editGap <= 1e-6,
+      `moved v${edit.movedIdx} by ${moveDist.toFixed(0)}px → gap ${editGap.toExponential(2)}`,
     );
 
     // --- 3. Faithful bezier outline + visualization. ---
-    const warped = applyDeform(rig, edit.skeleton);
-    const unstitched = unionDeformedPrimitives(warped);
     const outline = deformOutline(fitted, edit.skeleton);
     check("deformed outline produced", outline !== null, "");
     if (outline) {
@@ -471,29 +462,11 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       for (const r of rings) for (const c of r.curves) if (!c.isStraight()) { hasCurve = true; break; }
       check("deformed outline is bezier (has curves)", hasCurve, "");
 
-      // Stitch quads only ever add coverage — the seam strips fill gaps that
-      // appear where neighbouring capsules diverge at a corner.
-      const unstitchedArea = unstitched
-        ? Math.abs(
-            (unstitched instanceof paper.CompoundPath
-              ? (unstitched.children as paper.Path[])
-              : [unstitched as paper.Path]
-            ).reduce((s, c) => s + c.area, 0),
-          )
-        : 0;
-      check(
-        "stitched area ≥ unstitched area",
-        area >= unstitchedArea - 1e-6,
-        `moved v${edit.movedIdx} by ${moveDist.toFixed(0)}px → ` +
-          `${unstitchedArea.toFixed(0)} → ${area.toFixed(0)} (+${(area - unstitchedArea).toFixed(0)})`,
-      );
-
       const original = unionDeformedPrimitives(fitted.primitives);
       if (original) {
         renderDeform(label, fitted, edit, original, outline, boneLinks(rig));
         original.remove();
       }
-      unstitched?.remove();
       outline.remove();
     }
   }
