@@ -20,12 +20,10 @@ import * as fs from "node:fs";
 import paper from "paper";
 
 import {
-  evalBezier,
-  footParamOnBezier,
-} from "@/app/pathUtils/skeleton/bezierFitting";
-import {
+  BoneLink,
   DeformedSkeleton,
   applyDeform,
+  boneLinks,
   buildDeformRig,
   deformOutline,
   unionDeformedPrimitives,
@@ -222,65 +220,16 @@ function drawBoneControlNet(
   }
 }
 
-/** For the original (grey) shape: a thin line from each capsule-outline anchor
- *  that is NOT on the glyph's outer boundary (i.e. not an endpoint of a bezier-
- *  tagged curve — so the shared Voronoi-boundary anchors) to its foot point on
- *  that capsule's own bone. Shared anchors get one line per adjacent capsule. */
-function drawFootLines(
-  canvas: StaticCanvas,
-  fitted: FittedMedialAxisGraph,
-  tx: (x: number) => number,
-  ty: (y: number) => number,
-): void {
-  const keyOf = (x: number, y: number) =>
-    `${Math.round(x * 1e3)},${Math.round(y * 1e3)}`;
-  for (const prim of fitted.primitives) {
-    if (prim.type !== "edge" || !prim.clippedPath || !prim.boundaryTags) continue;
-    const path = prim.clippedPath as paper.Path;
-    const curves = path.curves;
-    // Anchors that lie on the glyph outer boundary = endpoints of bezier curves.
-    const boundary = new Set<string>();
-    for (let ci = 0; ci < curves.length; ci++) {
-      if (prim.boundaryTags[ci]?.kind !== "bezier") continue;
-      const c = curves[ci];
-      boundary.add(keyOf(c.point1.x, c.point1.y));
-      boundary.add(keyOf(c.point2.x, c.point2.y));
-    }
-    // This capsule's bone (original skeleton).
-    const [u, v] = fitted.segments[prim.elementIdx];
-    const cp = fitted.controlPoints?.[prim.elementIdx];
-    const pA = fitted.points[u], pB = fitted.points[v];
-    const cp1 = cp?.[0], cp2 = cp?.[1];
-
-    const drawn = new Set<string>();
-    let prevT = 0;
-    for (const seg of path.segments) {
-      const q = seg.point;
-      const k = keyOf(q.x, q.y);
-      if (boundary.has(k)) continue;
-      if (drawn.has(k)) continue;
-      drawn.add(k);
-      const t = footParamOnBezier(q, pA, cp1, cp2, pB, prevT);
-      prevT = t;
-      const bp = evalBezier(pA, cp1, cp2, pB, t);
-      canvas.add(
-        new FabricLine([tx(q.x), ty(q.y), tx(bp.x), ty(bp.y)], {
-          stroke: "rgba(0,0,0,0.28)",
-          strokeWidth: 0.75,
-          selectable: false,
-        }),
-      );
-    }
-  }
-}
-
-/** Render original (faint) vs deformed (solid) outline + skeleton + the move. */
+/** Render original (faint) vs deformed (solid) outline + skeleton + the move.
+ *  `links` connects each original (non-shared) outline anchor to its bone foot
+ *  point — drawn on the grey pre-deformation shape. */
 function renderDeform(
   label: string,
   fitted: FittedMedialAxisGraph,
   edit: RandomEdit,
   original: paper.PathItem,
   deformed: paper.PathItem,
+  links: BoneLink[],
 ): void {
   const SIZE = 1000;
   const PAD = 60;
@@ -314,8 +263,17 @@ function renderDeform(
       }),
     );
 
-  // Original capsule anchor → bone foot-point correspondences (grey).
-  drawFootLines(canvas, fitted, tx, ty);
+  // Anchor → bone foot-point correspondence on the pre-deformation shape
+  // (non-shared anchors only). Thin grey spokes from the medial axis outward.
+  for (const { anchor, bone } of links) {
+    canvas.add(
+      new FabricLine([tx(bone.x), ty(bone.y), tx(anchor.x), ty(anchor.y)], {
+        stroke: "rgba(0,0,0,0.28)",
+        strokeWidth: 0.5,
+        selectable: false,
+      }),
+    );
+  }
 
   // Deformed outline — solid blue.
   const dd = svgFromPathItem(deformed, tx, ty);
@@ -506,7 +464,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
 
       const original = unionDeformedPrimitives(fitted.primitives);
       if (original) {
-        renderDeform(label, fitted, edit, original, outline);
+        renderDeform(label, fitted, edit, original, outline, boneLinks(rig));
         original.remove();
       }
       outline.remove();

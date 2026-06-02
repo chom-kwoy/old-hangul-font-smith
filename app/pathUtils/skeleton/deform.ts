@@ -245,6 +245,41 @@ function warpAnchor(
   };
 }
 
+/** An outline anchor paired with its foot point on the owning bone. */
+export type BoneLink = { anchor: Vec2D; bone: Vec2D };
+
+/**
+ * For every non-shared clippedPath anchor, returns the anchor position and its
+ * corresponding foot point on the owning edge's bone, evaluated under `sPrime`
+ * (default: the original skeleton). Shared anchors are excluded — they have no
+ * single owning bone. Useful for visualising the anchor→bone correspondence.
+ */
+export function boneLinks(
+  rig: DeformRig,
+  sPrime?: DeformedSkeleton,
+): BoneLink[] {
+  const sk: DeformedSkeleton =
+    sPrime ?? { points: rig.points, controlPoints: rig.controlPoints };
+  const links: BoneLink[] = [];
+  for (const rp of rig.primitives) {
+    for (const ring of rp.rings) {
+      for (const se of ring) {
+        if (se.point.kind !== "single") continue; // shared anchors have no single bone
+        const m = se.point.m;
+        const f = frameAt(sk, rig.segments, m.edge, m.t);
+        links.push({
+          anchor: {
+            x: f.o.x + m.a * f.tau.x + m.b * f.nu.x,
+            y: f.o.y + m.a * f.tau.y + m.b * f.nu.y,
+          },
+          bone: { x: f.o.x, y: f.o.y },
+        });
+      }
+    }
+  }
+  return links;
+}
+
 function warpPoint(
   enc: PointEnc,
   sPrime: DeformedSkeleton,
