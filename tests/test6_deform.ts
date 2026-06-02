@@ -232,7 +232,6 @@ function renderDeform(
   original: paper.PathItem,
   deformed: paper.PathItem,
   links: BoneLink[],
-  stitchQuads: paper.Path[],
 ): void {
   const SIZE = 1000;
   const PAD = 60;
@@ -290,21 +289,6 @@ function renderDeform(
         selectable: false,
       }),
     );
-
-  // Seam-stitch quads — translucent magenta, drawn over the deformed outline so
-  // the strips filling the diverged seams are visible.
-  for (const q of stitchQuads) {
-    const qd = svgFromPathItem(q, tx, ty);
-    if (qd)
-      canvas.add(
-        new FabricPath(qd, {
-          fill: "rgba(210,30,160,0.30)",
-          stroke: "rgba(210,30,160,0.85)",
-          strokeWidth: 0.75,
-          selectable: false,
-        }),
-      );
-  }
 
   // Original skeleton (faint) and deformed skeleton (orange).
   canvas.add(
@@ -473,7 +457,6 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
 
     // --- 3. Faithful bezier outline + visualization. ---
     const warped = applyDeform(rig, edit.skeleton);
-    const quads = buildStitchQuads(rig, warped);
     const unstitched = unionDeformedPrimitives(warped);
     const outline = deformOutline(fitted, edit.skeleton);
     check("deformed outline produced", outline !== null, "");
@@ -507,7 +490,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
 
       const original = unionDeformedPrimitives(fitted.primitives);
       if (original) {
-        renderDeform(label, fitted, edit, original, outline, boneLinks(rig), quads);
+        renderDeform(label, fitted, edit, original, outline, boneLinks(rig));
         original.remove();
       }
       unstitched?.remove();
