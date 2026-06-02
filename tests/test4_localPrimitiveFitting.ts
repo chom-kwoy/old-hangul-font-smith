@@ -7,6 +7,7 @@
  */
 import paper from "paper";
 
+import { sampleBoundary } from "@/app/pathUtils/flatBoundary";
 import { localPrimitiveFitting } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
@@ -14,7 +15,6 @@ import {
   check,
   coverageFraction,
   finish,
-  getBoundarySamples,
   measure,
   suite,
   svgToCompoundPaths,
@@ -67,7 +67,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     );
 
     // Coverage: union of primitives covers ≥ 50% of boundary samples
-    const samples = getBoundarySamples(path);
+    const samples = sampleBoundary(path, { step: 10 }).points;
     const cov = coverageFraction(samples, fitted!.primitives);
     check("coverage ≥ 50%", cov >= 0.5, `${(cov * 100).toFixed(1)}%`);
   }

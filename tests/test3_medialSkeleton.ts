@@ -6,13 +6,15 @@
  */
 import paper from "paper";
 
-import { nearestDistFlatBoundary } from "@/app/pathUtils/flatBoundary";
+import {
+  buildFlatBoundary,
+  nearestDistFlatBoundary,
+} from "@/app/pathUtils/flatBoundary";
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
 import {
   check,
   finish,
-  getFlatBoundary,
   measure,
   suite,
   svgToCompoundPaths,
@@ -28,7 +30,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     suite(`constructMedialSkeleton — ${label}`);
 
     const axis = extractMedialAxis(path);
-    const flatBoundary = getFlatBoundary(path);
+    const flatBoundary = buildFlatBoundary(path);
 
     // Pick uniformly-spaced seeds from medial axis points
     const nSeeds = Math.min(5, Math.max(2, Math.floor(axis.points.length / 5)));

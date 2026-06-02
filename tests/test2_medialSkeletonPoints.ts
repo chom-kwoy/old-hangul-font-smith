@@ -6,15 +6,17 @@
  */
 import paper from "paper";
 
-import { nearestDistFlatBoundary } from "@/app/pathUtils/flatBoundary";
+import {
+  buildFlatBoundary,
+  nearestDistFlatBoundary,
+  sampleBoundary,
+} from "@/app/pathUtils/flatBoundary";
 import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import {
   check,
   checkApprox,
   finish,
-  getFlatBoundary,
-  getBoundarySamples,
   measure,
   suite,
   svgToCompoundPaths,
@@ -30,7 +32,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     suite(`computeMedialSkeletonPoints — ${label}`);
 
     const axis = extractMedialAxis(path);
-    const flatBoundary = getFlatBoundary(path);
+    const flatBoundary = buildFlatBoundary(path);
 
     let seeds: paper.Point[] = [];
     const { ms } = measure("optimization", () => {
@@ -57,7 +59,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     checkApprox("seed count is reasonable", seeds.length, 1, 50);
 
     // Coverage: fraction of boundary samples that are within 3× inscribed radius of nearest seed
-    const samples = getBoundarySamples(path);
+    const samples = sampleBoundary(path, { step: 10 }).points;
     let covered = 0;
     for (const s of samples) {
       let minDist = Infinity, bestSeed = seeds[0];

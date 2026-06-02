@@ -5,10 +5,6 @@ import { DOMParser } from "@xmldom/xmldom";
 import paper from "paper";
 
 import {
-  buildFlatBoundary,
-  sampleBoundary,
-} from "@/app/pathUtils/flatBoundary";
-import {
   Primitive,
   primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
@@ -99,18 +95,6 @@ export function finish() {
       (_failures > 0 ? `  (${_failures} failed)` : ""),
   );
   if (_failures > 0) process.exit(1);
-}
-
-// ---------------------------------------------------------------------------
-// Shared path helpers
-// ---------------------------------------------------------------------------
-
-export function getBoundarySamples(path: paper.CompoundPath): paper.Point[] {
-  return sampleBoundary(path, { step: 10 }).points;
-}
-
-export function getFlatBoundary(path: paper.CompoundPath) {
-  return buildFlatBoundary(path);
 }
 
 /** Count boundary samples covered by any primitive boundary polygon. */

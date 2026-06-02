@@ -20,7 +20,11 @@ import {
 import * as fs from "node:fs";
 import paper from "paper";
 
-import { nearestDistFlatBoundary } from "@/app/pathUtils/flatBoundary";
+import {
+  buildFlatBoundary,
+  nearestDistFlatBoundary,
+  sampleBoundary,
+} from "@/app/pathUtils/flatBoundary";
 import { evalBezier } from "@/app/pathUtils/skeleton/bezierFitting";
 import {
   FittedMedialAxisGraph,
@@ -43,8 +47,6 @@ import {
   check,
   coverageFraction,
   finish,
-  getBoundarySamples,
-  getFlatBoundary,
   suite,
   svgToCompoundPaths,
 } from "./testUtils";
@@ -348,8 +350,8 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     suite(`full pipeline — ${label}`);
 
     const axis = extractMedialAxis(path);
-    const flatBoundary = getFlatBoundary(path);
-    const samples = getBoundarySamples(path);
+    const flatBoundary = buildFlatBoundary(path);
+    const samples = sampleBoundary(path, { step: 10 }).points;
 
     let totalNmEvals = 0;
     const iterCallback: SkeletonIterCallback = (
