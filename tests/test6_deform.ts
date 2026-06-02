@@ -4,11 +4,18 @@
  * For each test glyph:
  *   1) run the skeleton pipeline → FittedMedialAxisGraph (S + capsules C)
  *   2) identity warp deform(S, S, C) must reproduce the original primitives
- *      (anchors + handles bit-close) and outline area
- *   3) a sample edit S' (translate an interior vertex, bend an edge's control
- *      points) must keep shared boundaries coincident (no gap/overlap) and
- *      produce a closed, non-degenerate bezier outline
+ *      (anchors + handles bit-close)
+ *   3) a random edit S' (move one random skeleton vertex in a random direction
+ *      by 10–100px, seeded per-glyph) must keep shared boundaries coincident
+ *      (no gap/overlap) and produce a closed, non-degenerate bezier outline;
+ *      the original vs deformed outline is rendered to test_outputs/deform_*.png
  */
+import {
+  Circle as FabricCircle,
+  Line as FabricLine,
+  Path as FabricPath,
+  StaticCanvas,
+} from "fabric/node";
 import * as fs from "node:fs";
 import paper from "paper";
 
@@ -17,6 +24,7 @@ import {
   applyDeform,
   buildDeformRig,
   deformOutline,
+  unionDeformedPrimitives,
 } from "@/app/pathUtils/skeleton/deform";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { skeletonizePath } from "@/app/pathUtils/skeleton/skeleton";
@@ -56,27 +64,216 @@ function maxPathDeviation(a: paper.PathItem, b: paper.PathItem): number {
   return max;
 }
 
-/** Edit the skeleton: translate one interior (degree ≥ 2) vertex by (dx,dy),
- *  and bend the first edge by nudging its control points. Topology unchanged. */
-function makeEdit(fitted: FittedMedialAxisGraph): DeformedSkeleton {
+/** Deterministic PRNG (mulberry32) so the "random" edit is reproducible. */
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashSeed(label: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < label.length; i++) {
+    h = Math.imul(h ^ label.charCodeAt(i), 16777619);
+  }
+  return h >>> 0;
+}
+
+type RandomEdit = {
+  skeleton: DeformedSkeleton;
+  movedIdx: number;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+};
+
+/** Move one random skeleton vertex in a random direction by 10–100 px. */
+function randomEdit(
+  fitted: FittedMedialAxisGraph,
+  rng: () => number,
+): RandomEdit {
   const points = fitted.points.map((p) => ({ x: p.x, y: p.y }));
   const controlPoints = fitted.controlPoints?.map(
     ([c1, c2]) => [{ x: c1.x, y: c1.y }, { x: c2.x, y: c2.y }] as [typeof c1, typeof c2],
   );
-  const deg = new Int32Array(fitted.points.length);
-  for (const [u, v] of fitted.segments) { deg[u]++; deg[v]++; }
-  // Translate the first degree-≥2 vertex (fall back to vertex 0).
-  let target = 0;
-  for (let i = 0; i < deg.length; i++) if (deg[i] >= 2) { target = i; break; }
-  points[target] = { x: points[target].x + 18, y: points[target].y - 12 };
-  // Bend edge 0's control points if present.
-  if (controlPoints && controlPoints.length > 0) {
-    controlPoints[0] = [
-      { x: controlPoints[0][0].x + 10, y: controlPoints[0][0].y + 6 },
-      { x: controlPoints[0][1].x - 6, y: controlPoints[0][1].y + 10 },
-    ];
+  const movedIdx = Math.floor(rng() * points.length);
+  const angle = rng() * 2 * Math.PI;
+  const dist = 10 + rng() * 90;
+  const from = { ...points[movedIdx] };
+  const to = {
+    x: from.x + Math.cos(angle) * dist,
+    y: from.y + Math.sin(angle) * dist,
+  };
+  points[movedIdx] = to;
+  return { skeleton: { points, controlPoints }, movedIdx, from, to };
+}
+
+// --- Visualization --------------------------------------------------------
+
+function svgFromPathItem(
+  item: paper.PathItem,
+  tx: (x: number) => number,
+  ty: (y: number) => number,
+): string {
+  // Build SVG manually so we can apply the viewport transform per anchor.
+  const clone = item.clone({ insert: false });
+  const rings =
+    clone instanceof paper.CompoundPath
+      ? (clone.children as paper.Path[])
+      : [clone as paper.Path];
+  const cmds: string[] = [];
+  for (const ring of rings) {
+    const segs = ring.segments;
+    if (segs.length === 0) continue;
+    cmds.push(`M ${tx(segs[0].point.x)} ${ty(segs[0].point.y)}`);
+    for (let i = 1; i <= segs.length; i++) {
+      const prev = segs[i - 1];
+      const cur = segs[i % segs.length];
+      if (i === segs.length && !ring.closed) break;
+      const c1 = prev.point.add(prev.handleOut);
+      const c2 = cur.point.add(cur.handleIn);
+      cmds.push(
+        `C ${tx(c1.x)} ${ty(c1.y)} ${tx(c2.x)} ${ty(c2.y)} ${tx(cur.point.x)} ${ty(cur.point.y)}`,
+      );
+    }
+    if (ring.closed) cmds.push("Z");
   }
-  return { points, controlPoints };
+  clone.remove();
+  return cmds.join(" ");
+}
+
+function edgePathData(
+  pts: { x: number; y: number }[],
+  cps: [{ x: number; y: number }, { x: number; y: number }][] | undefined,
+  segments: [number, number][],
+  tx: (x: number) => number,
+  ty: (y: number) => number,
+): string {
+  const cmds: string[] = [];
+  for (let e = 0; e < segments.length; e++) {
+    const [u, v] = segments[e];
+    const a = pts[u], b = pts[v];
+    const cp = cps?.[e];
+    cmds.push(`M ${tx(a.x)} ${ty(a.y)}`);
+    if (cp) {
+      cmds.push(
+        `C ${tx(cp[0].x)} ${ty(cp[0].y)} ${tx(cp[1].x)} ${ty(cp[1].y)} ${tx(b.x)} ${ty(b.y)}`,
+      );
+    } else {
+      cmds.push(`L ${tx(b.x)} ${ty(b.y)}`);
+    }
+  }
+  return cmds.join(" ");
+}
+
+/** Render original (faint) vs deformed (solid) outline + skeleton + the move. */
+function renderDeform(
+  label: string,
+  fitted: FittedMedialAxisGraph,
+  edit: RandomEdit,
+  original: paper.PathItem,
+  deformed: paper.PathItem,
+): void {
+  const SIZE = 1000;
+  const PAD = 60;
+
+  // Viewport fits both original and deformed bounds so nothing is clipped.
+  const bb = original.bounds.unite(deformed.bounds);
+  const scl = Math.min((SIZE - 2 * PAD) / bb.width, (SIZE - 2 * PAD) / bb.height);
+  const ox = PAD + (SIZE - 2 * PAD - bb.width * scl) / 2 - bb.x * scl;
+  const oy = PAD + (SIZE - 2 * PAD - bb.height * scl) / 2 - bb.y * scl;
+  const tx = (x: number) => x * scl + ox;
+  const ty = (y: number) => y * scl + oy;
+
+  const dpi = 2;
+  const canvas = new StaticCanvas("null", {
+    width: SIZE * dpi,
+    height: SIZE * dpi,
+    backgroundColor: "white",
+  });
+  canvas.setZoom(dpi);
+
+  // Original outline — faint gray fill.
+  const od = svgFromPathItem(original, tx, ty);
+  if (od)
+    canvas.add(
+      new FabricPath(od, {
+        fill: "rgba(0,0,0,0.08)",
+        stroke: "rgba(0,0,0,0.35)",
+        strokeWidth: 1,
+        fillRule: "evenodd",
+        selectable: false,
+      }),
+    );
+
+  // Deformed outline — solid blue.
+  const dd = svgFromPathItem(deformed, tx, ty);
+  if (dd)
+    canvas.add(
+      new FabricPath(dd, {
+        fill: "rgba(40,110,210,0.18)",
+        stroke: "rgba(40,110,210,0.95)",
+        strokeWidth: 2,
+        fillRule: "evenodd",
+        selectable: false,
+      }),
+    );
+
+  // Original skeleton (faint) and deformed skeleton (orange).
+  canvas.add(
+    new FabricPath(
+      edgePathData(fitted.points, fitted.controlPoints, fitted.segments, tx, ty),
+      { fill: "", stroke: "rgba(0,0,0,0.25)", strokeWidth: 1, selectable: false },
+    ),
+  );
+  canvas.add(
+    new FabricPath(
+      edgePathData(
+        edit.skeleton.points,
+        edit.skeleton.controlPoints,
+        fitted.segments,
+        tx,
+        ty,
+      ),
+      { fill: "", stroke: "rgba(230,130,0,0.95)", strokeWidth: 1.5, selectable: false },
+    ),
+  );
+
+  // The moved vertex: from (hollow) → to (filled) with a connecting line.
+  canvas.add(
+    new FabricLine([tx(edit.from.x), ty(edit.from.y), tx(edit.to.x), ty(edit.to.y)], {
+      stroke: "rgba(220,30,30,0.9)",
+      strokeWidth: 1.5,
+      selectable: false,
+    }),
+  );
+  canvas.add(
+    new FabricCircle({
+      left: tx(edit.from.x), top: ty(edit.from.y), radius: 4,
+      fill: "", stroke: "rgba(0,0,0,0.5)", strokeWidth: 1.5,
+      originX: "center", originY: "center", selectable: false,
+    }),
+  );
+  canvas.add(
+    new FabricCircle({
+      left: tx(edit.to.x), top: ty(edit.to.y), radius: 4,
+      fill: "rgba(220,30,30,0.95)",
+      originX: "center", originY: "center", selectable: false,
+    }),
+  );
+
+  canvas.renderAll();
+  const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
+  const outPath = `test_outputs/deform_${safeName}.png`;
+  type NodeCanvas = { toBuffer(type: string): Buffer };
+  const buf = (canvas as unknown as { getNodeCanvas(): NodeCanvas })
+    .getNodeCanvas()
+    .toBuffer("image/png");
+  fs.writeFileSync(outPath, buf);
+  console.log(`  → saved ${outPath}`);
 }
 
 for (const [name, svg] of Object.entries(TEST_PATHS)) {
@@ -116,10 +313,14 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       `max deviation ${maxDev.toExponential(2)}`,
     );
 
-    // --- 2. Shared boundaries coincide before and after a deformation. ---
+    // --- 2. Random deformation: move one skeleton vertex 10–100px. ---
+    // Seeded per-glyph so the "random" move is reproducible across runs.
+    const rng = mulberry32(hashSeed(label));
+    const edit = randomEdit(fitted, rng);
+    const moveDist = Math.hypot(edit.to.x - edit.from.x, edit.to.y - edit.from.y);
+
     const baseGap = analyzeSharedBoundaries(fitted.primitives).maxGap;
-    const edit = makeEdit(fitted);
-    const warped = applyDeform(rig, edit);
+    const warped = applyDeform(rig, edit.skeleton);
     const editGap = analyzeSharedBoundaries(warped).maxGap;
     check(
       "shared boundaries coincident on original (≤1e-6)",
@@ -129,23 +330,29 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     check(
       "shared boundaries stay coincident after deform (≤1e-6)",
       editGap <= 1e-6,
-      `${editGap.toExponential(2)}`,
+      `moved v${edit.movedIdx} by ${moveDist.toFixed(0)}px → gap ${editGap.toExponential(2)}`,
     );
 
-    // --- 3. Faithful bezier outline. ---
-    const outline = deformOutline(fitted, edit);
+    // --- 3. Faithful bezier outline + visualization. ---
+    const outline = deformOutline(fitted, edit.skeleton);
     check("deformed outline produced", outline !== null, "");
     if (outline) {
-      const area = Math.abs(
-        (outline instanceof paper.CompoundPath
-          ? (outline.children as paper.Path[]).reduce((s, c) => s + (c as paper.Path).area, 0)
-          : (outline as paper.Path).area),
-      );
+      const rings =
+        outline instanceof paper.CompoundPath
+          ? (outline.children as paper.Path[])
+          : [outline as paper.Path];
+      const area = Math.abs(rings.reduce((s, c) => s + c.area, 0));
       check("deformed outline has non-trivial area", area > 1, `area ${area.toFixed(0)}`);
       let hasCurve = false;
-      const rings = outline instanceof paper.CompoundPath ? (outline.children as paper.Path[]) : [outline as paper.Path];
       for (const r of rings) for (const c of r.curves) if (!c.isStraight()) { hasCurve = true; break; }
       check("deformed outline is bezier (has curves)", hasCurve, "");
+
+      const original = unionDeformedPrimitives(fitted.primitives);
+      if (original) {
+        renderDeform(label, fitted, edit, original, outline);
+        original.remove();
+      }
+      outline.remove();
     }
   }
 }
