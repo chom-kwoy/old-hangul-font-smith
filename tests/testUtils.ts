@@ -8,10 +8,24 @@ import {
   buildFlatBoundary,
   sampleBoundary,
 } from "@/app/pathUtils/flatBoundary";
+import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
 import {
+  FittedMedialAxisGraph,
   Primitive,
+  localPrimitiveFitting,
   primitivePolygon,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
+import {
+  SkeletonIterCallback,
+  computeMedialSkeletonPoints,
+} from "@/app/pathUtils/skeleton/medialSkeletonPoints";
+import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
+import {
+  clipPrimitivesToShape,
+  removeRedundantLeafEdges,
+} from "@/app/pathUtils/skeleton/skeleton";
+import { clipPrimitivesToVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
 import * as testPaths from "@/app/testpage/testPaths";
 import { initDrawContexts } from "@/app/utils/init";
 
@@ -168,4 +182,101 @@ function primCovers(
       return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Full skeleton pipeline (shared by test5 / test6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs the complete skeleton → fitted-glyph pipeline:
+ *   extractMedialAxis → computeMedialSkeletonPoints → constructMedialSkeleton
+ *     → [simplifyMedialSkeleton] → localPrimitiveFitting → removeRedundantLeafEdges
+ *     → clipPrimitivesToShape → clipPrimitivesToVoronoiCells
+ *
+ * `simplify` (default true) toggles the contraction pass; `onIteration` forwards
+ * the Nelder-Mead iteration callback (used by test5 to log NM eval counts).
+ */
+export function buildFittedGlyph(
+  path: paper.CompoundPath,
+  opts: { simplify?: boolean; onIteration?: SkeletonIterCallback } = {},
+): FittedMedialAxisGraph {
+  const simplify = opts.simplify ?? true;
+  const axis = extractMedialAxis(path);
+  const seeds = computeMedialSkeletonPoints(path, axis, false, opts.onIteration);
+  const skeleton = constructMedialSkeleton(seeds, axis, path, true);
+  const simplified = simplify
+    ? simplifyMedialSkeleton(skeleton, axis, path)
+    : skeleton;
+  const fitted = localPrimitiveFitting(path, simplified);
+  removeRedundantLeafEdges(fitted);
+  clipPrimitivesToShape(fitted, path);
+  clipPrimitivesToVoronoiCells(fitted, path.bounds);
+  return fitted;
+}
+
+// ---------------------------------------------------------------------------
+// Voronoi shared-boundary coincidence (shared by test5 / test6)
+// ---------------------------------------------------------------------------
+
+/**
+ * For every curve tagged `shared:n`, a neighbour `n` must carry the exact
+ * reversed segment. Returns the largest endpoint mismatch found (`maxGap`) and,
+ * keyed by source edge (`prim.elementIdx`), how many of its shared segments lack
+ * a mirror within `tol`. `unmatchedByEdge.size === 0` ⇔ every shared boundary
+ * coincides within `tol`.
+ */
+export function analyzeSharedBoundaries(
+  primitives: Primitive[],
+  tol = 1e-6,
+): { maxGap: number; unmatchedByEdge: Map<number, number> } {
+  type Seg = { primIdx: number; x1: number; y1: number; x2: number; y2: number };
+  const byPair = new Map<string, Seg[]>();
+  for (let pi = 0; pi < primitives.length; pi++) {
+    const p = primitives[pi];
+    if (!p.clippedPath || !p.boundaryTags) continue;
+    const curves = (p.clippedPath as paper.Path).curves;
+    for (let ci = 0; ci < p.boundaryTags.length; ci++) {
+      const tag = p.boundaryTags[ci];
+      if (tag.kind !== "shared") continue;
+      const c = curves[ci];
+      const key =
+        pi < tag.neighbour ? `${pi}-${tag.neighbour}` : `${tag.neighbour}-${pi}`;
+      if (!byPair.has(key)) byPair.set(key, []);
+      byPair.get(key)!.push({
+        primIdx: pi,
+        x1: c.point1.x,
+        y1: c.point1.y,
+        x2: c.point2.x,
+        y2: c.point2.y,
+      });
+    }
+  }
+
+  let maxGap = 0;
+  const unmatchedByEdge = new Map<number, number>();
+  for (const segs of byPair.values()) {
+    for (const s of segs) {
+      let best = Infinity;
+      for (const o of segs) {
+        if (o.primIdx === s.primIdx) continue;
+        best = Math.min(
+          best,
+          Math.max(
+            Math.abs(o.x1 - s.x2),
+            Math.abs(o.y1 - s.y2),
+            Math.abs(o.x2 - s.x1),
+            Math.abs(o.y2 - s.y1),
+          ),
+        );
+      }
+      if (best === Infinity) continue; // no neighbour segment at all — count below
+      maxGap = Math.max(maxGap, best);
+      if (best > tol) {
+        const edge = primitives[s.primIdx].elementIdx;
+        unmatchedByEdge.set(edge, (unmatchedByEdge.get(edge) ?? 0) + 1);
+      }
+    }
+  }
+  return { maxGap, unmatchedByEdge };
 }

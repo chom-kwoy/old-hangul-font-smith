@@ -18,23 +18,12 @@ import {
   buildDeformRig,
   deformOutline,
 } from "@/app/pathUtils/skeleton/deform";
-import {
-  FittedMedialAxisGraph,
-  Primitive,
-} from "@/app/pathUtils/skeleton/localPrimitiveFitting";
-import { extractMedialAxis } from "@/app/pathUtils/skeleton/medialAxis";
-import { computeMedialSkeletonPoints } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
-import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
-import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
-import { localPrimitiveFitting } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
-import {
-  clipPrimitivesToShape,
-  removeRedundantLeafEdges,
-} from "@/app/pathUtils/skeleton/skeleton";
-import { clipPrimitivesToVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
+import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 
 import {
   TEST_PATHS,
+  analyzeSharedBoundaries,
+  buildFittedGlyph,
   check,
   finish,
   suite,
@@ -42,18 +31,6 @@ import {
 } from "./testUtils";
 
 fs.mkdirSync("test_outputs", { recursive: true });
-
-function buildFitted(path: paper.CompoundPath): FittedMedialAxisGraph {
-  const axis = extractMedialAxis(path);
-  const seeds = computeMedialSkeletonPoints(path, axis, false);
-  const skeleton = constructMedialSkeleton(seeds, axis, path, true);
-  const simplified = simplifyMedialSkeleton(skeleton, axis, path);
-  const fitted = localPrimitiveFitting(path, simplified);
-  removeRedundantLeafEdges(fitted);
-  clipPrimitivesToShape(fitted, path);
-  clipPrimitivesToVoronoiCells(fitted, path.bounds);
-  return fitted;
-}
 
 /** Max anchor+handle deviation between two primitives' clippedPaths. */
 function maxPathDeviation(a: paper.PathItem, b: paper.PathItem): number {
@@ -77,46 +54,6 @@ function maxPathDeviation(a: paper.PathItem, b: paper.PathItem): number {
     }
   }
   return max;
-}
-
-/** Reuse test5's shared-boundary coincidence check on a set of primitives. */
-function maxUnmatchedSharedGap(primitives: Primitive[]): number {
-  type Seg = { pi: number; x1: number; y1: number; x2: number; y2: number };
-  const byPair = new Map<string, Seg[]>();
-  for (let pi = 0; pi < primitives.length; pi++) {
-    const p = primitives[pi];
-    if (!p.clippedPath || !p.boundaryTags) continue;
-    const path = p.clippedPath as paper.Path;
-    const curves = path.curves;
-    for (let ci = 0; ci < p.boundaryTags.length; ci++) {
-      const tag = p.boundaryTags[ci];
-      if (tag.kind !== "shared") continue;
-      const c = curves[ci];
-      const key = pi < tag.neighbour ? `${pi}-${tag.neighbour}` : `${tag.neighbour}-${pi}`;
-      if (!byPair.has(key)) byPair.set(key, []);
-      byPair.get(key)!.push({
-        pi, x1: c.point1.x, y1: c.point1.y, x2: c.point2.x, y2: c.point2.y,
-      });
-    }
-  }
-  let maxGap = 0;
-  for (const segs of byPair.values()) {
-    for (const s of segs) {
-      let best = Infinity;
-      for (const o of segs) {
-        if (o.pi === s.pi) continue;
-        best = Math.min(
-          best,
-          Math.max(
-            Math.abs(o.x1 - s.x2), Math.abs(o.y1 - s.y2),
-            Math.abs(o.x2 - s.x1), Math.abs(o.y2 - s.y1),
-          ),
-        );
-      }
-      if (best !== Infinity) maxGap = Math.max(maxGap, best);
-    }
-  }
-  return maxGap;
 }
 
 /** Edit the skeleton: translate one interior (degree ≥ 2) vertex by (dx,dy),
@@ -152,7 +89,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     let fitted: FittedMedialAxisGraph | null = null;
     let error: unknown = null;
     try {
-      fitted = buildFitted(path);
+      fitted = buildFittedGlyph(path);
     } catch (e) {
       error = e;
     }
@@ -180,10 +117,10 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     );
 
     // --- 2. Shared boundaries coincide before and after a deformation. ---
-    const baseGap = maxUnmatchedSharedGap(fitted.primitives);
+    const baseGap = analyzeSharedBoundaries(fitted.primitives).maxGap;
     const edit = makeEdit(fitted);
     const warped = applyDeform(rig, edit);
-    const editGap = maxUnmatchedSharedGap(warped);
+    const editGap = analyzeSharedBoundaries(warped).maxGap;
     check(
       "shared boundaries coincident on original (≤1e-6)",
       baseGap <= 1e-6,

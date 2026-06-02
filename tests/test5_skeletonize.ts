@@ -24,31 +24,22 @@ import { nearestDistFlatBoundary } from "@/app/pathUtils/flatBoundary";
 import { evalBezier } from "@/app/pathUtils/skeleton/bezierFitting";
 import {
   FittedMedialAxisGraph,
-  localPrimitiveFitting,
   primitivePath,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import {
   MedialAxisGraph,
   extractMedialAxis,
 } from "@/app/pathUtils/skeleton/medialAxis";
-import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
-import { coverageAndUncovered } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
 import {
   SkeletonIterCallback,
-  computeMedialSkeletonPoints,
+  coverageAndUncovered,
 } from "@/app/pathUtils/skeleton/medialSkeletonPoints";
-import { simplifyMedialSkeleton } from "@/app/pathUtils/skeleton/simplifyMedialSkeleton";
-import {
-  clipPrimitivesToShape,
-  removeRedundantLeafEdges,
-} from "@/app/pathUtils/skeleton/skeleton";
-import {
-  clipPrimitivesToVoronoiCells,
-  computePrimitiveVoronoiCells,
-} from "@/app/pathUtils/skeleton/voronoiClip";
+import { computePrimitiveVoronoiCells } from "@/app/pathUtils/skeleton/voronoiClip";
 
 import {
   TEST_PATHS,
+  analyzeSharedBoundaries,
+  buildFittedGlyph,
   check,
   coverageFraction,
   finish,
@@ -376,20 +367,10 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     let error: unknown = null;
     const t0 = Date.now();
     try {
-      const seeds = computeMedialSkeletonPoints(
-        path,
-        axis,
-        false,
-        iterCallback,
-      );
-      const skeleton = constructMedialSkeleton(seeds, axis, path, true);
-      const simplifiedSkeleton = SIMPLIFY_ENABLED
-        ? simplifyMedialSkeleton(skeleton, axis, path)
-        : skeleton;
-      fitted = localPrimitiveFitting(path, simplifiedSkeleton);
-      removeRedundantLeafEdges(fitted);
-      clipPrimitivesToShape(fitted, path);
-      clipPrimitivesToVoronoiCells(fitted, path.bounds);
+      fitted = buildFittedGlyph(path, {
+        simplify: SIMPLIFY_ENABLED,
+        onIteration: iterCallback,
+      });
     } catch (e) {
       error = e;
     }
@@ -506,73 +487,17 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       }
       check("boundaryTags parallel to clippedPath curves", tagParityOk, "");
 
-      // 3. Shared boundary coincidence: a curve tagged shared:n in primitive p
-      // must have a matching reversed-endpoint curve tagged shared:(p's index)
-      // in primitive n, at the same coordinates. Matching uses a 1e-6 tolerance:
-      // capsule-subtract derives the bisector via a subtract on one side and the
-      // CLAIMED intersect on the other, so endpoints coincide only to paper.js
-      // boolean round-off — ~1e-13 for short segments, growing to ~1e-8 for
-      // long ones (round-off scales with coordinate magnitude). 1e-6 em is
-      // ~1000× below sub-pixel — no hairline is possible at that scale.
-      type SharedSeg = {
-        primIdx: number;
-        x1: number;
-        y1: number;
-        x2: number;
-        y2: number;
-      };
-      const sharedCurves = new Map<string, SharedSeg[]>();
-      for (let pi = 0; pi < fitted.primitives.length; pi++) {
-        const p = fitted.primitives[pi];
-        if (!p.clippedPath || !p.boundaryTags) continue;
-        const curves = (p.clippedPath as paper.Path).curves;
-        for (let ci = 0; ci < p.boundaryTags.length; ci++) {
-          const tag = p.boundaryTags[ci];
-          if (tag.kind !== "shared") continue;
-          const c = curves[ci];
-          // key by unordered primitive pair
-          const key =
-            pi < tag.neighbour
-              ? `${pi}-${tag.neighbour}`
-              : `${tag.neighbour}-${pi}`;
-          if (!sharedCurves.has(key)) sharedCurves.set(key, []);
-          sharedCurves.get(key)!.push({
-            primIdx: pi,
-            x1: c.point1.x,
-            y1: c.point1.y,
-            x2: c.point2.x,
-            y2: c.point2.y,
-          });
-        }
-      }
-      // Count unmatched segments per source primitive (→ its edge number).
-      const SHARED_TOL = 1e-6;
-      const unmatchedByEdge = new Map<number, number>();
-      for (const segs of sharedCurves.values()) {
-        for (const s of segs) {
-          const hasMatch = segs.some(
-            (o) =>
-              Math.abs(o.x1 - s.x2) < SHARED_TOL &&
-              Math.abs(o.y1 - s.y2) < SHARED_TOL &&
-              Math.abs(o.x2 - s.x1) < SHARED_TOL &&
-              Math.abs(o.y2 - s.y1) < SHARED_TOL,
-          );
-          if (!hasMatch) {
-            const edgeNum = fitted.primitives[s.primIdx].elementIdx;
-            unmatchedByEdge.set(
-              edgeNum,
-              (unmatchedByEdge.get(edgeNum) ?? 0) + 1,
-            );
-          }
-        }
-      }
-      const sharedExact = unmatchedByEdge.size === 0;
+      // 3. Shared boundary coincidence: every curve tagged shared:n must have a
+      // matching reversed-endpoint curve in neighbour n, within 1e-6. Endpoints
+      // coincide only to paper.js boolean round-off (~1e-13 short, ~1e-8 long),
+      // far below sub-pixel — no hairline is possible at that scale.
+      const { unmatchedByEdge } = analyzeSharedBoundaries(fitted.primitives, 1e-6);
       const unmatchedDetail = [...unmatchedByEdge.entries()]
         .map(([edge, n]) => `edge ${edge}: ${n} seg(s)`)
         .join(", ");
       check(
         "shared boundaries coincide between neighbours (≤1e-6)",
-        sharedExact,
+        unmatchedByEdge.size === 0,
         unmatchedDetail,
       );
 
