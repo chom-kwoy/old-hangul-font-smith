@@ -265,6 +265,44 @@ function renderDeform(
     }),
   );
 
+  // Deformed outline anchors (green) + control points (purple), with a dashed
+  // handle line from each anchor to its in/out control point.
+  const dRings =
+    deformed instanceof paper.CompoundPath
+      ? (deformed.children as paper.Path[])
+      : [deformed as paper.Path];
+  for (const ring of dRings) {
+    for (const seg of ring.segments) {
+      const p = seg.point;
+      for (const h of [seg.handleIn, seg.handleOut]) {
+        if (Math.hypot(h.x, h.y) < 1e-9) continue; // straight side — no handle
+        const cx = p.x + h.x, cy = p.y + h.y;
+        canvas.add(
+          new FabricLine([tx(p.x), ty(p.y), tx(cx), ty(cy)], {
+            stroke: "rgba(150,40,200,0.7)",
+            strokeWidth: 1,
+            strokeDashArray: [3, 2],
+            selectable: false,
+          }),
+        );
+        canvas.add(
+          new FabricCircle({
+            left: tx(cx), top: ty(cy), radius: 2,
+            fill: "rgba(150,40,200,0.95)",
+            originX: "center", originY: "center", selectable: false,
+          }),
+        );
+      }
+      canvas.add(
+        new FabricCircle({
+          left: tx(p.x), top: ty(p.y), radius: 2.5,
+          fill: "rgba(20,150,60,0.95)",
+          originX: "center", originY: "center", selectable: false,
+        }),
+      );
+    }
+  }
+
   canvas.renderAll();
   const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
   const outPath = `test_outputs/deform_${safeName}.png`;
