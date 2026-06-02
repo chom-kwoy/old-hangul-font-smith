@@ -26,9 +26,10 @@ import { Vec2D } from "@/app/utils/types";
  *     follows the edge normal — interior feet have a≈0);
  *   - handles are stored polar (length + angle relative to τ) and rotate with
  *     the deformed tangent;
- *   - vertices shared between neighbouring capsules (from boundaryTags) are
- *     placed at the average of every sharing edge's warp, so the shared boundary
- *     stays coincident — no gap, no overlap.
+ *   - a boundary shared between neighbouring capsules (from boundaryTags) is
+ *     warped independently on each side by that capsule's own frame (full stroke
+ *     width preserved), and the seam strip between the two diverged sides is
+ *     stitched shut with quads — see `buildStitchQuads`.
  *
  * Identity (S' = S) reproduces the original outline exactly.
  */
@@ -43,16 +44,17 @@ export type DeformedSkeleton = Pick<
 
 type AnchorMember = { edge: number; t: number; a: number; b: number };
 
-type PointEnc =
-  | { kind: "single"; m: AnchorMember }
-  | { kind: "shared"; members: AnchorMember[] };
-
 // Polar handle relative to the owning edge's tangent at the anchor's foot.
 // null when the handle is zero (straight segment).
 type HandleEnc = { edge: number; t: number; dist: number; angle: number } | null;
 
 type SegEnc = {
-  point: PointEnc;
+  // Own-edge encoding: the anchor is warped by this capsule's own bone frame.
+  point: AnchorMember;
+  // True when the anchor lies on a shared seam (endpoint of a `shared:n` curve).
+  // Such anchors diverge from the neighbour under deformation; the seam is
+  // closed by stitch quads rather than by averaging the two sides.
+  shared: boolean;
   handleIn: HandleEnc;
   handleOut: HandleEnc;
 };
@@ -69,11 +71,29 @@ type RigPrimitive = {
   closed: boolean[];
 };
 
+/**
+ * One shared-boundary curve of capsule A together with the matching mirror
+ * anchors of neighbour B, by (ring, segment) index into each primitive's warped
+ * clippedPath. After deformation the seam strip A0'→B0'→B1'→A1' is filled.
+ */
+type StitchLink = {
+  aPrim: number;
+  aRing: number;
+  aSeg0: number;
+  aSeg1: number;
+  bPrim: number;
+  bRing0: number;
+  bSeg0: number;
+  bRing1: number;
+  bSeg1: number;
+};
+
 export type DeformRig = {
   segments: [number, number][];
   points: Vec2D[];
   controlPoints?: [Vec2D, Vec2D][];
   primitives: RigPrimitive[];
+  stitches: StitchLink[];
 };
 
 // --- Bone frame helpers ---------------------------------------------------
@@ -182,51 +202,89 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
     return { edge, t, dist, angle: Math.atan2(cross, dot) };
   };
 
+  // Per-primitive anchor index: snapped coord → (ring, segment) into its
+  // clippedPath. Lets a primitive's shared curve find the neighbour's mirror
+  // anchors for stitching.
+  const anchorIndex: Map<string, { ring: number; seg: number }>[] = [];
+
   const rigPrims: RigPrimitive[] = fitted.primitives.map((prim) => {
+    const index = new Map<string, { ring: number; seg: number }>();
+    anchorIndex.push(index);
     if (prim.type !== "edge" || !prim.clippedPath) {
       return { prim, rings: [], closed: [] };
     }
     const ownEdge = prim.elementIdx;
     const rings: SegEnc[][] = [];
     const closed: boolean[] = [];
+    let r = 0;
     for (const ring of ringsOf(prim.clippedPath)) {
       const segEncs: SegEnc[] = [];
       let prevT = 0;
+      let s = 0;
       for (const seg of ring.segments) {
         const q = seg.point;
         const own = encodeAnchor(q, ownEdge, prevT);
         prevT = own.t;
 
         const key = coordKey(q.x, q.y);
+        index.set(key, { ring: r, seg: s });
         const sharers = sharedAt.get(key);
-        let point: PointEnc;
-        if (sharers && sharers.size >= 2) {
-          const members: AnchorMember[] = [];
-          for (const spi of sharers) {
-            const e = fitted.primitives[spi].elementIdx;
-            members.push(e === ownEdge ? own : encodeAnchor(q, e));
-          }
-          point = { kind: "shared", members };
-        } else {
-          point = { kind: "single", m: own };
-        }
 
         segEncs.push({
-          point,
+          point: own,
+          shared: !!sharers && sharers.size >= 2,
           handleIn: encodeHandle(seg.handleIn, ownEdge, own.t),
           handleOut: encodeHandle(seg.handleOut, ownEdge, own.t),
         });
+        s++;
       }
       rings.push(segEncs);
       closed.push(ring.closed);
+      r++;
     }
     return { prim, rings, closed };
   });
+
+  // Stitch links: one per shared boundary curve, recorded from the lower-index
+  // capsule so each seam strip is built exactly once.
+  const stitches: StitchLink[] = [];
+  for (let pi = 0; pi < fitted.primitives.length; pi++) {
+    const prim = fitted.primitives[pi];
+    if (!prim.clippedPath || !prim.boundaryTags) continue;
+    let r = 0;
+    for (const ring of ringsOf(prim.clippedPath)) {
+      const segs = ring.segments;
+      const n = segs.length;
+      for (let ci = 0; ci < n; ci++) {
+        const tag = prim.boundaryTags[ci];
+        if (!tag || tag.kind !== "shared") continue;
+        const nB = tag.neighbour;
+        if (pi >= nB) continue; // canonical: build from the lower-index side
+        const ci1 = (ci + 1) % n;
+        const b0 = anchorIndex[nB].get(coordKey(segs[ci].point.x, segs[ci].point.y));
+        const b1 = anchorIndex[nB].get(coordKey(segs[ci1].point.x, segs[ci1].point.y));
+        if (!b0 || !b1) continue; // mirror anchor missing — skip rather than crash
+        stitches.push({
+          aPrim: pi,
+          aRing: r,
+          aSeg0: ci,
+          aSeg1: ci1,
+          bPrim: nB,
+          bRing0: b0.ring,
+          bSeg0: b0.seg,
+          bRing1: b1.ring,
+          bSeg1: b1.seg,
+        });
+      }
+      r++;
+    }
+  }
 
   return {
     segments,
     points: fitted.points,
     controlPoints: fitted.controlPoints,
+    stitches,
     primitives: rigPrims,
   };
 }
@@ -264,8 +322,8 @@ export function boneLinks(
   for (const rp of rig.primitives) {
     for (const ring of rp.rings) {
       for (const se of ring) {
-        if (se.point.kind !== "single") continue; // shared anchors have no single bone
-        const m = se.point.m;
+        if (se.shared) continue; // seam anchors are stitched, not spoked
+        const m = se.point;
         const f = frameAt(sk, rig.segments, m.edge, m.t);
         links.push({
           anchor: {
@@ -278,24 +336,6 @@ export function boneLinks(
     }
   }
   return links;
-}
-
-function warpPoint(
-  enc: PointEnc,
-  sPrime: DeformedSkeleton,
-  segments: [number, number][],
-): Vec2D {
-  if (enc.kind === "single") return warpAnchor(enc.m, sPrime, segments);
-  // Shared: average the warp from every sharing edge (identical on both sides
-  // ⇒ the shared boundary stays coincident).
-  let sx = 0, sy = 0;
-  for (const m of enc.members) {
-    const p = warpAnchor(m, sPrime, segments);
-    sx += p.x;
-    sy += p.y;
-  }
-  const k = enc.members.length;
-  return { x: sx / k, y: sy / k };
 }
 
 function warpHandle(
@@ -340,7 +380,7 @@ export function applyDeform(
     const ringPaths: paper.Path[] = [];
     for (let r = 0; r < rp.rings.length; r++) {
       const segs = rp.rings[r].map((se) => {
-        const pt = warpPoint(se.point, sPrime, segments);
+        const pt = warpAnchor(se.point, sPrime, segments);
         const hin = warpHandle(se.handleIn, sPrime, segments);
         const hout = warpHandle(se.handleOut, sPrime, segments);
         return new paper.Segment(
@@ -359,12 +399,54 @@ export function applyDeform(
   });
 }
 
-/** Bezier-preserving union of warped primitives into a single outline. */
-export function unionDeformedPrimitives(prims: Primitive[]): paper.PathItem | null {
+/**
+ * Build the seam-stitch shapes for the warped primitives. Each shared boundary
+ * curve of capsule A — whose two anchors A0,A1 diverge from neighbour B's mirror
+ * anchors B0,B1 once each side is warped by its own frame — yields the strip cell
+ * A0'→B0'→B1'→A1'. The strip is emitted as two triangles (A0'B0'B1' and
+ * A0'B1'A1') so it stays well-formed even where A and B cross at a concave
+ * corner. Degenerate strips (a straight seam, where A'=B') are skipped, so the
+ * identity warp adds nothing.
+ */
+export function buildStitchQuads(
+  rig: DeformRig,
+  warped: Primitive[],
+): paper.Path[] {
+  const anchor = (primIdx: number, ring: number, seg: number): paper.Point => {
+    const cp = warped[primIdx].clippedPath!;
+    const p = ringsOf(cp)[ring].segments[seg].point;
+    return new paper.Point(p.x, p.y);
+  };
+  const tris: paper.Path[] = [];
+  for (const s of rig.stitches) {
+    const a0 = anchor(s.aPrim, s.aRing, s.aSeg0);
+    const a1 = anchor(s.aPrim, s.aRing, s.aSeg1);
+    const b0 = anchor(s.bPrim, s.bRing0, s.bSeg0);
+    const b1 = anchor(s.bPrim, s.bRing1, s.bSeg1);
+    if (a0.getDistance(b0) < 1e-6 && a1.getDistance(b1) < 1e-6) continue; // straight seam
+    tris.push(
+      new paper.Path({ segments: [a0, b0, b1], closed: true, insert: false }),
+      new paper.Path({ segments: [a0, b1, a1], closed: true, insert: false }),
+    );
+  }
+  return tris;
+}
+
+/**
+ * Bezier-preserving union of warped primitives (plus any extra shapes, e.g.
+ * stitch quads) into a single outline.
+ */
+export function unionDeformedPrimitives(
+  prims: Primitive[],
+  extraShapes: paper.PathItem[] = [],
+): paper.PathItem | null {
+  const shapes: paper.PathItem[] = [];
+  for (const prim of prims) if (prim.clippedPath) shapes.push(prim.clippedPath);
+  shapes.push(...extraShapes);
+
   let acc: paper.PathItem | null = null;
-  for (const prim of prims) {
-    if (!prim.clippedPath) continue;
-    const shape = prim.clippedPath.clone({ insert: false });
+  for (const s of shapes) {
+    const shape = s.clone({ insert: false });
     if (acc === null) {
       acc = shape;
     } else {
@@ -380,7 +462,8 @@ export function unionDeformedPrimitives(prims: Primitive[]): paper.PathItem | nu
 /**
  * Stateless deformation: deform(S, S', C). Builds the rig from `fitted` (S + C)
  * and applies it to the edited skeleton `sPrime` (S'), returning the deformed
- * bezier outline. Identity when sPrime equals the original skeleton.
+ * bezier outline with seams stitched. Identity when sPrime equals the original
+ * skeleton.
  */
 export function deformOutline(
   fitted: FittedMedialAxisGraph,
@@ -388,5 +471,6 @@ export function deformOutline(
 ): paper.PathItem | null {
   const rig = buildDeformRig(fitted);
   const warped = applyDeform(rig, sPrime);
-  return unionDeformedPrimitives(warped);
+  const quads = buildStitchQuads(rig, warped);
+  return unionDeformedPrimitives(warped, quads);
 }
