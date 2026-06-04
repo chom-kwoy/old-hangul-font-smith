@@ -222,12 +222,14 @@ function drawBoneControlNet(
 }
 
 /** One filled+stroked deformed shape to overlay (the union'd outline, or one
- *  per warped capsule). */
+ *  per warped capsule). `dash` makes a dashed outline (and skips the anchor/
+ *  control-point net for that layer). */
 type DeformLayer = {
   item: paper.PathItem;
   fill: string;
   stroke: string;
   strokeWidth: number;
+  dash?: number[];
 };
 
 /** Render original (faint) vs deformed shape(s) + skeleton + the move.
@@ -298,6 +300,7 @@ function renderDeform(
           fill: layer.fill,
           stroke: layer.stroke,
           strokeWidth: layer.strokeWidth,
+          ...(layer.dash ? { strokeDashArray: layer.dash } : {}),
           fillRule: "evenodd",
           selectable: false,
         }),
@@ -359,8 +362,10 @@ function renderDeform(
   );
 
   // Deformed anchors (green) + control points (purple), with a dashed handle
-  // line from each anchor to its in/out control point — across every layer.
+  // line from each anchor to its in/out control point — for solid layers only
+  // (dashed pre-averaging overlays are outline-only).
   for (const layer of layers) {
+    if (layer.dash) continue;
     const dRings =
       layer.item instanceof paper.CompoundPath
         ? (layer.item.children as paper.Path[])
@@ -539,7 +544,10 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           "",
         );
         // Viz 2: each warped capsule pre-union, one hue per edge (test5 scheme;
-        // vertex disks in red).
+        // vertex disks in red). The solid outline is the current (post shared-
+        // point-averaging) capsule; the dashed outline overlays the same capsule
+        // *before* shared-point averaging (raw single-edge warp), so the shared
+        // boundaries don't yet coincide.
         const nSegs = Math.max(1, fitted.segments.length);
         const hue = (i: number) => Math.round((i * 360) / nSegs);
         const capLayers: DeformLayer[] = [];
@@ -560,6 +568,21 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
                   strokeWidth: 2,
                 },
           );
+        }
+        // Pre-averaging capsules (dashed, no fill, same hue) overlaid on top.
+        const warpedPre = applyDeform(rig, edit.skeleton, false);
+        for (const prim of warpedPre) {
+          if (!prim.clippedPath) continue;
+          capLayers.push({
+            item: prim.clippedPath,
+            fill: "",
+            stroke:
+              prim.type === "edge"
+                ? `hsl(${hue(prim.elementIdx)}, 80%, 28%)`
+                : "rgba(200,0,0,0.95)",
+            strokeWidth: 1.5,
+            dash: [5, 4],
+          });
         }
         renderDeform(label, fitted, edit, original, capLayers, links, "_capsules");
         original.remove();

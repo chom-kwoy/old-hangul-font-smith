@@ -439,6 +439,25 @@ function warpPoint(
   return { x: J.x + (R * dx) / len, y: J.y + (R * dy) / len };
 }
 
+/**
+ * Warp an anchor for the capsule owned by `ownEdge`. With `averageShared` (the
+ * default), shared anchors use the coincidence-preserving averaged/re-expanded
+ * position (`warpPoint`); without it, they use this capsule's own-edge member —
+ * the raw single-edge warp *before* shared averaging (for visualisation).
+ */
+function warpPointFor(
+  enc: PointEnc,
+  ownEdge: number,
+  sPrime: DeformedSkeleton,
+  segments: [number, number][],
+  averageShared: boolean,
+): Vec2D {
+  if (enc.kind === "single") return warpAnchor(enc.m, sPrime, segments);
+  if (averageShared) return warpPoint(enc, sPrime, segments);
+  const own = enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0];
+  return warpAnchor(own, sPrime, segments);
+}
+
 function warpHandle(
   enc: HandleEnc,
   sPrime: DeformedSkeleton,
@@ -534,6 +553,7 @@ function warpCurveChain(
 export function applyDeform(
   rig: DeformRig,
   sPrime: DeformedSkeleton,
+  averageShared = true,
 ): Primitive[] {
   const segments = rig.segments;
   return rig.primitives.map((rp) => {
@@ -553,6 +573,7 @@ export function applyDeform(
 
     // Rebuilt per-piece tags (subdivision changes the curve count, so the
     // original boundaryTags no longer align with the warped path's curves).
+    const ownEdge = prim.elementIdx;
     const newTags: BoundaryTag[] = [];
     const ringPaths: paper.Path[] = [];
     for (let r = 0; r < rp.rings.length; r++) {
@@ -566,8 +587,8 @@ export function applyDeform(
       // originating curve's boundary tag.
       const pieces: CubicPiece[] = [];
       for (let ci = 0; ci < nc; ci++) {
-        const A = warpPoint(ringEnc[ci].point, sPrime, segments);
-        const B = warpPoint(ringEnc[(ci + 1) % n].point, sPrime, segments);
+        const A = warpPointFor(ringEnc[ci].point, ownEdge, sPrime, segments, averageShared);
+        const B = warpPointFor(ringEnc[(ci + 1) % n].point, ownEdge, sPrime, segments, averageShared);
         const samples = csRing[ci];
         const tag: BoundaryTag = rp.prim.boundaryTags?.[ci] ?? { kind: "bezier" };
         if (!samples) {
