@@ -302,6 +302,7 @@ function renderDeform(
   layers: DeformLayer[],
   links: BoneLink[],
   suffix: string,
+  drawControlNet: boolean,
 ): void {
   const SIZE = 1000;
   const PAD = 60;
@@ -452,8 +453,9 @@ function renderDeform(
 
   // Deformed anchors (green) + control points (purple), with a dashed handle
   // line from each anchor to its in/out control point — for solid layers only
-  // (dashed pre-averaging overlays are outline-only).
-  for (const layer of layers) {
+  // (dashed pre-averaging overlays are outline-only). Skipped entirely when
+  // drawControlNet is off (e.g. the per-capsule view).
+  for (const layer of drawControlNet ? layers : []) {
     if (layer.dash) continue;
     const dRings =
       layer.item instanceof paper.CompoundPath
@@ -667,6 +669,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           ],
           links,
           "",
+          true,
         );
         // Viz 2: each warped capsule pre-union, one hue per edge (test5 scheme;
         // vertex disks in red). The solid outline is the current (post shared-
@@ -717,6 +720,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           capLayers,
           links,
           "_capsules",
+          false,
         );
         original.remove();
       }
