@@ -625,6 +625,47 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       `max deviation ${maxDev.toExponential(2)}`,
     );
 
+    // The per-curve samples that feed the Hermite/subdivision must have
+    // monotonic foot params along each non-shared curve — i.e. foot(A)→foot(B)→
+    // foot(C) doesn't cross/reverse on the bone. Constant runs (clamped cap
+    // feet) are allowed; a reversal means the offset locally exceeds the bone's
+    // curvature radius (1 − bκ ≤ 0).
+    let nonMonoCurves = 0;
+    let worstBacktrack = 0;
+    let worstInfo = "";
+    for (const rp of rig.primitives) {
+      for (const ring of rp.curveSamples) {
+        for (const cs of ring) {
+          if (!cs || cs.length < 3) continue;
+          const dir = Math.sign(cs[cs.length - 1].t - cs[0].t) || 1;
+          let inc = true,
+            dec = true,
+            back = 0;
+          for (let k = 1; k < cs.length; k++) {
+            const d = cs[k].t - cs[k - 1].t;
+            if (d < -1e-4) inc = false;
+            if (d > 1e-4) dec = false;
+            back = Math.max(back, -dir * d); // step opposing the dominant direction
+          }
+          if (!(inc || dec)) {
+            nonMonoCurves++;
+            if (back > worstBacktrack) {
+              worstBacktrack = back;
+              const ts = cs.map((c) => c.t);
+              worstInfo = `edge ${cs[0].edge}, t∈[${Math.min(...ts).toFixed(3)},${Math.max(...ts).toFixed(3)}]`;
+            }
+          }
+        }
+      }
+    }
+    check(
+      "hermite-fit samples have monotonic feet",
+      nonMonoCurves === 0,
+      nonMonoCurves === 0
+        ? "all monotonic"
+        : `${nonMonoCurves} non-monotonic curve(s), worst Δt backtrack ${worstBacktrack.toFixed(4)} (${worstInfo})`,
+    );
+
     // --- 2. Random deformation: move one skeleton vertex 10–100px. ---
     // Seeded per-glyph so the "random" move is reproducible across runs.
     const rng = mulberry32(hashSeed(label));
