@@ -45,12 +45,19 @@ fs.mkdirSync("test_outputs", { recursive: true });
 
 /** Max anchor+handle deviation between two primitives' clippedPaths. */
 function maxPathDeviation(a: paper.PathItem, b: paper.PathItem): number {
-  const ra = a instanceof paper.CompoundPath ? (a.children as paper.Path[]) : [a as paper.Path];
-  const rb = b instanceof paper.CompoundPath ? (b.children as paper.Path[]) : [b as paper.Path];
+  const ra =
+    a instanceof paper.CompoundPath
+      ? (a.children as paper.Path[])
+      : [a as paper.Path];
+  const rb =
+    b instanceof paper.CompoundPath
+      ? (b.children as paper.Path[])
+      : [b as paper.Path];
   if (ra.length !== rb.length) return Infinity;
   let max = 0;
   for (let r = 0; r < ra.length; r++) {
-    const sa = ra[r].segments, sb = rb[r].segments;
+    const sa = ra[r].segments,
+      sb = rb[r].segments;
     if (sa.length !== sb.length) return Infinity;
     for (let i = 0; i < sa.length; i++) {
       max = Math.max(
@@ -100,7 +107,11 @@ function randomEdit(
 ): RandomEdit {
   const points = fitted.points.map((p) => ({ x: p.x, y: p.y }));
   const controlPoints = fitted.controlPoints?.map(
-    ([c1, c2]) => [{ x: c1.x, y: c1.y }, { x: c2.x, y: c2.y }] as [typeof c1, typeof c2],
+    ([c1, c2]) =>
+      [
+        { x: c1.x, y: c1.y },
+        { x: c2.x, y: c2.y },
+      ] as [typeof c1, typeof c2],
   );
   const movedIdx = Math.floor(rng() * points.length);
   const angle = rng() * 2 * Math.PI;
@@ -110,7 +121,24 @@ function randomEdit(
     x: from.x + Math.cos(angle) * dist,
     y: from.y + Math.sin(angle) * dist,
   };
+  const dx = to.x - from.x,
+    dy = to.y - from.y;
   points[movedIdx] = to;
+  // Translate the control points attached to this vertex by the same delta, so
+  // the incident bones rigidly follow the anchor instead of stretching near it.
+  if (controlPoints) {
+    for (let e = 0; e < fitted.segments.length; e++) {
+      const [u, v] = fitted.segments[e];
+      if (u === movedIdx) {
+        controlPoints[e][0].x += dx;
+        controlPoints[e][0].y += dy;
+      }
+      if (v === movedIdx) {
+        controlPoints[e][1].x += dx;
+        controlPoints[e][1].y += dy;
+      }
+    }
+  }
   return { skeleton: { points, controlPoints }, movedIdx, from, to };
 }
 
@@ -158,7 +186,8 @@ function edgePathData(
   const cmds: string[] = [];
   for (let e = 0; e < segments.length; e++) {
     const [u, v] = segments[e];
-    const a = pts[u], b = pts[v];
+    const a = pts[u],
+      b = pts[v];
     const cp = cps?.[e];
     cmds.push(`M ${tx(a.x)} ${ty(a.y)}`);
     if (cp) {
@@ -202,9 +231,13 @@ function drawBoneControlNet(
         );
         canvas.add(
           new FabricCircle({
-            left: tx(c.x), top: ty(c.y), radius: 2,
+            left: tx(c.x),
+            top: ty(c.y),
+            radius: 2,
             fill: color,
-            originX: "center", originY: "center", selectable: false,
+            originX: "center",
+            originY: "center",
+            selectable: false,
           }),
         );
       }
@@ -213,9 +246,13 @@ function drawBoneControlNet(
   for (const p of pts) {
     canvas.add(
       new FabricCircle({
-        left: tx(p.x), top: ty(p.y), radius: 2.5,
+        left: tx(p.x),
+        top: ty(p.y),
+        radius: 2.5,
         fill: color,
-        originX: "center", originY: "center", selectable: false,
+        originX: "center",
+        originY: "center",
+        selectable: false,
       }),
     );
   }
@@ -252,7 +289,10 @@ function renderDeform(
   // Viewport fits the original and every deformed shape so nothing is clipped.
   let bb = original.bounds;
   for (const l of layers) bb = bb.unite(l.item.bounds);
-  const scl = Math.min((SIZE - 2 * PAD) / bb.width, (SIZE - 2 * PAD) / bb.height);
+  const scl = Math.min(
+    (SIZE - 2 * PAD) / bb.width,
+    (SIZE - 2 * PAD) / bb.height,
+  );
   const ox = PAD + (SIZE - 2 * PAD - bb.width * scl) / 2 - bb.x * scl;
   const oy = PAD + (SIZE - 2 * PAD - bb.height * scl) / 2 - bb.y * scl;
   const tx = (x: number) => x * scl + ox;
@@ -310,8 +350,19 @@ function renderDeform(
   // Original skeleton (faint) and deformed skeleton (orange).
   canvas.add(
     new FabricPath(
-      edgePathData(fitted.points, fitted.controlPoints, fitted.segments, tx, ty),
-      { fill: "", stroke: "rgba(0,0,0,0.25)", strokeWidth: 1, selectable: false },
+      edgePathData(
+        fitted.points,
+        fitted.controlPoints,
+        fitted.segments,
+        tx,
+        ty,
+      ),
+      {
+        fill: "",
+        stroke: "rgba(0,0,0,0.25)",
+        strokeWidth: 1,
+        selectable: false,
+      },
     ),
   );
   canvas.add(
@@ -323,7 +374,12 @@ function renderDeform(
         tx,
         ty,
       ),
-      { fill: "", stroke: "rgba(230,130,0,0.95)", strokeWidth: 1.5, selectable: false },
+      {
+        fill: "",
+        stroke: "rgba(230,130,0,0.95)",
+        strokeWidth: 1.5,
+        selectable: false,
+      },
     ),
   );
 
@@ -340,24 +396,37 @@ function renderDeform(
 
   // The moved vertex: from (hollow) → to (filled) with a connecting line.
   canvas.add(
-    new FabricLine([tx(edit.from.x), ty(edit.from.y), tx(edit.to.x), ty(edit.to.y)], {
-      stroke: "rgba(220,30,30,0.9)",
+    new FabricLine(
+      [tx(edit.from.x), ty(edit.from.y), tx(edit.to.x), ty(edit.to.y)],
+      {
+        stroke: "rgba(220,30,30,0.9)",
+        strokeWidth: 1.5,
+        selectable: false,
+      },
+    ),
+  );
+  canvas.add(
+    new FabricCircle({
+      left: tx(edit.from.x),
+      top: ty(edit.from.y),
+      radius: 4,
+      fill: "",
+      stroke: "rgba(0,0,0,0.5)",
       strokeWidth: 1.5,
+      originX: "center",
+      originY: "center",
       selectable: false,
     }),
   );
   canvas.add(
     new FabricCircle({
-      left: tx(edit.from.x), top: ty(edit.from.y), radius: 4,
-      fill: "", stroke: "rgba(0,0,0,0.5)", strokeWidth: 1.5,
-      originX: "center", originY: "center", selectable: false,
-    }),
-  );
-  canvas.add(
-    new FabricCircle({
-      left: tx(edit.to.x), top: ty(edit.to.y), radius: 4,
+      left: tx(edit.to.x),
+      top: ty(edit.to.y),
+      radius: 4,
       fill: "rgba(220,30,30,0.95)",
-      originX: "center", originY: "center", selectable: false,
+      originX: "center",
+      originY: "center",
+      selectable: false,
     }),
   );
 
@@ -375,7 +444,8 @@ function renderDeform(
         const p = seg.point;
         for (const h of [seg.handleIn, seg.handleOut]) {
           if (Math.hypot(h.x, h.y) < 1e-9) continue; // straight side — no handle
-          const cx = p.x + h.x, cy = p.y + h.y;
+          const cx = p.x + h.x,
+            cy = p.y + h.y;
           canvas.add(
             new FabricLine([tx(p.x), ty(p.y), tx(cx), ty(cy)], {
               stroke: "rgba(150,40,200,0.7)",
@@ -386,17 +456,25 @@ function renderDeform(
           );
           canvas.add(
             new FabricCircle({
-              left: tx(cx), top: ty(cy), radius: 2,
+              left: tx(cx),
+              top: ty(cy),
+              radius: 2,
               fill: "rgba(150,40,200,0.95)",
-              originX: "center", originY: "center", selectable: false,
+              originX: "center",
+              originY: "center",
+              selectable: false,
             }),
           );
         }
         canvas.add(
           new FabricCircle({
-            left: tx(p.x), top: ty(p.y), radius: 2.5,
+            left: tx(p.x),
+            top: ty(p.y),
+            radius: 2.5,
             fill: "rgba(20,150,60,0.95)",
-            originX: "center", originY: "center", selectable: false,
+            originX: "center",
+            originY: "center",
+            selectable: false,
           }),
         );
       }
@@ -428,7 +506,11 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     } catch (e) {
       error = e;
     }
-    check("pipeline builds fitted glyph", error === null, error ? String(error) : "");
+    check(
+      "pipeline builds fitted glyph",
+      error === null,
+      error ? String(error) : "",
+    );
     if (!fitted) continue;
 
     const S: DeformedSkeleton = {
@@ -443,7 +525,8 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     for (let i = 0; i < identity.length; i++) {
       const orig = fitted.primitives[i].clippedPath;
       const warped = identity[i].clippedPath;
-      if (orig && warped) maxDev = Math.max(maxDev, maxPathDeviation(orig, warped));
+      if (orig && warped)
+        maxDev = Math.max(maxDev, maxPathDeviation(orig, warped));
     }
     check(
       "identity warp reproduces primitives (≤1e-9)",
@@ -455,7 +538,10 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     // Seeded per-glyph so the "random" move is reproducible across runs.
     const rng = mulberry32(hashSeed(label));
     const edit = randomEdit(fitted, rng);
-    const moveDist = Math.hypot(edit.to.x - edit.from.x, edit.to.y - edit.from.y);
+    const moveDist = Math.hypot(
+      edit.to.x - edit.from.x,
+      edit.to.y - edit.from.y,
+    );
 
     const baseGap = analyzeSharedBoundaries(fitted.primitives).maxGap;
     const warped = applyDeform(rig, edit.skeleton);
@@ -504,7 +590,8 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     // cost), averaged over N runs.
     const N = 20;
     const tFull = performance.now();
-    for (let it = 0; it < N; it++) deformOutline(fitted, edit.skeleton)?.remove();
+    for (let it = 0; it < N; it++)
+      deformOutline(fitted, edit.skeleton)?.remove();
     const fullMs = (performance.now() - tFull) / N;
     const tApply = performance.now();
     for (let it = 0; it < N; it++) {
@@ -525,9 +612,18 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           ? (outline.children as paper.Path[])
           : [outline as paper.Path];
       const area = Math.abs(rings.reduce((s, c) => s + c.area, 0));
-      check("deformed outline has non-trivial area", area > 1, `area ${area.toFixed(0)}`);
+      check(
+        "deformed outline has non-trivial area",
+        area > 1,
+        `area ${area.toFixed(0)}`,
+      );
       let hasCurve = false;
-      for (const r of rings) for (const c of r.curves) if (!c.isStraight()) { hasCurve = true; break; }
+      for (const r of rings)
+        for (const c of r.curves)
+          if (!c.isStraight()) {
+            hasCurve = true;
+            break;
+          }
       check("deformed outline is bezier (has curves)", hasCurve, "");
 
       const original = unionDeformedPrimitives(fitted.primitives);
@@ -539,7 +635,14 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           fitted,
           edit,
           original,
-          [{ item: outline, fill: "rgba(40,110,210,0.18)", stroke: "rgba(40,110,210,0.95)", strokeWidth: 2 }],
+          [
+            {
+              item: outline,
+              fill: "rgba(40,110,210,0.18)",
+              stroke: "rgba(40,110,210,0.95)",
+              strokeWidth: 2,
+            },
+          ],
           links,
           "",
         );
@@ -584,7 +687,15 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             dash: [5, 4],
           });
         }
-        renderDeform(label, fitted, edit, original, capLayers, links, "_capsules");
+        renderDeform(
+          label,
+          fitted,
+          edit,
+          original,
+          capLayers,
+          links,
+          "_capsules",
+        );
         original.remove();
       }
       outline.remove();
