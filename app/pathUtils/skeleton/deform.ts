@@ -51,7 +51,12 @@ type PointEnc =
 
 // Polar handle relative to the owning edge's tangent at the anchor's foot.
 // null when the handle is zero (straight segment).
-type HandleEnc = { edge: number; t: number; dist: number; angle: number } | null;
+type HandleEnc = {
+  edge: number;
+  t: number;
+  dist: number;
+  angle: number;
+} | null;
 
 /**
  * A weighted reference to a shared vertex's correction δ (see `RigPrimitive.
@@ -137,7 +142,12 @@ function boneOf(
 ): { pA: Vec2D; cp1?: Vec2D; cp2?: Vec2D; pB: Vec2D } {
   const [u, v] = segments[edge];
   const cp = graph.controlPoints?.[edge];
-  return { pA: graph.points[u], cp1: cp?.[0], cp2: cp?.[1], pB: graph.points[v] };
+  return {
+    pA: graph.points[u],
+    cp1: cp?.[0],
+    cp2: cp?.[1],
+    pB: graph.points[v],
+  };
 }
 
 function frameAt(
@@ -316,11 +326,16 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
     }
   }
 
-  const encodeAnchor = (q: Vec2D, edge: number, seed?: number): AnchorMember => {
+  const encodeAnchor = (
+    q: Vec2D,
+    edge: number,
+    seed?: number,
+  ): AnchorMember => {
     const { pA, cp1, cp2, pB } = boneOf(S, segments, edge);
     const t = footParamOnBezier(q, pA, cp1, cp2, pB, seed);
     const f = frameAt(S, segments, edge, t);
-    const wx = q.x - f.o.x, wy = q.y - f.o.y;
+    const wx = q.x - f.o.x,
+      wy = q.y - f.o.y;
     return {
       edge,
       t,
@@ -352,8 +367,14 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
     march: { t: number | undefined },
   ): CurveSample[] => {
     const oP0 = { x: sA.point.x, y: sA.point.y };
-    const oCP1 = { x: sA.point.x + sA.handleOut.x, y: sA.point.y + sA.handleOut.y };
-    const oCP2 = { x: sB.point.x + sB.handleIn.x, y: sB.point.y + sB.handleIn.y };
+    const oCP1 = {
+      x: sA.point.x + sA.handleOut.x,
+      y: sA.point.y + sA.handleOut.y,
+    };
+    const oCP2 = {
+      x: sB.point.x + sB.handleIn.x,
+      y: sB.point.y + sB.handleIn.y,
+    };
     const oP3 = { x: sB.point.x, y: sB.point.y };
     const arr: CurveSample[] = [];
     let arc = 0;
@@ -364,10 +385,18 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
       if (prev) arc += Math.hypot(p.x - prev.x, p.y - prev.y);
       prev = p;
       const pv = bezierTangent(oP0, oCP1, oCP2, oP3, s); // original curve velocity
-      const t = footParamOnBezier(p, bone.pA, bone.cp1, bone.cp2, bone.pB, march.t);
+      const t = footParamOnBezier(
+        p,
+        bone.pA,
+        bone.cp1,
+        bone.cp2,
+        bone.pB,
+        march.t,
+      );
       march.t = t;
       const f = boneFrameFull(S, segments, ownEdge, t);
-      const wx = p.x - f.o.x, wy = p.y - f.o.y;
+      const wx = p.x - f.o.x,
+        wy = p.y - f.o.y;
       arr.push({
         edge: ownEdge,
         t,
@@ -461,7 +490,13 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
           continue;
         }
         csRing.push(
-          sampleCurve(segs[ci], segs[(ci + 1) % segs.length], ownEdge, bone, march),
+          sampleCurve(
+            segs[ci],
+            segs[(ci + 1) % segs.length],
+            ownEdge,
+            bone,
+            march,
+          ),
         );
       }
 
@@ -509,8 +544,10 @@ export function boneLinks(
   rig: DeformRig,
   sPrime?: DeformedSkeleton,
 ): BoneLink[] {
-  const sk: DeformedSkeleton =
-    sPrime ?? { points: rig.points, controlPoints: rig.controlPoints };
+  const sk: DeformedSkeleton = sPrime ?? {
+    points: rig.points,
+    controlPoints: rig.controlPoints,
+  };
   const links: BoneLink[] = [];
   for (const rp of rig.primitives) {
     for (const ring of rp.rings) {
@@ -542,8 +579,10 @@ export function sharedFootLinks(
   rig: DeformRig,
   sPrime?: DeformedSkeleton,
 ): BoneLink[] {
-  const sk: DeformedSkeleton =
-    sPrime ?? { points: rig.points, controlPoints: rig.controlPoints };
+  const sk: DeformedSkeleton = sPrime ?? {
+    points: rig.points,
+    controlPoints: rig.controlPoints,
+  };
   const links: BoneLink[] = [];
   for (const rp of rig.primitives) {
     for (let r = 0; r < rp.rings.length; r++) {
@@ -585,7 +624,8 @@ function warpPoint(
   // and a no-op at S'=S (every P_m = Q) ⇒ identity preserved exactly.
   const Ps = enc.members.map((m) => warpAnchor(m, sPrime, segments));
   const k = Ps.length;
-  let qx = 0, qy = 0;
+  let qx = 0,
+    qy = 0;
   for (const p of Ps) {
     qx += p.x;
     qy += p.y;
@@ -596,7 +636,8 @@ function warpPoint(
   let R = 0;
   for (const p of Ps) R += Math.hypot(p.x - J.x, p.y - J.y);
   R /= k;
-  const dx = Q.x - J.x, dy = Q.y - J.y;
+  const dx = Q.x - J.x,
+    dy = Q.y - J.y;
   const len = Math.hypot(dx, dy);
   if (len < 1e-9) return Q; // anchor sits on the joint
   return { x: J.x + (R * dx) / len, y: J.y + (R * dy) / len };
@@ -609,7 +650,8 @@ function warpHandle(
 ): Vec2D {
   if (!enc) return { x: 0, y: 0 };
   const f = frameAt(sPrime, segments, enc.edge, enc.t);
-  const c = Math.cos(enc.angle), s = Math.sin(enc.angle);
+  const c = Math.cos(enc.angle),
+    s = Math.sin(enc.angle);
   // rotate τ' by `angle`, scale by `dist`.
   const rx = f.tau.x * c - f.tau.y * s;
   const ry = f.tau.x * s + f.tau.y * c;
@@ -656,14 +698,30 @@ function warpCurveChain(
   A: Vec2D,
   B: Vec2D,
   warpPt: (i: number) => Vec2D, // corrected true warp of sample i
+  corrVec: (i: number) => Vec2D, // shared-correction offset at sample i
   sPrime: DeformedSkeleton,
   segments: [number, number][],
   depth: number,
   out: CubicPiece[],
 ): void {
   const ds = (hi - lo) / WARP_K; // span in original curve parameter s
-  const vlo = warpVelocity(samples[lo], sPrime, segments);
-  const vhi = warpVelocity(samples[hi], sPrime, segments);
+  // Endpoint velocity of the *corrected* field C(s) = W_own(s) + correction(s):
+  // analytic W_own tangent (exact at identity) + the correction's s-derivative
+  // (one-sided finite difference over the adjacent sample, WARP_K = d/ds). This
+  // makes the handle follow the anchor's averaged + stroke-expanded shift, not
+  // just the raw single-edge tangent. Zero at identity (δ=0).
+  const vlo0 = warpVelocity(samples[lo], sPrime, segments);
+  const vhi0 = warpVelocity(samples[hi], sPrime, segments);
+  const cLo = corrVec(lo), cLo1 = corrVec(lo + 1);
+  const cHi = corrVec(hi), cHi1 = corrVec(hi - 1);
+  const vlo = {
+    x: vlo0.x + WARP_K * (cLo1.x - cLo.x),
+    y: vlo0.y + WARP_K * (cLo1.y - cLo.y),
+  };
+  const vhi = {
+    x: vhi0.x + WARP_K * (cHi.x - cHi1.x),
+    y: vhi0.y + WARP_K * (cHi.y - cHi1.y),
+  };
   const cp1 = { x: A.x + (vlo.x * ds) / 3, y: A.y + (vlo.y * ds) / 3 };
   const cp2 = { x: B.x - (vhi.x * ds) / 3, y: B.y - (vhi.y * ds) / 3 };
 
@@ -686,8 +744,32 @@ function warpCurveChain(
   }
   const m = (lo + hi) >> 1;
   const mid = warpPt(m);
-  warpCurveChain(samples, lo, m, A, mid, warpPt, sPrime, segments, depth + 1, out);
-  warpCurveChain(samples, m, hi, mid, B, warpPt, sPrime, segments, depth + 1, out);
+  warpCurveChain(
+    samples,
+    lo,
+    m,
+    A,
+    mid,
+    warpPt,
+    corrVec,
+    sPrime,
+    segments,
+    depth + 1,
+    out,
+  );
+  warpCurveChain(
+    samples,
+    m,
+    hi,
+    mid,
+    B,
+    warpPt,
+    corrVec,
+    sPrime,
+    segments,
+    depth + 1,
+    out,
+  );
 }
 
 /**
@@ -727,7 +809,7 @@ export function applyDeform(
     const ownOf = (enc: PointEnc): AnchorMember =>
       enc.kind === "single"
         ? enc.m
-        : enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0];
+        : (enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0]);
     const deltas: Vec2D[] = averageShared
       ? rp.sharedVerts.map((sv) => {
           const avg = warpPoint(sv, sPrime, segments);
@@ -735,15 +817,20 @@ export function applyDeform(
           return { x: avg.x - own.x, y: avg.y - own.y };
         })
       : [];
+    const corrOf = (blend: BlendRef[]): Vec2D => {
+      let cx = 0,
+        cy = 0;
+      if (averageShared)
+        for (const { v, w } of blend) {
+          cx += w * deltas[v].x;
+          cy += w * deltas[v].y;
+        }
+      return { x: cx, y: cy };
+    };
     const warpCorrected = (m: AnchorMember, blend: BlendRef[]): Vec2D => {
       const base = warpAnchor(m, sPrime, segments);
-      if (!averageShared) return base; // raw single-edge warp (visualisation)
-      let cx = 0, cy = 0;
-      for (const { v, w } of blend) {
-        cx += w * deltas[v].x;
-        cy += w * deltas[v].y;
-      }
-      return { x: base.x + cx, y: base.y + cy };
+      const c = corrOf(blend);
+      return { x: base.x + c.x, y: base.y + c.y };
     };
 
     const newTags: BoundaryTag[] = [];
@@ -759,11 +846,14 @@ export function applyDeform(
       // originating curve's boundary tag.
       const pieces: CubicPiece[] = [];
       for (let ci = 0; ci < nc; ci++) {
-        const encA = ringEnc[ci], encB = ringEnc[(ci + 1) % n];
+        const encA = ringEnc[ci],
+          encB = ringEnc[(ci + 1) % n];
         const A = warpCorrected(ownOf(encA.point), encA.blend);
         const B = warpCorrected(ownOf(encB.point), encB.blend);
         const samples = csRing[ci];
-        const tag: BoundaryTag = rp.prim.boundaryTags?.[ci] ?? { kind: "bezier" };
+        const tag: BoundaryTag = rp.prim.boundaryTags?.[ci] ?? {
+          kind: "bezier",
+        };
         if (!samples) {
           // Shared / straight: keep the (zero-handle) segment between anchors so
           // neighbouring capsules stay coincident.
@@ -777,9 +867,23 @@ export function applyDeform(
           });
           newTags.push(tag);
         } else {
-          const warpPt = (i: number) => warpCorrected(samples[i], samples[i].blend);
+          const warpPt = (i: number) =>
+            warpCorrected(samples[i], samples[i].blend);
+          const corrVec = (i: number) => corrOf(samples[i].blend);
           const before = pieces.length;
-          warpCurveChain(samples, 0, samples.length - 1, A, B, warpPt, sPrime, segments, 0, pieces);
+          warpCurveChain(
+            samples,
+            0,
+            samples.length - 1,
+            A,
+            B,
+            warpPt,
+            corrVec,
+            sPrime,
+            segments,
+            0,
+            pieces,
+          );
           for (let k = before; k < pieces.length; k++) newTags.push(tag);
         }
       }
@@ -812,7 +916,9 @@ export function applyDeform(
           );
         }
       }
-      ringPaths.push(new paper.Path({ segments: segObjs, closed, insert: false }));
+      ringPaths.push(
+        new paper.Path({ segments: segObjs, closed, insert: false }),
+      );
     }
     const clippedPath: paper.PathItem =
       ringPaths.length === 1
@@ -855,7 +961,8 @@ export function warpedCurveSamplePoints(
         if (!cs) continue;
         for (let j = 1; j < cs.length - 1; j++) {
           const base = warpAnchor(cs[j], sPrime, segments);
-          let cx = 0, cy = 0;
+          let cx = 0,
+            cy = 0;
           for (const { v, w } of cs[j].blend) {
             cx += w * deltas[v].x;
             cy += w * deltas[v].y;
@@ -869,7 +976,9 @@ export function warpedCurveSamplePoints(
 }
 
 /** Bezier-preserving union of warped primitives into a single outline. */
-export function unionDeformedPrimitives(prims: Primitive[]): paper.PathItem | null {
+export function unionDeformedPrimitives(
+  prims: Primitive[],
+): paper.PathItem | null {
   let acc: paper.PathItem | null = null;
   for (const prim of prims) {
     if (!prim.clippedPath) continue;
