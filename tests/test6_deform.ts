@@ -234,7 +234,8 @@ type DeformLayer = {
  *  `layers` are the deformed shapes to draw (a single union'd outline, or one
  *  per warped capsule). `links` connects each original (non-shared) outline
  *  anchor to its bone foot point — drawn on the grey pre-deformation shape.
- *  `suffix` distinguishes the output filename. */
+ *  `suffix` distinguishes the output filename. `drawDeformedNet` toggles the
+ *  per-anchor green/purple control net (off for the dense per-capsule view). */
 function renderDeform(
   label: string,
   fitted: FittedMedialAxisGraph,
@@ -243,6 +244,7 @@ function renderDeform(
   layers: DeformLayer[],
   links: BoneLink[],
   suffix: string,
+  drawDeformedNet: boolean,
 ): void {
   const SIZE = 1000;
   const PAD = 60;
@@ -360,6 +362,7 @@ function renderDeform(
 
   // Deformed anchors (green) + control points (purple), with a dashed handle
   // line from each anchor to its in/out control point — across every layer.
+  if (drawDeformedNet)
   for (const layer of layers) {
     const dRings =
       layer.item instanceof paper.CompoundPath
@@ -537,6 +540,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           [{ item: outline, fill: "rgba(40,110,210,0.18)", stroke: "rgba(40,110,210,0.95)", strokeWidth: 2 }],
           links,
           "",
+          true,
         );
         // Viz 2: each warped capsule pre-union, one hue per edge (test5 scheme;
         // vertex disks in red).
@@ -561,7 +565,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
                 },
           );
         }
-        renderDeform(label, fitted, edit, original, capLayers, links, "_capsules");
+        renderDeform(label, fitted, edit, original, capLayers, links, "_capsules", false);
         original.remove();
       }
       outline.remove();
