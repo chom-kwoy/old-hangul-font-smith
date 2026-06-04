@@ -698,30 +698,14 @@ function warpCurveChain(
   A: Vec2D,
   B: Vec2D,
   warpPt: (i: number) => Vec2D, // corrected true warp of sample i
-  corrVec: (i: number) => Vec2D, // shared-correction offset at sample i
   sPrime: DeformedSkeleton,
   segments: [number, number][],
   depth: number,
   out: CubicPiece[],
 ): void {
   const ds = (hi - lo) / WARP_K; // span in original curve parameter s
-  // Endpoint velocity of the *corrected* field C(s) = W_own(s) + correction(s):
-  // analytic W_own tangent (exact at identity) + the correction's s-derivative
-  // (one-sided finite difference over the adjacent sample, WARP_K = d/ds). This
-  // makes the handle follow the anchor's averaged + stroke-expanded shift, not
-  // just the raw single-edge tangent. Zero at identity (δ=0).
-  const vlo0 = warpVelocity(samples[lo], sPrime, segments);
-  const vhi0 = warpVelocity(samples[hi], sPrime, segments);
-  const cLo = corrVec(lo), cLo1 = corrVec(lo + 1);
-  const cHi = corrVec(hi), cHi1 = corrVec(hi - 1);
-  const vlo = {
-    x: vlo0.x + WARP_K * (cLo1.x - cLo.x),
-    y: vlo0.y + WARP_K * (cLo1.y - cLo.y),
-  };
-  const vhi = {
-    x: vhi0.x + WARP_K * (cHi.x - cHi1.x),
-    y: vhi0.y + WARP_K * (cHi.y - cHi1.y),
-  };
+  const vlo = warpVelocity(samples[lo], sPrime, segments);
+  const vhi = warpVelocity(samples[hi], sPrime, segments);
   const cp1 = { x: A.x + (vlo.x * ds) / 3, y: A.y + (vlo.y * ds) / 3 };
   const cp2 = { x: B.x - (vhi.x * ds) / 3, y: B.y - (vhi.y * ds) / 3 };
 
@@ -751,7 +735,6 @@ function warpCurveChain(
     A,
     mid,
     warpPt,
-    corrVec,
     sPrime,
     segments,
     depth + 1,
@@ -764,7 +747,6 @@ function warpCurveChain(
     mid,
     B,
     warpPt,
-    corrVec,
     sPrime,
     segments,
     depth + 1,
@@ -817,20 +799,16 @@ export function applyDeform(
           return { x: avg.x - own.x, y: avg.y - own.y };
         })
       : [];
-    const corrOf = (blend: BlendRef[]): Vec2D => {
-      let cx = 0,
-        cy = 0;
-      if (averageShared)
-        for (const { v, w } of blend) {
-          cx += w * deltas[v].x;
-          cy += w * deltas[v].y;
-        }
-      return { x: cx, y: cy };
-    };
     const warpCorrected = (m: AnchorMember, blend: BlendRef[]): Vec2D => {
       const base = warpAnchor(m, sPrime, segments);
-      const c = corrOf(blend);
-      return { x: base.x + c.x, y: base.y + c.y };
+      if (!averageShared) return base; // raw single-edge warp (visualisation)
+      let cx = 0,
+        cy = 0;
+      for (const { v, w } of blend) {
+        cx += w * deltas[v].x;
+        cy += w * deltas[v].y;
+      }
+      return { x: base.x + cx, y: base.y + cy };
     };
 
     const newTags: BoundaryTag[] = [];
@@ -869,7 +847,6 @@ export function applyDeform(
         } else {
           const warpPt = (i: number) =>
             warpCorrected(samples[i], samples[i].blend);
-          const corrVec = (i: number) => corrOf(samples[i].blend);
           const before = pieces.length;
           warpCurveChain(
             samples,
@@ -878,7 +855,6 @@ export function applyDeform(
             A,
             B,
             warpPt,
-            corrVec,
             sPrime,
             segments,
             0,
