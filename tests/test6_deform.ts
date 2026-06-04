@@ -221,22 +221,35 @@ function drawBoneControlNet(
   }
 }
 
-/** Render original (faint) vs deformed (solid) outline + skeleton + the move.
- *  `links` connects each original (non-shared) outline anchor to its bone foot
- *  point — drawn on the grey pre-deformation shape. */
+/** One filled+stroked deformed shape to overlay (the union'd outline, or one
+ *  per warped capsule). */
+type DeformLayer = {
+  item: paper.PathItem;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+};
+
+/** Render original (faint) vs deformed shape(s) + skeleton + the move.
+ *  `layers` are the deformed shapes to draw (a single union'd outline, or one
+ *  per warped capsule). `links` connects each original (non-shared) outline
+ *  anchor to its bone foot point — drawn on the grey pre-deformation shape.
+ *  `suffix` distinguishes the output filename. */
 function renderDeform(
   label: string,
   fitted: FittedMedialAxisGraph,
   edit: RandomEdit,
   original: paper.PathItem,
-  deformed: paper.PathItem,
+  layers: DeformLayer[],
   links: BoneLink[],
+  suffix: string,
 ): void {
   const SIZE = 1000;
   const PAD = 60;
 
-  // Viewport fits both original and deformed bounds so nothing is clipped.
-  const bb = original.bounds.unite(deformed.bounds);
+  // Viewport fits the original and every deformed shape so nothing is clipped.
+  let bb = original.bounds;
+  for (const l of layers) bb = bb.unite(l.item.bounds);
   const scl = Math.min((SIZE - 2 * PAD) / bb.width, (SIZE - 2 * PAD) / bb.height);
   const ox = PAD + (SIZE - 2 * PAD - bb.width * scl) / 2 - bb.x * scl;
   const oy = PAD + (SIZE - 2 * PAD - bb.height * scl) / 2 - bb.y * scl;
@@ -276,18 +289,20 @@ function renderDeform(
     );
   }
 
-  // Deformed outline — solid blue.
-  const dd = svgFromPathItem(deformed, tx, ty);
-  if (dd)
-    canvas.add(
-      new FabricPath(dd, {
-        fill: "rgba(40,110,210,0.18)",
-        stroke: "rgba(40,110,210,0.95)",
-        strokeWidth: 2,
-        fillRule: "evenodd",
-        selectable: false,
-      }),
-    );
+  // Deformed shape(s): the union'd outline, or one per warped capsule.
+  for (const layer of layers) {
+    const dd = svgFromPathItem(layer.item, tx, ty);
+    if (dd)
+      canvas.add(
+        new FabricPath(dd, {
+          fill: layer.fill,
+          stroke: layer.stroke,
+          strokeWidth: layer.strokeWidth,
+          fillRule: "evenodd",
+          selectable: false,
+        }),
+      );
+  }
 
   // Original skeleton (faint) and deformed skeleton (orange).
   canvas.add(
@@ -343,47 +358,49 @@ function renderDeform(
     }),
   );
 
-  // Deformed outline anchors (green) + control points (purple), with a dashed
-  // handle line from each anchor to its in/out control point.
-  const dRings =
-    deformed instanceof paper.CompoundPath
-      ? (deformed.children as paper.Path[])
-      : [deformed as paper.Path];
-  for (const ring of dRings) {
-    for (const seg of ring.segments) {
-      const p = seg.point;
-      for (const h of [seg.handleIn, seg.handleOut]) {
-        if (Math.hypot(h.x, h.y) < 1e-9) continue; // straight side — no handle
-        const cx = p.x + h.x, cy = p.y + h.y;
-        canvas.add(
-          new FabricLine([tx(p.x), ty(p.y), tx(cx), ty(cy)], {
-            stroke: "rgba(150,40,200,0.7)",
-            strokeWidth: 1,
-            strokeDashArray: [3, 2],
-            selectable: false,
-          }),
-        );
+  // Deformed anchors (green) + control points (purple), with a dashed handle
+  // line from each anchor to its in/out control point — across every layer.
+  for (const layer of layers) {
+    const dRings =
+      layer.item instanceof paper.CompoundPath
+        ? (layer.item.children as paper.Path[])
+        : [layer.item as paper.Path];
+    for (const ring of dRings) {
+      for (const seg of ring.segments) {
+        const p = seg.point;
+        for (const h of [seg.handleIn, seg.handleOut]) {
+          if (Math.hypot(h.x, h.y) < 1e-9) continue; // straight side — no handle
+          const cx = p.x + h.x, cy = p.y + h.y;
+          canvas.add(
+            new FabricLine([tx(p.x), ty(p.y), tx(cx), ty(cy)], {
+              stroke: "rgba(150,40,200,0.7)",
+              strokeWidth: 1,
+              strokeDashArray: [3, 2],
+              selectable: false,
+            }),
+          );
+          canvas.add(
+            new FabricCircle({
+              left: tx(cx), top: ty(cy), radius: 2,
+              fill: "rgba(150,40,200,0.95)",
+              originX: "center", originY: "center", selectable: false,
+            }),
+          );
+        }
         canvas.add(
           new FabricCircle({
-            left: tx(cx), top: ty(cy), radius: 2,
-            fill: "rgba(150,40,200,0.95)",
+            left: tx(p.x), top: ty(p.y), radius: 2.5,
+            fill: "rgba(20,150,60,0.95)",
             originX: "center", originY: "center", selectable: false,
           }),
         );
       }
-      canvas.add(
-        new FabricCircle({
-          left: tx(p.x), top: ty(p.y), radius: 2.5,
-          fill: "rgba(20,150,60,0.95)",
-          originX: "center", originY: "center", selectable: false,
-        }),
-      );
     }
   }
 
   canvas.renderAll();
   const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
-  const outPath = `test_outputs/deform_${safeName}.png`;
+  const outPath = `test_outputs/deform_${safeName}${suffix}.png`;
   type NodeCanvas = { toBuffer(type: string): Buffer };
   const buf = (canvas as unknown as { getNodeCanvas(): NodeCanvas })
     .getNodeCanvas()
@@ -477,6 +494,23 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       `max ${trackErr.toFixed(3)}px`,
     );
 
+    // Latency of the deformation under the random edit: the full stateless
+    // deform() (rig rebuilt) vs. the cached apply+union (interactive per-frame
+    // cost), averaged over N runs.
+    const N = 20;
+    const tFull = performance.now();
+    for (let it = 0; it < N; it++) deformOutline(fitted, edit.skeleton)?.remove();
+    const fullMs = (performance.now() - tFull) / N;
+    const tApply = performance.now();
+    for (let it = 0; it < N; it++) {
+      unionDeformedPrimitives(applyDeform(rig, edit.skeleton))?.remove();
+    }
+    const applyMs = (performance.now() - tApply) / N;
+    console.log(
+      `  ⏱  deform() ${fullMs.toFixed(2)}ms (rig+apply+union) | ` +
+        `apply+union ${applyMs.toFixed(2)}ms (cached rig), avg of ${N}`,
+    );
+
     // --- 3. Faithful bezier outline + visualization. ---
     const outline = deformOutline(fitted, edit.skeleton);
     check("deformed outline produced", outline !== null, "");
@@ -493,7 +527,41 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
 
       const original = unionDeformedPrimitives(fitted.primitives);
       if (original) {
-        renderDeform(label, fitted, edit, original, outline, boneLinks(rig));
+        const links = boneLinks(rig);
+        // Viz 1: the union'd deformed outline (solid blue).
+        renderDeform(
+          label,
+          fitted,
+          edit,
+          original,
+          [{ item: outline, fill: "rgba(40,110,210,0.18)", stroke: "rgba(40,110,210,0.95)", strokeWidth: 2 }],
+          links,
+          "",
+        );
+        // Viz 2: each warped capsule pre-union, one hue per edge (test5 scheme;
+        // vertex disks in red).
+        const nSegs = Math.max(1, fitted.segments.length);
+        const hue = (i: number) => Math.round((i * 360) / nSegs);
+        const capLayers: DeformLayer[] = [];
+        for (const prim of warped) {
+          if (!prim.clippedPath) continue;
+          capLayers.push(
+            prim.type === "edge"
+              ? {
+                  item: prim.clippedPath,
+                  fill: `hsla(${hue(prim.elementIdx)}, 70%, 60%, 0.18)`,
+                  stroke: `hsl(${hue(prim.elementIdx)}, 70%, 35%)`,
+                  strokeWidth: 1.5,
+                }
+              : {
+                  item: prim.clippedPath,
+                  fill: "rgba(255,100,100,0.5)",
+                  stroke: "rgba(255,0,0,0.95)",
+                  strokeWidth: 2,
+                },
+          );
+        }
+        renderDeform(label, fitted, edit, original, capLayers, links, "_capsules");
         original.remove();
       }
       outline.remove();
