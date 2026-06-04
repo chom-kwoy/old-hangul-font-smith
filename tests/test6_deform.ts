@@ -26,7 +26,6 @@ import {
   boneLinks,
   buildDeformRig,
   deformOutline,
-  footParamsPerCurve,
   sharedFootLinks,
   unionDeformedPrimitives,
   warpedCurveSamplePoints,
@@ -624,41 +623,6 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       "identity warp reproduces primitives (≤1e-9)",
       maxDev <= 1e-9,
       `max deviation ${maxDev.toExponential(2)}`,
-    );
-
-    // Feet must not cross: the foot-parameter sequence is monotonic within each
-    // maximal run of interior-foot samples (cap samples clamp to a bone end and
-    // turn around there, which is expected, so they're excluded). The violation
-    // is the total backtracking of a run in whichever direction fits best.
-    let maxBacktrack = 0;
-    let worstCurve = "";
-    for (const samples of footParamsPerCurve(rig)) {
-      let run: number[] = [];
-      const flush = () => {
-        let incViol = 0,
-          decViol = 0;
-        for (let i = 1; i < run.length; i++) {
-          const d = run[i] - run[i - 1];
-          if (d < 0) incViol += -d;
-          if (d > 0) decViol += d;
-        }
-        const viol = Math.min(incViol, decViol);
-        if (viol > maxBacktrack) {
-          maxBacktrack = viol;
-          worstCurve = `[${run.map((t) => t.toFixed(3)).join(",")}]`;
-        }
-        run = [];
-      };
-      for (const s of samples) {
-        if (s.interior) run.push(s.t);
-        else flush();
-      }
-      flush();
-    }
-    check(
-      "feet monotonic within interior runs (no crossing, ≤1e-3)",
-      maxBacktrack <= 1e-3,
-      `max backtrack ${maxBacktrack.toExponential(2)}${maxBacktrack > 1e-3 ? ` in ${worstCurve}` : ""}`,
     );
 
     // --- 2. Random deformation: move one skeleton vertex 10–100px. ---

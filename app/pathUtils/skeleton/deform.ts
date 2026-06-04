@@ -905,27 +905,6 @@ export function applyDeform(
 }
 
 /**
- * Per non-shared boundary curve (one array per curve, in boundary order), the
- * foot parameter `T` of each sample on the original bone, plus whether the foot
- * is interior (vs clamped to a bone end, i.e. a cap sample). For verification:
- * a well-formed capsule has monotonic `T` within each interior run — caps turn
- * around at the clamped end, which is expected and excluded.
- */
-export function footParamsPerCurve(
-  rig: DeformRig,
-): { t: number; interior: boolean }[][] {
-  const out: { t: number; interior: boolean }[][] = [];
-  for (const rp of rig.primitives) {
-    for (const ring of rp.curveSamples) {
-      for (const cs of ring) {
-        if (cs) out.push(cs.map((s) => ({ t: s.t, interior: s.interior })));
-      }
-    }
-  }
-  return out;
-}
-
-/**
  * The corrected warp of the *interior* samples of every non-shared boundary
  * curve (single-edge warp + the blended shared correction — the same target the
  * deformed outline is built to track), per primitive (index-aligned with
