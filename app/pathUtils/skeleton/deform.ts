@@ -53,10 +53,19 @@ type PointEnc =
 // null when the handle is zero (straight segment).
 type HandleEnc = { edge: number; t: number; dist: number; angle: number } | null;
 
+/**
+ * A weighted reference to a shared vertex's correction δ (see `RigPrimitive.
+ * sharedVerts`). The corrected warp of any boundary point is
+ * `W_own(q) + Σ blend.w · δ[blend.v]`, blending the shared snap smoothly into
+ * the surrounding non-shared boundary so it no longer jumps at shared vertices.
+ */
+type BlendRef = { v: number; w: number };
+
 type SegEnc = {
   point: PointEnc;
   handleIn: HandleEnc;
   handleOut: HandleEnc;
+  blend: BlendRef[]; // shared-correction weights at this anchor
 };
 
 /**
@@ -75,6 +84,8 @@ type CurveSample = {
   sigmaS: number; // |B'_S(t)|  (bone speed)
   kappaS: number; // signed curvature of bone S at t
   interior: boolean; // foot strictly interior ⇒ iso-offset stretch; else ρ→1
+  arc: number; // cumulative arc length from the curve's start anchor (original)
+  blend: BlendRef[]; // shared-correction weights at this sample
 };
 
 type RigPrimitive = {
@@ -94,12 +105,19 @@ type RigPrimitive = {
    * shared anchors so neighbouring capsules remain coincident.
    */
   curveSamples: (CurveSample[] | null)[][];
+  /**
+   * Shared vertices of this capsule (the endpoints of its shared bisector
+   * segments), in `BlendRef.v` index order. At apply time each yields a
+   * correction δ = W_avg − W_own; see `BlendRef`.
+   */
+  sharedVerts: Extract<PointEnc, { kind: "shared" }>[];
 };
 
 // Accurate-warp tuning (1000-unit em space).
 const WARP_K = 16; // samples per non-shared curve (K+1 points)
 const WARP_TOL = 1.0; // max curve deviation before subdividing (em units)
 const WARP_MAX_DEPTH = 6; // recursion cap (≤ 2^depth cubics per original curve)
+const WARP_BLEND_L = 150; // arc-length support over which a shared correction decays
 
 export type DeformRig = {
   segments: [number, number][];
@@ -169,6 +187,95 @@ function coordKey(x: number, y: number): string {
 function ringsOf(path: paper.PathItem): paper.Path[] {
   if (path instanceof paper.CompoundPath) return path.children as paper.Path[];
   return [path as paper.Path];
+}
+
+/** Clamped smoothstep on [0,1]. */
+function smooth01(x: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * Fill `blend` on every anchor (`segEncs`) and every curve sample so the shared
+ * correction decays smoothly into the surrounding non-shared boundary instead of
+ * snapping only at the shared vertex. The boundary is split into maximal runs of
+ * consecutive non-shared curves (shared bisector segments act as barriers); each
+ * run blends the corrections of its two bounding shared vertices by arc-length,
+ * over a support `Leff = min(WARP_BLEND_L, runLen/2)`. The half-run cap makes the
+ * weight of the far vertex exactly 0 at each shared vertex, so a shared anchor
+ * still lands exactly on its averaged position (coincidence preserved).
+ */
+function assignBlendWeights(
+  segEncs: SegEnc[],
+  csRing: (CurveSample[] | null)[],
+  sharedId: number[],
+  closed: boolean,
+): void {
+  const n = segEncs.length;
+  const nc = closed ? n : n - 1;
+  const isShared = (ci: number) => csRing[ci] === null;
+  const curveLen = (ci: number) => {
+    const s = csRing[ci]!;
+    return s[s.length - 1].arc;
+  };
+
+  let startShared = -1;
+  for (let ci = 0; ci < nc; ci++)
+    if (isShared(ci)) {
+      startShared = ci;
+      break;
+    }
+  if (startShared < 0) return; // no shared boundary on this ring → no correction
+
+  let ci = (startShared + 1) % nc;
+  let visited = 0;
+  while (visited < nc) {
+    if (isShared(ci)) {
+      ci = (ci + 1) % nc;
+      visited++;
+      continue;
+    }
+    const runCurves: number[] = [];
+    while (visited < nc && !isShared(ci)) {
+      runCurves.push(ci);
+      ci = (ci + 1) % nc;
+      visited++;
+    }
+    const startAnchor = runCurves[0];
+    const endAnchor = (runCurves[runCurves.length - 1] + 1) % n;
+    const vS = sharedId[startAnchor];
+    const vE = sharedId[endAnchor];
+    let runLen = 0;
+    for (const c of runCurves) runLen += curveLen(c);
+    const Leff = Math.min(WARP_BLEND_L, runLen / 2);
+    const weightAt = (d: number): BlendRef[] => {
+      if (Leff <= 1e-9) return vS >= 0 ? [{ v: vS, w: 1 }] : [];
+      const out: BlendRef[] = [];
+      const wS = vS >= 0 ? smooth01(1 - d / Leff) : 0;
+      const wE = vE >= 0 ? smooth01(1 - (runLen - d) / Leff) : 0;
+      if (wS > 1e-6) out.push({ v: vS, w: wS });
+      if (wE > 1e-6) out.push({ v: vE, w: wE });
+      return out;
+    };
+
+    segEncs[startAnchor].blend = weightAt(0);
+    let acc = 0;
+    for (const c of runCurves) {
+      const samples = csRing[c]!;
+      for (const s of samples) s.blend = weightAt(acc + s.arc);
+      acc += curveLen(c);
+      segEncs[(c + 1) % n].blend = weightAt(acc);
+    }
+  }
+
+  // Shared vertices flanked by shared curves on both sides aren't part of any
+  // run; they still correct themselves fully.
+  for (let i = 0; i < n; i++) {
+    if (sharedId[i] >= 0 && segEncs[i].blend.length === 0) {
+      segEncs[i].blend = [{ v: sharedId[i], w: 1 }];
+    }
+  }
 }
 
 /**
@@ -249,9 +356,13 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
     const oCP2 = { x: sB.point.x + sB.handleIn.x, y: sB.point.y + sB.handleIn.y };
     const oP3 = { x: sB.point.x, y: sB.point.y };
     const arr: CurveSample[] = [];
+    let arc = 0;
+    let prev: Vec2D | null = null;
     for (let k = 0; k <= WARP_K; k++) {
       const s = k / WARP_K;
       const p = evalBezier(oP0, oCP1, oCP2, oP3, s);
+      if (prev) arc += Math.hypot(p.x - prev.x, p.y - prev.y);
+      prev = p;
       const pv = bezierTangent(oP0, oCP1, oCP2, oP3, s); // original curve velocity
       const t = footParamOnBezier(p, bone.pA, bone.cp1, bone.cp2, bone.pB, march.t);
       march.t = t;
@@ -267,6 +378,8 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
         sigmaS: f.sigma,
         kappaS: f.kappa,
         interior: t > 1e-6 && t < 1 - 1e-6,
+        arc,
+        blend: [],
       });
     }
     return arr;
@@ -274,15 +387,17 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
 
   const rigPrims: RigPrimitive[] = fitted.primitives.map((prim) => {
     if (prim.type !== "edge" || !prim.clippedPath) {
-      return { prim, rings: [], closed: [], curveSamples: [] };
+      return { prim, rings: [], closed: [], curveSamples: [], sharedVerts: [] };
     }
     const ownEdge = prim.elementIdx;
     const bone = boneOf(S, segments, ownEdge);
     const rings: SegEnc[][] = [];
     const closed: boolean[] = [];
     const curveSamples: (CurveSample[] | null)[][] = [];
+    const sharedVerts: Extract<PointEnc, { kind: "shared" }>[] = [];
     for (const ring of ringsOf(prim.clippedPath)) {
       const segEncs: SegEnc[] = [];
+      const sharedId: number[] = []; // per anchor: shared-vertex id, else -1
       let prevT = 0;
       for (const seg of ring.segments) {
         const q = seg.point;
@@ -292,6 +407,7 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
         const key = coordKey(q.x, q.y);
         const sharers = sharedAt.get(key);
         let point: PointEnc;
+        let sid = -1;
         if (sharers && sharers.size >= 2) {
           const members: AnchorMember[] = [];
           const edges: number[] = [];
@@ -316,15 +432,20 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
               jointIdx = idx;
             }
           }
-          point = { kind: "shared", members, jointIdx };
+          const sharedPoint = { kind: "shared" as const, members, jointIdx };
+          point = sharedPoint;
+          sid = sharedVerts.length;
+          sharedVerts.push(sharedPoint);
         } else {
           point = { kind: "single", m: own };
         }
+        sharedId.push(sid);
 
         segEncs.push({
           point,
           handleIn: encodeHandle(seg.handleIn, ownEdge, own.t),
           handleOut: encodeHandle(seg.handleOut, ownEdge, own.t),
+          blend: [],
         });
       }
       // Per-curve warp samples for accurate reconstruction. Shared (straight
@@ -344,11 +465,13 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
         );
       }
 
+      assignBlendWeights(segEncs, csRing, sharedId, ring.closed);
+
       rings.push(segEncs);
       closed.push(ring.closed);
       curveSamples.push(csRing);
     }
-    return { prim, rings, closed, curveSamples };
+    return { prim, rings, closed, curveSamples, sharedVerts };
   });
 
   return {
@@ -439,25 +562,6 @@ function warpPoint(
   return { x: J.x + (R * dx) / len, y: J.y + (R * dy) / len };
 }
 
-/**
- * Warp an anchor for the capsule owned by `ownEdge`. With `averageShared` (the
- * default), shared anchors use the coincidence-preserving averaged/re-expanded
- * position (`warpPoint`); without it, they use this capsule's own-edge member —
- * the raw single-edge warp *before* shared averaging (for visualisation).
- */
-function warpPointFor(
-  enc: PointEnc,
-  ownEdge: number,
-  sPrime: DeformedSkeleton,
-  segments: [number, number][],
-  averageShared: boolean,
-): Vec2D {
-  if (enc.kind === "single") return warpAnchor(enc.m, sPrime, segments);
-  if (averageShared) return warpPoint(enc, sPrime, segments);
-  const own = enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0];
-  return warpAnchor(own, sPrime, segments);
-}
-
 function warpHandle(
   enc: HandleEnc,
   sPrime: DeformedSkeleton,
@@ -511,6 +615,7 @@ function warpCurveChain(
   hi: number,
   A: Vec2D,
   B: Vec2D,
+  warpPt: (i: number) => Vec2D, // corrected true warp of sample i
   sPrime: DeformedSkeleton,
   segments: [number, number][],
   depth: number,
@@ -524,7 +629,7 @@ function warpCurveChain(
 
   let maxErr = 0;
   for (let j = lo + 1; j < hi; j++) {
-    const tp = warpAnchor(samples[j], sPrime, segments); // true warp point
+    const tp = warpPt(j); // true (corrected) warp point
     const u = (j - lo) / (hi - lo);
     const c = evalBezier(A, cp1, cp2, B, u);
     maxErr = Math.max(maxErr, Math.hypot(tp.x - c.x, tp.y - c.y));
@@ -540,9 +645,9 @@ function warpCurveChain(
     return;
   }
   const m = (lo + hi) >> 1;
-  const mid = warpAnchor(samples[m], sPrime, segments);
-  warpCurveChain(samples, lo, m, A, mid, sPrime, segments, depth + 1, out);
-  warpCurveChain(samples, m, hi, mid, B, sPrime, segments, depth + 1, out);
+  const mid = warpPt(m);
+  warpCurveChain(samples, lo, m, A, mid, warpPt, sPrime, segments, depth + 1, out);
+  warpCurveChain(samples, m, hi, mid, B, warpPt, sPrime, segments, depth + 1, out);
 }
 
 /**
@@ -574,6 +679,33 @@ export function applyDeform(
     // Rebuilt per-piece tags (subdivision changes the curve count, so the
     // original boundaryTags no longer align with the warped path's curves).
     const ownEdge = prim.elementIdx;
+
+    // Shared-vertex corrections δ = W_avg − W_own. Blended smoothly into the
+    // surrounding boundary (per-anchor / per-sample `blend` weights) so the
+    // shared snap no longer jumps at the shared vertex. Disabled when
+    // !averageShared (raw single-edge warp, for visualisation).
+    const ownOf = (enc: PointEnc): AnchorMember =>
+      enc.kind === "single"
+        ? enc.m
+        : enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0];
+    const deltas: Vec2D[] = averageShared
+      ? rp.sharedVerts.map((sv) => {
+          const avg = warpPoint(sv, sPrime, segments);
+          const own = warpAnchor(ownOf(sv), sPrime, segments);
+          return { x: avg.x - own.x, y: avg.y - own.y };
+        })
+      : [];
+    const warpCorrected = (m: AnchorMember, blend: BlendRef[]): Vec2D => {
+      const base = warpAnchor(m, sPrime, segments);
+      if (!averageShared) return base; // raw single-edge warp (visualisation)
+      let cx = 0, cy = 0;
+      for (const { v, w } of blend) {
+        cx += w * deltas[v].x;
+        cy += w * deltas[v].y;
+      }
+      return { x: base.x + cx, y: base.y + cy };
+    };
+
     const newTags: BoundaryTag[] = [];
     const ringPaths: paper.Path[] = [];
     for (let r = 0; r < rp.rings.length; r++) {
@@ -587,15 +719,16 @@ export function applyDeform(
       // originating curve's boundary tag.
       const pieces: CubicPiece[] = [];
       for (let ci = 0; ci < nc; ci++) {
-        const A = warpPointFor(ringEnc[ci].point, ownEdge, sPrime, segments, averageShared);
-        const B = warpPointFor(ringEnc[(ci + 1) % n].point, ownEdge, sPrime, segments, averageShared);
+        const encA = ringEnc[ci], encB = ringEnc[(ci + 1) % n];
+        const A = warpCorrected(ownOf(encA.point), encA.blend);
+        const B = warpCorrected(ownOf(encB.point), encB.blend);
         const samples = csRing[ci];
         const tag: BoundaryTag = rp.prim.boundaryTags?.[ci] ?? { kind: "bezier" };
         if (!samples) {
           // Shared / straight: keep the (zero-handle) segment between anchors so
           // neighbouring capsules stay coincident.
-          const hout = warpHandle(ringEnc[ci].handleOut, sPrime, segments);
-          const hin = warpHandle(ringEnc[(ci + 1) % n].handleIn, sPrime, segments);
+          const hout = warpHandle(encA.handleOut, sPrime, segments);
+          const hin = warpHandle(encB.handleIn, sPrime, segments);
           pieces.push({
             p0: A,
             cp1: { x: A.x + hout.x, y: A.y + hout.y },
@@ -604,8 +737,9 @@ export function applyDeform(
           });
           newTags.push(tag);
         } else {
+          const warpPt = (i: number) => warpCorrected(samples[i], samples[i].blend);
           const before = pieces.length;
-          warpCurveChain(samples, 0, samples.length - 1, A, B, sPrime, segments, 0, pieces);
+          warpCurveChain(samples, 0, samples.length - 1, A, B, warpPt, sPrime, segments, 0, pieces);
           for (let k = before; k < pieces.length; k++) newTags.push(tag);
         }
       }
@@ -649,25 +783,44 @@ export function applyDeform(
 }
 
 /**
- * The true warp `W(p)` of the *interior* samples of every non-shared boundary
- * curve, per primitive (index-aligned with `rig.primitives`). For verification:
- * the deformed outline should pass within tolerance of all of these points.
+ * The corrected warp of the *interior* samples of every non-shared boundary
+ * curve (single-edge warp + the blended shared correction — the same target the
+ * deformed outline is built to track), per primitive (index-aligned with
+ * `rig.primitives`). For verification: the deformed outline should pass within
+ * tolerance of all of these points.
  *
- * Curve endpoints are excluded — they are placed by `warpPoint` (shared anchors
- * use the re-expanded joint position, which intentionally differs from the
- * single-edge warp), so only interior samples test the per-curve warp accuracy.
+ * Curve endpoints are excluded — they are placed by the shared averaging, which
+ * intentionally differs from the single-edge warp, so only interior samples test
+ * the per-curve warp accuracy.
  */
 export function warpedCurveSamplePoints(
   rig: DeformRig,
   sPrime: DeformedSkeleton,
 ): Vec2D[][] {
+  const segments = rig.segments;
   return rig.primitives.map((rp) => {
+    const ownEdge = rp.prim.elementIdx;
+    const deltas = rp.sharedVerts.map((sv) => {
+      const avg = warpPoint(sv, sPrime, segments);
+      const own = warpAnchor(
+        sv.members.find((m) => m.edge === ownEdge) ?? sv.members[0],
+        sPrime,
+        segments,
+      );
+      return { x: avg.x - own.x, y: avg.y - own.y };
+    });
     const pts: Vec2D[] = [];
     for (const ring of rp.curveSamples) {
       for (const cs of ring) {
         if (!cs) continue;
         for (let j = 1; j < cs.length - 1; j++) {
-          pts.push(warpAnchor(cs[j], sPrime, rig.segments));
+          const base = warpAnchor(cs[j], sPrime, segments);
+          let cx = 0, cy = 0;
+          for (const { v, w } of cs[j].blend) {
+            cx += w * deltas[v].x;
+            cy += w * deltas[v].y;
+          }
+          pts.push({ x: base.x + cx, y: base.y + cy });
         }
       }
     }
