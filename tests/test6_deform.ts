@@ -176,6 +176,26 @@ function svgFromPathItem(
   return cmds.join(" ");
 }
 
+/** Write the deformed outline to test_outputs/deform_<label>.svg in native
+ *  (em-space) coordinates, with a small padding around its bounds. */
+function writeOutlineSvg(label: string, outline: paper.PathItem): void {
+  const d = outline.pathData;
+  if (!d) return;
+  const bb = outline.bounds;
+  const pad = Math.max(bb.width, bb.height) * 0.05 + 5;
+  const vb = [bb.x - pad, bb.y - pad, bb.width + 2 * pad, bb.height + 2 * pad]
+    .map((v) => v.toFixed(2))
+    .join(" ");
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}">\n` +
+    `  <path d="${d}" fill="#000" fill-rule="evenodd"/>\n` +
+    `</svg>\n`;
+  const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
+  const outPath = `test_outputs/deform_${safeName}.svg`;
+  fs.writeFileSync(outPath, svg);
+  console.log(`  → saved ${outPath}`);
+}
+
 function edgePathData(
   pts: { x: number; y: number }[],
   cps: [{ x: number; y: number }, { x: number; y: number }][] | undefined,
@@ -625,6 +645,8 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             break;
           }
       check("deformed outline is bezier (has curves)", hasCurve, "");
+
+      writeOutlineSvg(label, outline);
 
       const original = unionDeformedPrimitives(fitted.primitives);
       if (original) {
