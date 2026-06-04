@@ -30,7 +30,10 @@ import {
   unionDeformedPrimitives,
   warpedCurveSamplePoints,
 } from "@/app/pathUtils/skeleton/deform";
-import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import {
+  FittedMedialAxisGraph,
+  Primitive,
+} from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { skeletonizePath } from "@/app/pathUtils/skeleton/skeleton";
 
 import {
@@ -193,6 +196,47 @@ function writeOutlineSvg(label: string, outline: paper.PathItem): void {
     `</svg>\n`;
   const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
   const outPath = `test_outputs/deform_${safeName}.svg`;
+  fs.writeFileSync(outPath, svg);
+  console.log(`  → saved ${outPath}`);
+}
+
+/** Write every warped capsule (pre-union) to a single SVG, one hue per edge
+ *  (test5 scheme; vertex disks red). Used for the pre-averaging capsules. */
+function writeCapsulesSvg(
+  label: string,
+  prims: Primitive[],
+  nSegs: number,
+  suffix: string,
+): void {
+  let bb: paper.Rectangle | null = null;
+  for (const p of prims) {
+    if (!p.clippedPath) continue;
+    bb = bb ? bb.unite(p.clippedPath.bounds) : p.clippedPath.bounds;
+  }
+  if (!bb) return;
+  const pad = Math.max(bb.width, bb.height) * 0.05 + 5;
+  const vb = [bb.x - pad, bb.y - pad, bb.width + 2 * pad, bb.height + 2 * pad]
+    .map((v) => v.toFixed(2))
+    .join(" ");
+  const hue = (i: number) => Math.round((i * 360) / Math.max(1, nSegs));
+  const paths: string[] = [];
+  for (const p of prims) {
+    const d = p.clippedPath?.pathData;
+    if (!d) continue;
+    const isEdge = p.type === "edge";
+    const fill = isEdge ? `hsl(${hue(p.elementIdx)}, 70%, 60%)` : "rgb(255,100,100)";
+    const stroke = isEdge ? `hsl(${hue(p.elementIdx)}, 70%, 35%)` : "rgb(255,0,0)";
+    paths.push(
+      `  <path d="${d}" fill="${fill}" fill-opacity="0.22" ` +
+        `stroke="${stroke}" stroke-width="1.5" fill-rule="evenodd"/>`,
+    );
+  }
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}">\n` +
+    paths.join("\n") +
+    `\n</svg>\n`;
+  const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
+  const outPath = `test_outputs/deform_${safeName}${suffix}.svg`;
   fs.writeFileSync(outPath, svg);
   console.log(`  → saved ${outPath}`);
 }
@@ -726,6 +770,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         }
         // Pre-averaging capsules (dashed, no fill, same hue) overlaid on top.
         const warpedPre = applyDeform(rig, edit.skeleton, false);
+        writeCapsulesSvg(label, warpedPre, nSegs, "_capsules_preavg");
         for (const prim of warpedPre) {
           if (!prim.clippedPath) continue;
           capLayers.push({
