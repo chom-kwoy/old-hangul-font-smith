@@ -64,6 +64,25 @@ export function bezierTangent(
 }
 
 /**
+ * Second derivative B''(t) of a cubic Bezier at t ∈ [0, 1].
+ * Returns zero when CPs are undefined (linear segment has zero curvature).
+ */
+export function bezierSecondDerivative(
+  pA: Vec2D,
+  cp1: Vec2D | undefined,
+  cp2: Vec2D | undefined,
+  pB: Vec2D,
+  t: number,
+): Vec2D {
+  if (!cp1 || !cp2) return { x: 0, y: 0 };
+  const u = 1 - t;
+  return {
+    x: 6 * (u * (cp2.x - 2 * cp1.x + pA.x) + t * (pB.x - 2 * cp2.x + cp1.x)),
+    y: 6 * (u * (cp2.y - 2 * cp1.y + pA.y) + t * (pB.y - 2 * cp2.y + cp1.y)),
+  };
+}
+
+/**
  * Foot-point parameter t* ∈ [0,1] on the cubic Bezier (pA,cp1,cp2,pB) nearest
  * to q. Coarse-samples for a good seed, then Newton-refines. The seed avoids
  * the Newton local-minimum trap near caps/loops.

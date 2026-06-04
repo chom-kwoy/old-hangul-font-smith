@@ -1,11 +1,13 @@
 import paper from "paper";
 
 import {
+  bezierSecondDerivative,
   bezierTangent,
   evalBezier,
   footParamOnBezier,
 } from "@/app/pathUtils/skeleton/bezierFitting";
 import {
+  BoundaryTag,
   FittedMedialAxisGraph,
   Primitive,
 } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
@@ -57,6 +59,24 @@ type SegEnc = {
   handleOut: HandleEnc;
 };
 
+/**
+ * A point sampled along an original (non-shared) boundary curve, with every
+ * quantity that depends only on S precomputed. At apply time only the S' bone
+ * frame is evaluated to obtain the warped point and the analytic curve velocity
+ * (see `warpVelocity`).
+ */
+type CurveSample = {
+  edge: number; // owning edge (its bone defines the frame)
+  t: number; // foot parameter on bone S
+  a: number; // tangential offset in S's frame (≈0 for interior feet)
+  b: number; // signed normal offset in S's frame
+  vt: number; // original curve velocity · τ_S  (tangential component)
+  vn: number; // original curve velocity · ν_S  (normal component)
+  sigmaS: number; // |B'_S(t)|  (bone speed)
+  kappaS: number; // signed curvature of bone S at t
+  interior: boolean; // foot strictly interior ⇒ iso-offset stretch; else ρ→1
+};
+
 type RigPrimitive = {
   /** Reference to the original primitive (carries type/elementIdx/boundaryTags). */
   prim: Primitive;
@@ -67,7 +87,19 @@ type RigPrimitive = {
    */
   rings: SegEnc[][];
   closed: boolean[];
+  /**
+   * Per-ring, per-curve sampled warp data for accurate reconstruction. Indexed
+   * [ring][curve] where curve `ci` runs segment `ci`→`ci+1`. `null` for shared
+   * (straight bisector) curves — those stay the straight segment between the two
+   * shared anchors so neighbouring capsules remain coincident.
+   */
+  curveSamples: (CurveSample[] | null)[][];
 };
+
+// Accurate-warp tuning (1000-unit em space).
+const WARP_K = 16; // samples per non-shared curve (K+1 points)
+const WARP_TOL = 1.0; // max curve deviation before subdividing (em units)
+const WARP_MAX_DEPTH = 6; // recursion cap (≤ 2^depth cubics per original curve)
 
 export type DeformRig = {
   segments: [number, number][];
@@ -104,6 +136,27 @@ function frameAt(
   const tau = { x: tg.x / len, y: tg.y / len };
   const nu = { x: -tau.y, y: tau.x };
   return { o, tau, nu };
+}
+
+type FullFrame = Frame & { sigma: number; kappa: number };
+
+/** Frame plus bone speed σ=|B'| and signed curvature κ=(B'×B'')/σ³ at t. */
+function boneFrameFull(
+  graph: DeformedSkeleton,
+  segments: [number, number][],
+  edge: number,
+  t: number,
+): FullFrame {
+  const { pA, cp1, cp2, pB } = boneOf(graph, segments, edge);
+  const o = evalBezier(pA, cp1, cp2, pB, t);
+  const d1 = bezierTangent(pA, cp1, cp2, pB, t);
+  const d2 = bezierSecondDerivative(pA, cp1, cp2, pB, t);
+  let sigma = Math.hypot(d1.x, d1.y);
+  if (sigma < 1e-9) sigma = 1e-9;
+  const tau = { x: d1.x / sigma, y: d1.y / sigma };
+  const nu = { x: -tau.y, y: tau.x };
+  const kappa = (d1.x * d2.y - d1.y * d2.x) / (sigma * sigma * sigma);
+  return { o, tau, nu, sigma, kappa };
 }
 
 // --- buildDeformRig -------------------------------------------------------
@@ -182,13 +235,52 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
     return { edge, t, dist, angle: Math.atan2(cross, dot) };
   };
 
+  // Sample one non-shared curve (segments ci → ci+1) and precompute the
+  // S-dependent warp data for each sample. `march` seeds footParam on-branch.
+  const sampleCurve = (
+    sA: paper.Segment,
+    sB: paper.Segment,
+    ownEdge: number,
+    bone: { pA: Vec2D; cp1?: Vec2D; cp2?: Vec2D; pB: Vec2D },
+    march: { t: number | undefined },
+  ): CurveSample[] => {
+    const oP0 = { x: sA.point.x, y: sA.point.y };
+    const oCP1 = { x: sA.point.x + sA.handleOut.x, y: sA.point.y + sA.handleOut.y };
+    const oCP2 = { x: sB.point.x + sB.handleIn.x, y: sB.point.y + sB.handleIn.y };
+    const oP3 = { x: sB.point.x, y: sB.point.y };
+    const arr: CurveSample[] = [];
+    for (let k = 0; k <= WARP_K; k++) {
+      const s = k / WARP_K;
+      const p = evalBezier(oP0, oCP1, oCP2, oP3, s);
+      const pv = bezierTangent(oP0, oCP1, oCP2, oP3, s); // original curve velocity
+      const t = footParamOnBezier(p, bone.pA, bone.cp1, bone.cp2, bone.pB, march.t);
+      march.t = t;
+      const f = boneFrameFull(S, segments, ownEdge, t);
+      const wx = p.x - f.o.x, wy = p.y - f.o.y;
+      arr.push({
+        edge: ownEdge,
+        t,
+        a: wx * f.tau.x + wy * f.tau.y,
+        b: wx * f.nu.x + wy * f.nu.y,
+        vt: pv.x * f.tau.x + pv.y * f.tau.y,
+        vn: pv.x * f.nu.x + pv.y * f.nu.y,
+        sigmaS: f.sigma,
+        kappaS: f.kappa,
+        interior: t > 1e-6 && t < 1 - 1e-6,
+      });
+    }
+    return arr;
+  };
+
   const rigPrims: RigPrimitive[] = fitted.primitives.map((prim) => {
     if (prim.type !== "edge" || !prim.clippedPath) {
-      return { prim, rings: [], closed: [] };
+      return { prim, rings: [], closed: [], curveSamples: [] };
     }
     const ownEdge = prim.elementIdx;
+    const bone = boneOf(S, segments, ownEdge);
     const rings: SegEnc[][] = [];
     const closed: boolean[] = [];
+    const curveSamples: (CurveSample[] | null)[][] = [];
     for (const ring of ringsOf(prim.clippedPath)) {
       const segEncs: SegEnc[] = [];
       let prevT = 0;
@@ -235,10 +327,28 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
           handleOut: encodeHandle(seg.handleOut, ownEdge, own.t),
         });
       }
+      // Per-curve warp samples for accurate reconstruction. Shared (straight
+      // bisector) curves stay straight ⇒ null; non-shared curves are sampled.
+      const segs = ring.segments;
+      const nc = ring.closed ? segs.length : segs.length - 1;
+      const csRing: (CurveSample[] | null)[] = [];
+      const march = { t: undefined as number | undefined };
+      for (let ci = 0; ci < nc; ci++) {
+        if (prim.boundaryTags?.[ci]?.kind === "shared") {
+          csRing.push(null);
+          march.t = undefined; // restart marching after a straight gap
+          continue;
+        }
+        csRing.push(
+          sampleCurve(segs[ci], segs[(ci + 1) % segs.length], ownEdge, bone, march),
+        );
+      }
+
       rings.push(segEncs);
       closed.push(ring.closed);
+      curveSamples.push(csRing);
     }
-    return { prim, rings, closed };
+    return { prim, rings, closed, curveSamples };
   });
 
   return {
@@ -344,6 +454,79 @@ function warpHandle(
 }
 
 /**
+ * Analytic velocity dC/ds of the warped curve `C(s)=W(p(s))` at a sample, in S'.
+ * The original velocity's tangential part scales by the iso-offset stretch ratio
+ * ρ = σ'(1−bκ') / (σ(1−bκ)) and rides τ'; the normal part rides ν' rigidly.
+ * Clamped (cap) feet have a locally constant frame ⇒ ρ=1 (frame rotation only).
+ */
+function warpVelocity(
+  cs: CurveSample,
+  sPrime: DeformedSkeleton,
+  segments: [number, number][],
+): Vec2D {
+  const f = boneFrameFull(sPrime, segments, cs.edge, cs.t);
+  let rho = 1;
+  if (cs.interior) {
+    const denom = cs.sigmaS * (1 - cs.b * cs.kappaS);
+    if (Math.abs(denom) > 1e-9) {
+      rho = (f.sigma * (1 - cs.b * f.kappa)) / denom;
+    }
+  }
+  return {
+    x: rho * cs.vt * f.tau.x + cs.vn * f.nu.x,
+    y: rho * cs.vt * f.tau.y + cs.vn * f.nu.y,
+  };
+}
+
+type CubicPiece = { p0: Vec2D; cp1: Vec2D; cp2: Vec2D; p3: Vec2D };
+
+/**
+ * Warp one original curve into a chain of cubic pieces. The default is a single
+ * Hermite cubic matching the warped endpoint positions (A,B) and the analytic
+ * endpoint velocities; if the true warp of interior samples deviates beyond
+ * `WARP_TOL`, split at the worst sample (a true warp point) and recurse.
+ */
+function warpCurveChain(
+  samples: CurveSample[],
+  lo: number,
+  hi: number,
+  A: Vec2D,
+  B: Vec2D,
+  sPrime: DeformedSkeleton,
+  segments: [number, number][],
+  depth: number,
+  out: CubicPiece[],
+): void {
+  const ds = (hi - lo) / WARP_K; // span in original curve parameter s
+  const vlo = warpVelocity(samples[lo], sPrime, segments);
+  const vhi = warpVelocity(samples[hi], sPrime, segments);
+  const cp1 = { x: A.x + (vlo.x * ds) / 3, y: A.y + (vlo.y * ds) / 3 };
+  const cp2 = { x: B.x - (vhi.x * ds) / 3, y: B.y - (vhi.y * ds) / 3 };
+
+  let maxErr = 0;
+  for (let j = lo + 1; j < hi; j++) {
+    const tp = warpAnchor(samples[j], sPrime, segments); // true warp point
+    const u = (j - lo) / (hi - lo);
+    const c = evalBezier(A, cp1, cp2, B, u);
+    maxErr = Math.max(maxErr, Math.hypot(tp.x - c.x, tp.y - c.y));
+  }
+
+  // Stop when accurate enough, out of intervals, or at the depth cap. Split at
+  // the MIDPOINT (balanced bisection) so every refined piece shrinks to a single
+  // sample interval within log2(K) levels — guaranteeing the emitted curve
+  // passes through every sample. (Splitting at the worst sample can stall under
+  // the depth cap when splits are lopsided.)
+  if (maxErr <= WARP_TOL || hi - lo <= 1 || depth >= WARP_MAX_DEPTH) {
+    out.push({ p0: A, cp1, cp2, p3: B });
+    return;
+  }
+  const m = (lo + hi) >> 1;
+  const mid = warpAnchor(samples[m], sPrime, segments);
+  warpCurveChain(samples, lo, m, A, mid, sPrime, segments, depth + 1, out);
+  warpCurveChain(samples, m, hi, mid, B, sPrime, segments, depth + 1, out);
+}
+
+/**
  * Apply a precomputed rig to an edited skeleton, returning the deformed
  * primitives (each with a warped `clippedPath`; original boundaryTags / type /
  * elementIdx / origins / directions / radii carried through).
@@ -368,25 +551,106 @@ export function applyDeform(
       return { ...prim };
     }
 
+    // Rebuilt per-piece tags (subdivision changes the curve count, so the
+    // original boundaryTags no longer align with the warped path's curves).
+    const newTags: BoundaryTag[] = [];
     const ringPaths: paper.Path[] = [];
     for (let r = 0; r < rp.rings.length; r++) {
-      const segs = rp.rings[r].map((se) => {
-        const pt = warpPoint(se.point, sPrime, segments);
-        const hin = warpHandle(se.handleIn, sPrime, segments);
-        const hout = warpHandle(se.handleOut, sPrime, segments);
-        return new paper.Segment(
-          new paper.Point(pt.x, pt.y),
-          new paper.Point(hin.x, hin.y),
-          new paper.Point(hout.x, hout.y),
-        );
-      });
-      ringPaths.push(new paper.Path({ segments: segs, closed: rp.closed[r], insert: false }));
+      const ringEnc = rp.rings[r];
+      const csRing = rp.curveSamples[r];
+      const n = ringEnc.length;
+      const closed = rp.closed[r];
+      const nc = closed ? n : n - 1; // curves in this ring
+
+      // Emit each curve as one or more cubic pieces, tagging each piece with its
+      // originating curve's boundary tag.
+      const pieces: CubicPiece[] = [];
+      for (let ci = 0; ci < nc; ci++) {
+        const A = warpPoint(ringEnc[ci].point, sPrime, segments);
+        const B = warpPoint(ringEnc[(ci + 1) % n].point, sPrime, segments);
+        const samples = csRing[ci];
+        const tag: BoundaryTag = rp.prim.boundaryTags?.[ci] ?? { kind: "bezier" };
+        if (!samples) {
+          // Shared / straight: keep the (zero-handle) segment between anchors so
+          // neighbouring capsules stay coincident.
+          const hout = warpHandle(ringEnc[ci].handleOut, sPrime, segments);
+          const hin = warpHandle(ringEnc[(ci + 1) % n].handleIn, sPrime, segments);
+          pieces.push({
+            p0: A,
+            cp1: { x: A.x + hout.x, y: A.y + hout.y },
+            cp2: { x: B.x + hin.x, y: B.y + hin.y },
+            p3: B,
+          });
+          newTags.push(tag);
+        } else {
+          const before = pieces.length;
+          warpCurveChain(samples, 0, samples.length - 1, A, B, sPrime, segments, 0, pieces);
+          for (let k = before; k < pieces.length; k++) newTags.push(tag);
+        }
+      }
+
+      // Assemble piece chain into segment nodes (out-handle of one anchor +
+      // in-handle of the next). Consecutive pieces share an endpoint exactly.
+      const segObjs: paper.Segment[] = [];
+      if (pieces.length > 0) {
+        const nodes: { point: Vec2D; hin: Vec2D; hout: Vec2D }[] = [
+          { point: pieces[0].p0, hin: { x: 0, y: 0 }, hout: { x: 0, y: 0 } },
+        ];
+        for (let k = 0; k < pieces.length; k++) {
+          const pc = pieces[k];
+          const cur = nodes[nodes.length - 1];
+          cur.hout = { x: pc.cp1.x - pc.p0.x, y: pc.cp1.y - pc.p0.y };
+          const inH = { x: pc.cp2.x - pc.p3.x, y: pc.cp2.y - pc.p3.y };
+          if (k === pieces.length - 1 && closed) {
+            nodes[0].hin = inH; // last piece returns to the first anchor
+          } else {
+            nodes.push({ point: pc.p3, hin: inH, hout: { x: 0, y: 0 } });
+          }
+        }
+        for (const nd of nodes) {
+          segObjs.push(
+            new paper.Segment(
+              new paper.Point(nd.point.x, nd.point.y),
+              new paper.Point(nd.hin.x, nd.hin.y),
+              new paper.Point(nd.hout.x, nd.hout.y),
+            ),
+          );
+        }
+      }
+      ringPaths.push(new paper.Path({ segments: segObjs, closed, insert: false }));
     }
     const clippedPath: paper.PathItem =
       ringPaths.length === 1
         ? ringPaths[0]
         : new paper.CompoundPath({ children: ringPaths, insert: false });
-    return { ...prim, clippedPath };
+    return { ...prim, clippedPath, boundaryTags: newTags };
+  });
+}
+
+/**
+ * The true warp `W(p)` of the *interior* samples of every non-shared boundary
+ * curve, per primitive (index-aligned with `rig.primitives`). For verification:
+ * the deformed outline should pass within tolerance of all of these points.
+ *
+ * Curve endpoints are excluded — they are placed by `warpPoint` (shared anchors
+ * use the re-expanded joint position, which intentionally differs from the
+ * single-edge warp), so only interior samples test the per-curve warp accuracy.
+ */
+export function warpedCurveSamplePoints(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+): Vec2D[][] {
+  return rig.primitives.map((rp) => {
+    const pts: Vec2D[] = [];
+    for (const ring of rp.curveSamples) {
+      for (const cs of ring) {
+        if (!cs) continue;
+        for (let j = 1; j < cs.length - 1; j++) {
+          pts.push(warpAnchor(cs[j], sPrime, rig.segments));
+        }
+      }
+    }
+    return pts;
   });
 }
 

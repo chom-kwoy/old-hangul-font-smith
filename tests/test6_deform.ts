@@ -27,6 +27,7 @@ import {
   buildDeformRig,
   deformOutline,
   unionDeformedPrimitives,
+  warpedCurveSamplePoints,
 } from "@/app/pathUtils/skeleton/deform";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { skeletonizePath } from "@/app/pathUtils/skeleton/skeleton";
@@ -446,6 +447,34 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       "shared boundaries stay coincident after deform (≤1e-6)",
       editGap <= 1e-6,
       `moved v${edit.movedIdx} by ${moveDist.toFixed(0)}px → gap ${editGap.toExponential(2)}`,
+    );
+
+    // The deformed outline must track the *true* per-point warp of the original
+    // boundary (not a stale 4-control-point cubic): every true warp sample lies
+    // within tolerance of the emitted deformed curve.
+    const truePts = warpedCurveSamplePoints(rig, edit.skeleton);
+    let trackErr = 0;
+    for (let i = 0; i < warped.length; i++) {
+      const cp = warped[i].clippedPath;
+      if (!cp) continue;
+      const subPaths =
+        cp instanceof paper.CompoundPath
+          ? (cp.children as paper.Path[])
+          : [cp as paper.Path];
+      for (const p of truePts[i]) {
+        const q = new paper.Point(p.x, p.y);
+        let near = Infinity;
+        for (const sp of subPaths) {
+          const np = sp.getNearestPoint(q);
+          if (np) near = Math.min(near, np.getDistance(q));
+        }
+        if (near !== Infinity) trackErr = Math.max(trackErr, near);
+      }
+    }
+    check(
+      "deformed outline tracks the true warp (≤2px)",
+      trackErr <= 2.0,
+      `max ${trackErr.toFixed(3)}px`,
     );
 
     // --- 3. Faithful bezier outline + visualization. ---
