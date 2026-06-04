@@ -26,6 +26,7 @@ import {
   boneLinks,
   buildDeformRig,
   deformOutline,
+  sharedFootLinks,
   unionDeformedPrimitives,
   warpedCurveSamplePoints,
 } from "@/app/pathUtils/skeleton/deform";
@@ -301,6 +302,7 @@ function renderDeform(
   original: paper.PathItem,
   layers: DeformLayer[],
   links: BoneLink[],
+  sharedLinks: BoneLink[],
   suffix: string,
   drawControlNet: boolean,
 ): void {
@@ -347,6 +349,29 @@ function renderDeform(
       new FabricLine([tx(bone.x), ty(bone.y), tx(anchor.x), ty(anchor.y)], {
         stroke: "rgba(0,0,0,0.28)",
         strokeWidth: 0.5,
+        selectable: false,
+      }),
+    );
+  }
+
+  // Shared boundary points neighbouring a non-shared curve → their foot on each
+  // sharing edge's bone (red spokes), to show whether the foot sits on the joint.
+  for (const { anchor, bone } of sharedLinks) {
+    canvas.add(
+      new FabricLine([tx(bone.x), ty(bone.y), tx(anchor.x), ty(anchor.y)], {
+        stroke: "rgba(210,40,40,0.7)",
+        strokeWidth: 0.9,
+        selectable: false,
+      }),
+    );
+    canvas.add(
+      new FabricCircle({
+        left: tx(bone.x),
+        top: ty(bone.y),
+        radius: 2,
+        fill: "rgba(210,40,40,0.85)",
+        originX: "center",
+        originY: "center",
         selectable: false,
       }),
     );
@@ -653,6 +678,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       const original = unionDeformedPrimitives(fitted.primitives);
       if (original) {
         const links = boneLinks(rig);
+        const sharedLinks = sharedFootLinks(rig);
         // Viz 1: the union'd deformed outline (solid blue).
         renderDeform(
           label,
@@ -668,6 +694,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             },
           ],
           links,
+          sharedLinks,
           "",
           true,
         );
@@ -706,10 +733,10 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             fill: "",
             stroke:
               prim.type === "edge"
-                ? `hsl(${hue(prim.elementIdx)}, 80%, 28%)`
+                ? `hsl(${hue(prim.elementIdx)}, 80%, 80%)`
                 : "rgba(200,0,0,0.95)",
             strokeWidth: 1.5,
-            dash: [5, 4],
+            dash: [1, 1],
           });
         }
         renderDeform(
@@ -719,6 +746,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           original,
           capLayers,
           links,
+          sharedLinks,
           "_capsules",
           false,
         );

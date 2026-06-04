@@ -531,6 +531,46 @@ export function boneLinks(
   return links;
 }
 
+/**
+ * For each shared vertex that *neighbours a non-shared curve* (a junction
+ * between a shared bisector segment and a free boundary — not a vertex interior
+ * to a shared run), a link from the shared anchor to its foot on every sharing
+ * edge's bone, under `sPrime` (default: the original skeleton). One link per
+ * (vertex, member) so the per-bone feet are all shown. For visualisation.
+ */
+export function sharedFootLinks(
+  rig: DeformRig,
+  sPrime?: DeformedSkeleton,
+): BoneLink[] {
+  const sk: DeformedSkeleton =
+    sPrime ?? { points: rig.points, controlPoints: rig.controlPoints };
+  const links: BoneLink[] = [];
+  for (const rp of rig.primitives) {
+    for (let r = 0; r < rp.rings.length; r++) {
+      const ring = rp.rings[r];
+      const cs = rp.curveSamples[r];
+      const n = ring.length;
+      if (n === 0) continue;
+      const nc = rp.closed[r] ? n : n - 1;
+      for (let i = 0; i < n; i++) {
+        const enc = ring[i].point;
+        if (enc.kind !== "shared") continue;
+        // Incident curves of anchor i (curve c runs anchor c → c+1).
+        const incident = rp.closed[r]
+          ? [(i - 1 + n) % n, i % n]
+          : [i - 1, i].filter((c) => c >= 0 && c < nc);
+        if (!incident.some((c) => cs[c] != null)) continue; // interior shared vertex
+        const anchor = warpAnchor(enc.members[0], sk, rig.segments);
+        for (const m of enc.members) {
+          const f = frameAt(sk, rig.segments, m.edge, m.t);
+          links.push({ anchor, bone: { x: f.o.x, y: f.o.y } });
+        }
+      }
+    }
+  }
+  return links;
+}
+
 function warpPoint(
   enc: PointEnc,
   sPrime: DeformedSkeleton,
