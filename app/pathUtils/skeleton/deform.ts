@@ -43,13 +43,7 @@ export type DeformedSkeleton = Pick<
 
 // --- Rig encodings --------------------------------------------------------
 
-type AnchorMember = {
-  edge: number;
-  t: number;
-  a: number;
-  b: number;
-  kappaS: number; // signed curvature of bone S at the foot (for the fold clamp)
-};
+type AnchorMember = { edge: number; t: number; a: number; b: number };
 
 type PointEnc =
   | { kind: "single"; m: AnchorMember }
@@ -130,7 +124,6 @@ const WARP_TOL = 1.0; // max curve deviation before subdividing (em units)
 const WARP_MAX_DEPTH = 6; // recursion cap (≤ 2^depth cubics per original curve)
 const WARP_BLEND_L = 150; // arc-length support over which a shared correction decays
 const WARP_RHO_MAX = 6; // cap on the iso-offset stretch before the analytic tangent is rejected
-const WARP_FOLD_ETA = 0.1; // floor on the deformed offset factor (1−bκ'), as a fraction of the original (1−bκ), so a point can't cross its bone's centre of curvature
 
 export type DeformRig = {
   segments: [number, number][];
@@ -341,7 +334,7 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
   ): AnchorMember => {
     const { pA, cp1, cp2, pB } = boneOf(S, segments, edge);
     const t = footParamOnBezier(q, pA, cp1, cp2, pB, seed);
-    const f = boneFrameFull(S, segments, edge, t);
+    const f = frameAt(S, segments, edge, t);
     const wx = q.x - f.o.x,
       wy = q.y - f.o.y;
     return {
@@ -349,7 +342,6 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
       t,
       a: wx * f.tau.x + wy * f.tau.y,
       b: wx * f.nu.x + wy * f.nu.y,
-      kappaS: f.kappa,
     };
   };
 
@@ -528,32 +520,15 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
 
 // --- applyDeform ----------------------------------------------------------
 
-/**
- * Clamp the normal offset so the point can't cross its bone's centre of
- * curvature (where the iso-offset locus folds). Keeps the deformed offset factor
- * `1−b·κ'` at least `WARP_FOLD_ETA·(1−b·κ_S)` — a fraction of the *original*
- * factor — so it's a no-op at identity (κ'=κ_S ⇒ exact reproduction) and only
- * pinches the capsule inward where the deformed bone bends tighter than the
- * stroke's half-width, instead of letting the offset self-fold into a spike.
- */
-function clampOffset(b: number, kappaS: number, kappaPrime: number): number {
-  const g = 1 - b * kappaS; // original offset factor
-  if (g <= 1e-6 || Math.abs(kappaPrime) < 1e-9) return b; // degenerate / straight
-  const floor = WARP_FOLD_ETA * g;
-  if (1 - b * kappaPrime >= floor) return b;
-  return (1 - floor) / kappaPrime; // pull in so 1 − b·κ' = floor
-}
-
 function warpAnchor(
   m: AnchorMember,
   sPrime: DeformedSkeleton,
   segments: [number, number][],
 ): Vec2D {
-  const f = boneFrameFull(sPrime, segments, m.edge, m.t);
-  const b = clampOffset(m.b, m.kappaS, f.kappa);
+  const f = frameAt(sPrime, segments, m.edge, m.t);
   return {
-    x: f.o.x + m.a * f.tau.x + b * f.nu.x,
-    y: f.o.y + m.a * f.tau.y + b * f.nu.y,
+    x: f.o.x + m.a * f.tau.x + m.b * f.nu.x,
+    y: f.o.y + m.a * f.tau.y + m.b * f.nu.y,
   };
 }
 
