@@ -711,15 +711,14 @@ function warpCurveChain(
   out: CubicPiece[],
 ): void {
   const ds = (hi - lo) / WARP_K; // span in original curve parameter s
-  // Finite-difference dC/ds from the (corrected) true warp of adjacent samples;
-  // robust fallback where the analytic tangent is ill-conditioned (offset fold).
-  const secant = (i: number, j: number): Vec2D => {
-    const pi = warpPt(i), pj = warpPt(j);
-    const k = WARP_K / (j - i);
-    return { x: (pj.x - pi.x) * k, y: (pj.y - pi.y) * k };
-  };
-  const vlo = warpVelocity(samples[lo], sPrime, segments) ?? secant(lo, lo + 1);
-  const vhi = warpVelocity(samples[hi], sPrime, segments) ?? secant(hi - 1, hi);
+  // Fallback tangent where the analytic one is ill-conditioned (offset fold):
+  // the chord A→B (natural cubic handles). Near a cusp the local tangent hooks
+  // back, so its handle juts past the endpoint; the chord instead always points
+  // toward the other endpoint, giving a well-behaved cubic that subdivision then
+  // refines against the true sample positions.
+  const chord = { x: (B.x - A.x) / ds, y: (B.y - A.y) / ds };
+  const vlo = warpVelocity(samples[lo], sPrime, segments) ?? chord;
+  const vhi = warpVelocity(samples[hi], sPrime, segments) ?? chord;
   const cp1 = { x: A.x + (vlo.x * ds) / 3, y: A.y + (vlo.y * ds) / 3 };
   const cp2 = { x: B.x - (vhi.x * ds) / 3, y: B.y - (vhi.y * ds) / 3 };
 
