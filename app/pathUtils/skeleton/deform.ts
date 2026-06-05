@@ -611,6 +611,30 @@ export function sharedFootLinks(
   return links;
 }
 
+/**
+ * Re-expand the position average `Q` of the warped shared points `Ps` so its
+ * distance to the shared joint `J'` equals the mean of the members' joint
+ * distances — restores stroke width at sharp corners (see [[deform]]). No-op
+ * when there's no joint or `Q` sits on the joint.
+ */
+function reExpandToJoint(
+  Q: Vec2D,
+  Ps: Vec2D[],
+  jointIdx: number | null,
+  sPrime: DeformedSkeleton,
+): Vec2D {
+  if (jointIdx == null) return Q;
+  const J = sPrime.points[jointIdx];
+  let R = 0;
+  for (const p of Ps) R += Math.hypot(p.x - J.x, p.y - J.y);
+  R /= Ps.length;
+  const dx = Q.x - J.x,
+    dy = Q.y - J.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return Q;
+  return { x: J.x + (R * dx) / len, y: J.y + (R * dy) / len };
+}
+
 function warpPoint(
   enc: PointEnc,
   sPrime: DeformedSkeleton,
@@ -618,11 +642,9 @@ function warpPoint(
 ): Vec2D {
   if (enc.kind === "single") return warpAnchor(enc.m, sPrime, segments);
   // Shared: warp via every sharing edge, then re-expand to the average
-  // joint-distance so sharp corners keep their stroke width. The plain position
-  // average pulls inward when the bones' tangents diverge; rescaling its
-  // distance to the shared joint to the mean member radius restores the width.
-  // Identical on both sides (same members + joint) ⇒ boundary stays coincident,
-  // and a no-op at S'=S (every P_m = Q) ⇒ identity preserved exactly.
+  // joint-distance so sharp corners keep their stroke width. Identical on both
+  // sides (same members + joint) ⇒ boundary stays coincident, and a no-op at
+  // S'=S (every P_m = Q) ⇒ identity preserved exactly.
   const Ps = enc.members.map((m) => warpAnchor(m, sPrime, segments));
   const k = Ps.length;
   let qx = 0,
@@ -631,17 +653,7 @@ function warpPoint(
     qx += p.x;
     qy += p.y;
   }
-  const Q = { x: qx / k, y: qy / k };
-  if (enc.jointIdx == null) return Q; // no common joint → plain average
-  const J = sPrime.points[enc.jointIdx];
-  let R = 0;
-  for (const p of Ps) R += Math.hypot(p.x - J.x, p.y - J.y);
-  R /= k;
-  const dx = Q.x - J.x,
-    dy = Q.y - J.y;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-9) return Q; // anchor sits on the joint
-  return { x: J.x + (R * dx) / len, y: J.y + (R * dy) / len };
+  return reExpandToJoint({ x: qx / k, y: qy / k }, Ps, enc.jointIdx, sPrime);
 }
 
 function warpHandle(
@@ -776,9 +788,16 @@ export function applyDeform(
   rig: DeformRig,
   sPrime: DeformedSkeleton,
   averageShared = true,
+  /**
+   * Optional override for the averaged shared-vertex position `W_avg`, indexed
+   * `[primitiveIndex][sharedVertexIndex]`. When present, the shared correction
+   * `δ` uses it instead of `warpPoint(...)` — used by the resolve→re-map→average
+   * two-pass in `deformOutline`. When absent, `warpPoint` is used (back-compat).
+   */
+  sharedOverride?: (Vec2D | null)[][],
 ): Primitive[] {
   const segments = rig.segments;
-  return rig.primitives.map((rp) => {
+  return rig.primitives.map((rp, pi) => {
     const prim = rp.prim;
     if (prim.type !== "edge" || !prim.clippedPath) {
       // Point/disk primitive: rigid translation by its vertex displacement.
@@ -806,8 +825,8 @@ export function applyDeform(
         ? enc.m
         : (enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0]);
     const deltas: Vec2D[] = averageShared
-      ? rp.sharedVerts.map((sv) => {
-          const avg = warpPoint(sv, sPrime, segments);
+      ? rp.sharedVerts.map((sv, si) => {
+          const avg = sharedOverride?.[pi]?.[si] ?? warpPoint(sv, sPrime, segments);
           const own = warpAnchor(ownOf(sv), sPrime, segments);
           return { x: avg.x - own.x, y: avg.y - own.y };
         })
@@ -964,6 +983,102 @@ export function warpedCurveSamplePoints(
   });
 }
 
+/**
+ * Remove a path's self-intersections (the offset fold a sharply-bent bone makes
+ * when the stroke half-width exceeds the bone's radius of curvature), tracing by
+ * non-zero winding — the swept-region envelope. Bezier-native (paper.js), keeps
+ * the curves. A no-op when the path has no crossings (so identity is unchanged).
+ * Operates on a clone; the input is left untouched.
+ */
+export function resolveSelfIntersections(path: paper.PathItem): paper.PathItem {
+  // resolveCrossings exists at runtime (paper 0.12) but not in the TS types.
+  const clone = path.clone({ insert: false }) as paper.PathItem & {
+    resolveCrossings(): paper.PathItem;
+  };
+  return clone.resolveCrossings();
+}
+
+/**
+ * `W_avg` per shared vertex, computed on the *resolved* (fold-free) capsules:
+ * each capsule's shared anchor is re-mapped to the nearest point on its resolved
+ * boundary (so a vertex swallowed by a removed fold maps to the surviving
+ * crossing vertex), then averaged across the sharing capsules and re-expanded to
+ * the joint. Returns `[primitiveIndex][sharedVertexIndex] → W_avg`, consistent
+ * across the capsules that share each vertex. Feeds `applyDeform`'s
+ * `sharedOverride`.
+ */
+function computeSharedAverages(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+  resolved: (paper.PathItem | null)[],
+): (Vec2D | null)[][] {
+  const segments = rig.segments;
+  const sOrig: DeformedSkeleton = {
+    points: rig.points,
+    controlPoints: rig.controlPoints,
+  };
+  type Group = {
+    cells: { pi: number; si: number }[];
+    reMapped: Vec2D[];
+    jointIdx: number | null;
+  };
+  const groups = new Map<string, Group>();
+  rig.primitives.forEach((rp, pi) => {
+    const path = resolved[pi];
+    if (!path) return;
+    const ownEdge = rp.prim.elementIdx;
+    rp.sharedVerts.forEach((sv, si) => {
+      const own = sv.members.find((m) => m.edge === ownEdge) ?? sv.members[0];
+      // Group across capsules by the original shared-anchor coordinate.
+      const orig = warpAnchor(own, sOrig, segments);
+      const key = coordKey(orig.x, orig.y);
+      const raw = warpAnchor(own, sPrime, segments);
+      // Nearest point on the resolved boundary (Compound-safe). A swallowed
+      // anchor (now interior) maps to the surviving crossing vertex.
+      const q = new paper.Point(raw.x, raw.y);
+      let reMapped = raw;
+      let bd = Infinity;
+      for (const ring of ringsOf(path)) {
+        const np = ring.getNearestPoint(q);
+        if (!np) continue;
+        const d = np.getDistance(q);
+        if (d < bd) {
+          bd = d;
+          reMapped = { x: np.x, y: np.y };
+        }
+      }
+      let g = groups.get(key);
+      if (!g) {
+        g = { cells: [], reMapped: [], jointIdx: sv.jointIdx };
+        groups.set(key, g);
+      }
+      g.cells.push({ pi, si });
+      g.reMapped.push(reMapped);
+    });
+  });
+
+  const out: (Vec2D | null)[][] = rig.primitives.map((rp) =>
+    rp.sharedVerts.map(() => null),
+  );
+  for (const g of groups.values()) {
+    const k = g.reMapped.length;
+    let qx = 0,
+      qy = 0;
+    for (const p of g.reMapped) {
+      qx += p.x;
+      qy += p.y;
+    }
+    const wavg = reExpandToJoint(
+      { x: qx / k, y: qy / k },
+      g.reMapped,
+      g.jointIdx,
+      sPrime,
+    );
+    for (const c of g.cells) out[c.pi][c.si] = wavg;
+  }
+  return out;
+}
+
 /** Bezier-preserving union of warped primitives into a single outline. */
 export function unionDeformedPrimitives(
   prims: Primitive[],
@@ -985,15 +1100,48 @@ export function unionDeformedPrimitives(
 }
 
 /**
+ * Deform a rig and return the final, fold-free capsules: warp pre-averaging →
+ * resolve each → re-map+average shared vertices on the clean boundaries → warp
+ * again with that `W_avg` + the smooth blend → resolve each. Folds (offset
+ * self-intersections) are removed and the shared averaging is done on the
+ * cleaned geometry. Identity-exact (no folds ⇒ every resolve is a no-op and the
+ * average equals `warpPoint`).
+ */
+export function deformCapsules(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+): Primitive[] {
+  // Pass 1: raw single-edge warp, then resolve each capsule (for re-mapping).
+  const raw = applyDeform(rig, sPrime, false);
+  const resolvedRaw = raw.map((p) =>
+    p.clippedPath ? resolveSelfIntersections(p.clippedPath) : null,
+  );
+  const overrides = computeSharedAverages(rig, sPrime, resolvedRaw);
+
+  // Pass 2: averaged + blended warp using the re-mapped W_avg, then resolve.
+  const averaged = applyDeform(rig, sPrime, true, overrides);
+  const out = averaged.map((p) =>
+    p.clippedPath
+      ? { ...p, clippedPath: resolveSelfIntersections(p.clippedPath) }
+      : p,
+  );
+
+  // Free the intermediates.
+  for (const p of raw) p.clippedPath?.remove();
+  for (const p of resolvedRaw) p?.remove();
+  for (const p of averaged) p.clippedPath?.remove();
+  return out;
+}
+
+/**
  * Stateless deformation: deform(S, S', C). Builds the rig from `fitted` (S + C)
- * and applies it to the edited skeleton `sPrime` (S'), returning the deformed
- * bezier outline. Identity when sPrime equals the original skeleton.
+ * and returns the deformed, fold-free bezier outline. Identity when sPrime
+ * equals the original skeleton.
  */
 export function deformOutline(
   fitted: FittedMedialAxisGraph,
   sPrime: DeformedSkeleton,
 ): paper.PathItem | null {
   const rig = buildDeformRig(fitted);
-  const warped = applyDeform(rig, sPrime);
-  return unionDeformedPrimitives(warped);
+  return unionDeformedPrimitives(deformCapsules(rig, sPrime));
 }

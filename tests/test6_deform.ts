@@ -25,7 +25,9 @@ import {
   applyDeform,
   boneLinks,
   buildDeformRig,
+  deformCapsules,
   deformOutline,
+  resolveSelfIntersections,
   sharedFootLinks,
   unionDeformedPrimitives,
   warpedCurveSamplePoints,
@@ -76,6 +78,11 @@ function maxPathDeviation(a: paper.PathItem, b: paper.PathItem): number {
     }
   }
   return max;
+}
+
+/** Number of self-intersections of a path (getCrossings is untyped in paper). */
+function selfCrossings(path: paper.PathItem): number {
+  return (path as unknown as { getCrossings(): unknown[] }).getCrossings().length;
 }
 
 /** Deterministic PRNG (mulberry32) so the "random" edit is reproducible. */
@@ -717,6 +724,18 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           }
       check("deformed outline is bezier (has curves)", hasCurve, "");
 
+      // Offset folds (self-intersections) must be removed: the final outline and
+      // every final capsule are self-intersection-free.
+      const caps = deformCapsules(rig, edit.skeleton);
+      let maxCapCross = 0;
+      for (const c of caps)
+        if (c.clippedPath) maxCapCross = Math.max(maxCapCross, selfCrossings(c.clippedPath));
+      check(
+        "deformed outline + capsules have no self-intersections",
+        selfCrossings(outline) === 0 && maxCapCross === 0,
+        `outline ${selfCrossings(outline)}, max capsule ${maxCapCross}`,
+      );
+
       writeOutlineSvg(label, outline);
 
       const original = unionDeformedPrimitives(fitted.primitives);
@@ -743,14 +762,14 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           true,
         );
         // Viz 2: each warped capsule pre-union, one hue per edge (test5 scheme;
-        // vertex disks in red). The solid outline is the current (post shared-
-        // point-averaging) capsule; the dashed outline overlays the same capsule
-        // *before* shared-point averaging (raw single-edge warp), so the shared
-        // boundaries don't yet coincide.
+        // vertex disks in red). Solid = the final fold-free capsule (resolved +
+        // averaged); dashed = the same capsule resolved but *before* shared
+        // averaging (raw single-edge warp), so shared boundaries don't yet
+        // coincide.
         const nSegs = Math.max(1, fitted.segments.length);
         const hue = (i: number) => Math.round((i * 360) / nSegs);
         const capLayers: DeformLayer[] = [];
-        for (const prim of warped) {
+        for (const prim of caps) {
           if (!prim.clippedPath) continue;
           capLayers.push(
             prim.type === "edge"
@@ -768,8 +787,12 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
                 },
           );
         }
-        // Pre-averaging capsules (dashed, no fill, same hue) overlaid on top.
-        const warpedPre = applyDeform(rig, edit.skeleton, false);
+        // Pre-averaging capsules, resolved (dashed, no fill, same hue) on top.
+        const warpedPre = applyDeform(rig, edit.skeleton, false).map((p) =>
+          p.clippedPath
+            ? { ...p, clippedPath: resolveSelfIntersections(p.clippedPath) }
+            : p,
+        );
         writeCapsulesSvg(label, warpedPre, nSegs, "_capsules_preavg");
         for (const prim of warpedPre) {
           if (!prim.clippedPath) continue;
@@ -797,6 +820,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
         );
         original.remove();
       }
+      for (const c of caps) c.clippedPath?.remove();
       outline.remove();
     }
   }
