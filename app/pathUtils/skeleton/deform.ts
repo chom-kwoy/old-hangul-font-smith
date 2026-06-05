@@ -123,6 +123,7 @@ const WARP_K = 16; // samples per non-shared curve (K+1 points)
 const WARP_TOL = 1.0; // max curve deviation before subdividing (em units)
 const WARP_MAX_DEPTH = 6; // recursion cap (≤ 2^depth cubics per original curve)
 const WARP_BLEND_L = 150; // arc-length support over which a shared correction decays
+const WARP_RHO_MAX = 6; // cap on the iso-offset stretch before the analytic tangent is rejected
 
 export type DeformRig = {
   segments: [number, number][];
@@ -663,19 +664,25 @@ function warpHandle(
  * The original velocity's tangential part scales by the iso-offset stretch ratio
  * ρ = σ'(1−bκ') / (σ(1−bκ)) and rides τ'; the normal part rides ν' rigidly.
  * Clamped (cap) feet have a locally constant frame ⇒ ρ=1 (frame rotation only).
+ *
+ * Returns null when ρ is ill-conditioned — i.e. the deformed bone folds its
+ * offset at this radius (`1−bκ' ≤ 0`, an offset cusp) or stretches
+ * pathologically (`ρ > WARP_RHO_MAX`). There the analytic tangent flips or
+ * explodes, so the caller substitutes a finite-difference tangent instead.
+ * ρ=1 at identity, so this never trips when S'=S (exact reproduction preserved).
  */
 function warpVelocity(
   cs: CurveSample,
   sPrime: DeformedSkeleton,
   segments: [number, number][],
-): Vec2D {
+): Vec2D | null {
   const f = boneFrameFull(sPrime, segments, cs.edge, cs.t);
   let rho = 1;
   if (cs.interior) {
     const denom = cs.sigmaS * (1 - cs.b * cs.kappaS);
-    if (Math.abs(denom) > 1e-9) {
-      rho = (f.sigma * (1 - cs.b * f.kappa)) / denom;
-    }
+    if (!(Math.abs(denom) > 1e-9)) return null;
+    rho = (f.sigma * (1 - cs.b * f.kappa)) / denom;
+    if (!(rho >= 0 && rho <= WARP_RHO_MAX)) return null;
   }
   return {
     x: rho * cs.vt * f.tau.x + cs.vn * f.nu.x,
@@ -704,8 +711,15 @@ function warpCurveChain(
   out: CubicPiece[],
 ): void {
   const ds = (hi - lo) / WARP_K; // span in original curve parameter s
-  const vlo = warpVelocity(samples[lo], sPrime, segments);
-  const vhi = warpVelocity(samples[hi], sPrime, segments);
+  // Finite-difference dC/ds from the (corrected) true warp of adjacent samples;
+  // robust fallback where the analytic tangent is ill-conditioned (offset fold).
+  const secant = (i: number, j: number): Vec2D => {
+    const pi = warpPt(i), pj = warpPt(j);
+    const k = WARP_K / (j - i);
+    return { x: (pj.x - pi.x) * k, y: (pj.y - pi.y) * k };
+  };
+  const vlo = warpVelocity(samples[lo], sPrime, segments) ?? secant(lo, lo + 1);
+  const vhi = warpVelocity(samples[hi], sPrime, segments) ?? secant(hi - 1, hi);
   const cp1 = { x: A.x + (vlo.x * ds) / 3, y: A.y + (vlo.y * ds) / 3 };
   const cp2 = { x: B.x - (vhi.x * ds) / 3, y: B.y - (vhi.y * ds) / 3 };
 
