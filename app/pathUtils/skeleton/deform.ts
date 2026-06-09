@@ -991,11 +991,31 @@ export function warpedCurveSamplePoints(
  * Operates on a clone; the input is left untouched.
  */
 export function resolveSelfIntersections(path: paper.PathItem): paper.PathItem {
-  // resolveCrossings exists at runtime (paper 0.12) but not in the TS types.
+  // resolveCrossings / reorient exist at runtime (paper 0.12) but not in the TS types.
   const clone = path.clone({ insert: false }) as paper.PathItem & {
-    resolveCrossings(): paper.PathItem;
+    getCrossings(): unknown[];
+    resolveCrossings(): paper.PathItem & {
+      reorient(nonZero: boolean, clockwise: boolean): paper.PathItem;
+    };
   };
-  return clone.resolveCrossings();
+  if (clone.getCrossings().length === 0) return clone; // no fold ⇒ leave untouched (identity-safe)
+  // Resolve the fold, then reorient by non-zero winding (drops reverse-loop
+  // children) — mirrors paper's own boolean `preparePath`.
+  const resolved = clone.resolveCrossings().reorient(true, true);
+  // A capsule is one connected region; the fold removal can leave a tiny
+  // same-winding sliver as a separate child, which still gets stroked/filled and
+  // reads as a self-intersection. Drop slivers (< 2% of the largest child).
+  if (resolved instanceof paper.CompoundPath) {
+    const kids = resolved.children as paper.Path[];
+    if (kids.length > 1) {
+      const area = (k: paper.Path) => Math.abs((k as paper.Path & { area: number }).area);
+      const maxA = Math.max(...kids.map(area));
+      for (let i = kids.length - 1; i >= 0; i--) {
+        if (area(kids[i]) < maxA * 0.02) kids[i].remove();
+      }
+    }
+  }
+  return resolved;
 }
 
 /**
