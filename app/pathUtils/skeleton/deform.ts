@@ -1,6 +1,11 @@
 import paper from "paper";
 
 import {
+  componentsByArea,
+  resolveCrossings,
+  selfCrossingCount,
+} from "@/app/pathUtils/paperExtras";
+import {
   bezierSecondDerivative,
   bezierTangent,
   evalBezier,
@@ -532,7 +537,13 @@ export function buildDeformRig(
         );
       }
 
-      assignBlendWeights(segEncs, csRing, sharedId, ring.closed, opts.blendSupport);
+      assignBlendWeights(
+        segEncs,
+        csRing,
+        sharedId,
+        ring.closed,
+        opts.blendSupport,
+      );
 
       rings.push(segEncs);
       closed.push(ring.closed);
@@ -787,8 +798,32 @@ function warpCurveChain(
   }
   const m = (lo + hi) >> 1;
   const mid = warpPt(m);
-  warpCurveChain(samples, lo, m, A, mid, warpPt, sPrime, segments, depth + 1, out, opts);
-  warpCurveChain(samples, m, hi, mid, B, warpPt, sPrime, segments, depth + 1, out, opts);
+  warpCurveChain(
+    samples,
+    lo,
+    m,
+    A,
+    mid,
+    warpPt,
+    sPrime,
+    segments,
+    depth + 1,
+    out,
+    opts,
+  );
+  warpCurveChain(
+    samples,
+    m,
+    hi,
+    mid,
+    B,
+    warpPt,
+    sPrime,
+    segments,
+    depth + 1,
+    out,
+    opts,
+  );
 }
 
 /**
@@ -839,7 +874,8 @@ export function applyDeform(
         : (enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0]);
     const deltas: Vec2D[] = averageShared
       ? rp.sharedVerts.map((sv, si) => {
-          const avg = sharedOverride?.[pi]?.[si] ?? warpPoint(sv, sPrime, segments);
+          const avg =
+            sharedOverride?.[pi]?.[si] ?? warpPoint(sv, sPrime, segments);
           const own = warpAnchor(ownOf(sv), sPrime, segments);
           return { x: avg.x - own.x, y: avg.y - own.y };
         })
@@ -1005,28 +1041,19 @@ export function warpedCurveSamplePoints(
  * Operates on a clone; the input is left untouched.
  */
 export function resolveSelfIntersections(path: paper.PathItem): paper.PathItem {
-  // resolveCrossings / reorient exist at runtime (paper 0.12) but not in the TS types.
-  const clone = path.clone({ insert: false }) as paper.PathItem & {
-    getCrossings(): unknown[];
-    resolveCrossings(): paper.PathItem & {
-      reorient(nonZero: boolean, clockwise: boolean): paper.PathItem;
-    };
-  };
-  if (clone.getCrossings().length === 0) return clone; // no fold ⇒ leave untouched (identity-safe)
+  const clone = path.clone({ insert: false });
+  if (selfCrossingCount(clone) === 0) return clone; // no fold ⇒ untouched (identity-safe)
   // Resolve the fold, then reorient by non-zero winding (drops reverse-loop
   // children) — mirrors paper's own boolean `preparePath`.
-  const resolved = clone.resolveCrossings().reorient(true, true);
+  const resolved = resolveCrossings(clone).reorient(true, true);
   // A capsule is one connected region; the fold removal can leave a tiny
   // same-winding sliver as a separate child, which still gets stroked/filled and
   // reads as a self-intersection. Drop slivers (< 2% of the largest child).
   if (resolved instanceof paper.CompoundPath) {
-    const kids = resolved.children as paper.Path[];
-    if (kids.length > 1) {
-      const area = (k: paper.Path) => Math.abs((k as paper.Path & { area: number }).area);
-      const maxA = Math.max(...kids.map(area));
-      for (let i = kids.length - 1; i >= 0; i--) {
-        if (area(kids[i]) < maxA * 0.02) kids[i].remove();
-      }
+    const comps = componentsByArea(resolved);
+    if (comps.length > 1) {
+      const maxA = comps[0].area;
+      for (const c of comps) if (c.area < maxA * 0.02) c.path.remove();
     }
   }
   return resolved;
@@ -1140,7 +1167,9 @@ export function unionDeformedPrimitives(
     const next: paper.PathItem[] = [];
     for (let i = 0; i < level.length; i += 2) {
       if (i + 1 < level.length) {
-        const u: paper.PathItem = level[i].unite(level[i + 1], { insert: false });
+        const u: paper.PathItem = level[i].unite(level[i + 1], {
+          insert: false,
+        });
         level[i].remove();
         level[i + 1].remove();
         next.push(u);
@@ -1153,8 +1182,7 @@ export function unionDeformedPrimitives(
   return level[0];
 }
 
-const selfCrosses = (p: paper.PathItem) =>
-  (p as unknown as { getCrossings(): unknown[] }).getCrossings().length > 0;
+const selfCrosses = (p: paper.PathItem) => selfCrossingCount(p) > 0;
 
 /**
  * The averaged + blended capsules (still possibly folded). Two passes:
@@ -1165,7 +1193,10 @@ const selfCrosses = (p: paper.PathItem) =>
  * smooth blend. Folds are NOT removed here — `deformOutline`'s union resolves
  * them, and `deformCapsules` resolves per-capsule for visualisation.
  */
-function averagedCapsules(rig: DeformRig, sPrime: DeformedSkeleton): Primitive[] {
+function averagedCapsules(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+): Primitive[] {
   const raw = applyDeform(rig, sPrime, false);
   // Re-mapping (and thus the pass-1 resolve) is only needed where a capsule
   // folds AND one of its shared vertices is swallowed by the fold (its foot is
@@ -1184,7 +1215,7 @@ function averagedCapsules(rig: DeformRig, sPrime: DeformedSkeleton): Primitive[]
   const resolvedRaw = raw.map((p, i) =>
     p.clippedPath && needsRemap[i]
       ? resolveSelfIntersections(p.clippedPath)
-      : p.clippedPath ?? null,
+      : (p.clippedPath ?? null),
   );
   const overrides = computeSharedAverages(rig, sPrime, resolvedRaw, needsRemap);
   const averaged = applyDeform(rig, sPrime, true, overrides);

@@ -3,6 +3,7 @@ import { ClipType, PolyFillType } from "js-angusj-clipper/web";
 import paper from "paper";
 
 import { clipper } from "@/app/pathUtils/loadClipper";
+import { componentsByArea } from "@/app/pathUtils/paperExtras";
 import { evalBezier } from "@/app/pathUtils/skeleton/bezierFitting";
 import {
   BoundaryTag,
@@ -191,16 +192,10 @@ export function clipPrimitivesToVoronoiCells(
 function largestComponent(item: paper.PathItem | null): paper.Path | null {
   if (!item) return null;
   if (item instanceof paper.CompoundPath) {
-    let best: paper.Path | null = null;
-    let bestArea = 0;
-    for (const c of item.children as paper.Path[]) {
-      const a = Math.abs(c.area);
-      if (a > bestArea) {
-        bestArea = a;
-        best = c;
-      }
-    }
-    const res = best ? (best.clone({ insert: false }) as paper.Path) : null;
+    const comps = componentsByArea(item);
+    const res = comps.length
+      ? (comps[0].path.clone({ insert: false }) as paper.Path)
+      : null;
     item.remove();
     return res;
   }

@@ -12,6 +12,7 @@ import {
   paperToFabricPathData,
 } from "@/app/pathUtils/convert";
 import { clipper } from "@/app/pathUtils/loadClipper";
+import { componentsByArea, pathArea } from "@/app/pathUtils/paperExtras";
 import { computeDegrees } from "@/app/pathUtils/skeleton/graphUtils";
 import {
   FittedMedialAxisGraph,
@@ -305,14 +306,8 @@ export function clipPrimitivesToShape(
     // Step 3: clip to original shape — overshoot is replaced by exact original bezier arcs
     const clipped = offsetPath.intersect(path, { insert: false });
 
-    const resultPath =
-      clipped instanceof paper.CompoundPath
-        ? (clipped.children as paper.Path[]).reduce((best, c) =>
-            Math.abs((c as paper.Path).area) > Math.abs(best.area)
-              ? (c as paper.Path)
-              : best,
-          )
-        : (clipped as paper.Path);
+    // Largest-area component of the clip result (overshoot can split the path).
+    const resultPath = componentsByArea(clipped)[0]?.path ?? (clipped as paper.Path);
 
     if (resultPath.segments.length >= 3) {
       // Store only the bezier-exact path. primitivePolygon() samples this on
@@ -434,10 +429,8 @@ function removeRedundantLeafEdgesPass(
     const leafPath = primitivePath(leafPrim);
     const leafArea = Math.abs(leafPath.area);
     // Boolean subtract: leaf − union = part of leaf outside any neighbour.
-    // PathItem.area isn't in @types but both Path and CompoundPath expose it;
-    // cast through `as paper.Path` is the same pattern used at line 280 above.
     const diff = leafPath.subtract(unionPath, { insert: false });
-    const remaining = Math.abs((diff as paper.Path).area);
+    const remaining = Math.abs(pathArea(diff));
     diff.remove();
     unionPath.remove();
     leafPath.remove();
