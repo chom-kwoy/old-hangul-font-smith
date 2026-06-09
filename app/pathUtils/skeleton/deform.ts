@@ -118,18 +118,44 @@ type RigPrimitive = {
   sharedVerts: Extract<PointEnc, { kind: "shared" }>[];
 };
 
-// Accurate-warp tuning (1000-unit em space).
-const WARP_K = 16; // samples per non-shared curve (K+1 points)
-const WARP_TOL = 1.5; // max curve deviation before subdividing (em units)
-const WARP_MAX_DEPTH = 6; // recursion cap (≤ 2^depth cubics per original curve)
-const WARP_BLEND_L = 150; // arc-length support over which a shared correction decays
-const WARP_RHO_MAX = 6; // cap on the iso-offset stretch before the analytic tangent is rejected
+/**
+ * Tunable parameters for the accurate per-curve warp (1000-unit em space).
+ * Set once at `buildDeformRig` / `deformOutline`; carried through the rig.
+ */
+export interface WarpOptions {
+  /** Samples per non-shared curve for warp-error checking (K+1 points). */
+  samples?: number;
+  /** Max curve deviation (em units) before a curve is subdivided. */
+  tolerance?: number;
+  /** Subdivision recursion cap (≤ 2^maxDepth cubics per original curve). */
+  maxDepth?: number;
+  /** Arc-length support over which a shared correction decays. */
+  blendSupport?: number;
+  /** Cap on the iso-offset stretch ρ before the analytic tangent is rejected. */
+  rhoMax?: number;
+}
+
+type ResolvedWarpOptions = Required<WarpOptions>;
+
+export const DEFAULT_WARP_OPTIONS: ResolvedWarpOptions = {
+  samples: 16,
+  tolerance: 1.5,
+  maxDepth: 6,
+  blendSupport: 150,
+  rhoMax: 6,
+};
+
+function resolveWarpOptions(o?: WarpOptions): ResolvedWarpOptions {
+  return { ...DEFAULT_WARP_OPTIONS, ...o };
+}
 
 export type DeformRig = {
   segments: [number, number][];
   points: Vec2D[];
   controlPoints?: [Vec2D, Vec2D][];
   primitives: RigPrimitive[];
+  /** Resolved warp options used to build this rig (and reused at apply). */
+  options: ResolvedWarpOptions;
 };
 
 // --- Bone frame helpers ---------------------------------------------------
@@ -222,6 +248,7 @@ function assignBlendWeights(
   csRing: (CurveSample[] | null)[],
   sharedId: number[],
   closed: boolean,
+  blendSupport: number,
 ): void {
   const n = segEncs.length;
   const nc = closed ? n : n - 1;
@@ -259,7 +286,7 @@ function assignBlendWeights(
     const vE = sharedId[endAnchor];
     let runLen = 0;
     for (const c of runCurves) runLen += curveLen(c);
-    const Leff = Math.min(WARP_BLEND_L, runLen / 2);
+    const Leff = Math.min(blendSupport, runLen / 2);
     const weightAt = (d: number): BlendRef[] => {
       if (Leff <= 1e-9) return vS >= 0 ? [{ v: vS, w: 1 }] : [];
       const out: BlendRef[] = [];
@@ -293,7 +320,11 @@ function assignBlendWeights(
  * Precompute the deformation rig from the original fitted glyph. Depends only on
  * the original skeleton (embedded in `fitted`) and the original capsules.
  */
-export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
+export function buildDeformRig(
+  fitted: FittedMedialAxisGraph,
+  options?: WarpOptions,
+): DeformRig {
+  const opts = resolveWarpOptions(options);
   const segments = fitted.segments;
   const S: DeformedSkeleton = {
     points: fitted.points,
@@ -380,8 +411,8 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
     const arr: CurveSample[] = [];
     let arc = 0;
     let prev: Vec2D | null = null;
-    for (let k = 0; k <= WARP_K; k++) {
-      const s = k / WARP_K;
+    for (let k = 0; k <= opts.samples; k++) {
+      const s = k / opts.samples;
       const p = evalBezier(oP0, oCP1, oCP2, oP3, s);
       if (prev) arc += Math.hypot(p.x - prev.x, p.y - prev.y);
       prev = p;
@@ -501,7 +532,7 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
         );
       }
 
-      assignBlendWeights(segEncs, csRing, sharedId, ring.closed);
+      assignBlendWeights(segEncs, csRing, sharedId, ring.closed, opts.blendSupport);
 
       rings.push(segEncs);
       closed.push(ring.closed);
@@ -515,6 +546,7 @@ export function buildDeformRig(fitted: FittedMedialAxisGraph): DeformRig {
     points: fitted.points,
     controlPoints: fitted.controlPoints,
     primitives: rigPrims,
+    options: opts,
   };
 }
 
@@ -687,6 +719,7 @@ function warpVelocity(
   cs: CurveSample,
   sPrime: DeformedSkeleton,
   segments: [number, number][],
+  rhoMax: number,
 ): Vec2D | null {
   const f = boneFrameFull(sPrime, segments, cs.edge, cs.t);
   let rho = 1;
@@ -694,7 +727,7 @@ function warpVelocity(
     const denom = cs.sigmaS * (1 - cs.b * cs.kappaS);
     if (!(Math.abs(denom) > 1e-9)) return null;
     rho = (f.sigma * (1 - cs.b * f.kappa)) / denom;
-    if (!(rho >= 0 && rho <= WARP_RHO_MAX)) return null;
+    if (!(rho >= 0 && rho <= rhoMax)) return null;
   }
   return {
     x: rho * cs.vt * f.tau.x + cs.vn * f.nu.x,
@@ -721,16 +754,17 @@ function warpCurveChain(
   segments: [number, number][],
   depth: number,
   out: CubicPiece[],
+  opts: ResolvedWarpOptions,
 ): void {
-  const ds = (hi - lo) / WARP_K; // span in original curve parameter s
+  const ds = (hi - lo) / (samples.length - 1); // span in original curve param s
   // Fallback tangent where the analytic one is ill-conditioned (offset fold):
   // the chord A→B (natural cubic handles). Near a cusp the local tangent hooks
   // back, so its handle juts past the endpoint; the chord instead always points
   // toward the other endpoint, giving a well-behaved cubic that subdivision then
   // refines against the true sample positions.
   const chord = { x: (B.x - A.x) / ds, y: (B.y - A.y) / ds };
-  const vlo = warpVelocity(samples[lo], sPrime, segments) ?? chord;
-  const vhi = warpVelocity(samples[hi], sPrime, segments) ?? chord;
+  const vlo = warpVelocity(samples[lo], sPrime, segments, opts.rhoMax) ?? chord;
+  const vhi = warpVelocity(samples[hi], sPrime, segments, opts.rhoMax) ?? chord;
   const cp1 = { x: A.x + (vlo.x * ds) / 3, y: A.y + (vlo.y * ds) / 3 };
   const cp2 = { x: B.x - (vhi.x * ds) / 3, y: B.y - (vhi.y * ds) / 3 };
 
@@ -747,36 +781,14 @@ function warpCurveChain(
   // sample interval within log2(K) levels — guaranteeing the emitted curve
   // passes through every sample. (Splitting at the worst sample can stall under
   // the depth cap when splits are lopsided.)
-  if (maxErr <= WARP_TOL || hi - lo <= 1 || depth >= WARP_MAX_DEPTH) {
+  if (maxErr <= opts.tolerance || hi - lo <= 1 || depth >= opts.maxDepth) {
     out.push({ p0: A, cp1, cp2, p3: B });
     return;
   }
   const m = (lo + hi) >> 1;
   const mid = warpPt(m);
-  warpCurveChain(
-    samples,
-    lo,
-    m,
-    A,
-    mid,
-    warpPt,
-    sPrime,
-    segments,
-    depth + 1,
-    out,
-  );
-  warpCurveChain(
-    samples,
-    m,
-    hi,
-    mid,
-    B,
-    warpPt,
-    sPrime,
-    segments,
-    depth + 1,
-    out,
-  );
+  warpCurveChain(samples, lo, m, A, mid, warpPt, sPrime, segments, depth + 1, out, opts);
+  warpCurveChain(samples, m, hi, mid, B, warpPt, sPrime, segments, depth + 1, out, opts);
 }
 
 /**
@@ -797,6 +809,7 @@ export function applyDeform(
   sharedOverride?: (Vec2D | null)[][],
 ): Primitive[] {
   const segments = rig.segments;
+  const opts = rig.options;
   return rig.primitives.map((rp, pi) => {
     const prim = rp.prim;
     if (prim.type !== "edge" || !prim.clippedPath) {
@@ -891,6 +904,7 @@ export function applyDeform(
             segments,
             0,
             pieces,
+            opts,
           );
           for (let k = before; k < pieces.length; k++) newTags.push(tag);
         }
@@ -1225,6 +1239,7 @@ export function deformOutlineFromRig(
 export function deformOutline(
   fitted: FittedMedialAxisGraph,
   sPrime: DeformedSkeleton,
+  options?: WarpOptions,
 ): paper.PathItem | null {
-  return deformOutlineFromRig(buildDeformRig(fitted), sPrime);
+  return deformOutlineFromRig(buildDeformRig(fitted, options), sPrime);
 }

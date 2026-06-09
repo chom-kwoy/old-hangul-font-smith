@@ -6,6 +6,10 @@ import {
   nearestDistFlatBoundary,
   rayIntersectFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
+import {
+  bezierTangent,
+  evalBezier,
+} from "@/app/pathUtils/skeleton/bezierFitting";
 import { computeDegrees } from "@/app/pathUtils/skeleton/graphUtils";
 import { MedialAxisGraph } from "@/app/pathUtils/skeleton/medialAxis";
 import { Vec2D } from "@/app/utils/types";
@@ -601,50 +605,8 @@ function fitSinglePrimitive(
 }
 
 // --- Geometry Helpers ---
-
-function cubicBezierPoint(
-  pA: Vec2D,
-  cp1: Vec2D,
-  cp2: Vec2D,
-  pB: Vec2D,
-  t: number,
-): Vec2D {
-  const u = 1 - t;
-  return {
-    x:
-      u * u * u * pA.x +
-      3 * u * u * t * cp1.x +
-      3 * u * t * t * cp2.x +
-      t * t * t * pB.x,
-    y:
-      u * u * u * pA.y +
-      3 * u * u * t * cp1.y +
-      3 * u * t * t * cp2.y +
-      t * t * t * pB.y,
-  };
-}
-
-function cubicBezierTangent(
-  pA: Vec2D,
-  cp1: Vec2D,
-  cp2: Vec2D,
-  pB: Vec2D,
-  t: number,
-): Vec2D {
-  const u = 1 - t;
-  return {
-    x:
-      3 *
-      (u * u * (cp1.x - pA.x) +
-        2 * u * t * (cp2.x - cp1.x) +
-        t * t * (pB.x - cp2.x)),
-    y:
-      3 *
-      (u * u * (cp1.y - pA.y) +
-        2 * u * t * (cp2.y - cp1.y) +
-        t * t * (pB.y - cp2.y)),
-  };
-}
+// Cubic-bezier point/tangent come from bezierFitting (`evalBezier` /
+// `bezierTangent`); they handle the degenerate (missing-cp) case too.
 
 /**
  * Writes origins and directions for a capsule primitive into the provided
@@ -675,7 +637,7 @@ function generateCapsuleDiscretization(
     const pB: Vec2D = { x: pBx, y: pBy };
 
     const unitTan = (t: number): Vec2D => {
-      const raw = cubicBezierTangent(pA, cp1, cp2, pB, t);
+      const raw = bezierTangent(pA, cp1, cp2, pB, t);
       const len = Math.hypot(raw.x, raw.y);
       return len > 1e-8 ? { x: raw.x / len, y: raw.y / len } : { x: 1, y: 0 };
     };
@@ -688,7 +650,7 @@ function generateCapsuleDiscretization(
     // Section 1: Side A→B (+90° normal to tangent)
     for (let i = 0; i < nSide; i++) {
       const t = nSide > 1 ? i / (nSide - 1) : 0;
-      const pt = cubicBezierPoint(pA, cp1, cp2, pB, t);
+      const pt = evalBezier(pA, cp1, cp2, pB, t);
       const tn = unitTan(t);
       origX[j] = pt.x;
       origY[j] = pt.y;
@@ -711,7 +673,7 @@ function generateCapsuleDiscretization(
     // Section 3: Side B→A (−90° normal)
     for (let i = 0; i < nSide; i++) {
       const t = nSide > 1 ? i / (nSide - 1) : 0;
-      const pt = cubicBezierPoint(pA, cp1, cp2, pB, 1 - t);
+      const pt = evalBezier(pA, cp1, cp2, pB, 1 - t);
       const tn = unitTan(1 - t);
       origX[j] = pt.x;
       origY[j] = pt.y;
