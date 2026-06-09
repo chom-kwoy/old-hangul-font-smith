@@ -2,6 +2,7 @@ import paper from "paper";
 
 import { sampleBoundary } from "@/app/pathUtils/flatBoundary";
 import {
+  DEFAULT_REFIT_ITERS,
   evalBezier,
   fitBezierCPs,
   fitBezierCPsFromSamples,
@@ -24,6 +25,8 @@ import { Vec2D } from "@/app/utils/types";
 export type SimplifySkeletonOptions = {
   /** Tikhonov regularisation strength for merged-edge Bezier CP fitting. */
   bezierRegularization: number;
+  /** Alternating re-parameterisation iterations for merged-edge Bezier fitting. */
+  bezierRefitIters: number;
   /** Number of interior samples for the merged-edge inside-shape validity check. */
   validityNSamples: number;
   /** Max fractional coverage drop that still permits a contraction. */
@@ -36,6 +39,7 @@ export type SimplifySkeletonOptions = {
 
 const DEFAULTS: SimplifySkeletonOptions = {
   bezierRegularization: 0.5,
+  bezierRefitIters: DEFAULT_REFIT_ITERS,
   validityNSamples: 20,
   coverageTolerance: 0.001,
   nFitSamples: 30,
@@ -171,13 +175,16 @@ function tryRemove(
   let cp1: Vec2D, cp2: Vec2D, residual: number;
   if (samples) {
     [cp1, cp2] = fitBezierCPsFromSamples(
-      samples.samples, samples.ts, pKept, pFar, opts.bezierRegularization,
+      samples.samples, samples.ts, pKept, pFar,
+      opts.bezierRegularization, opts.bezierRefitIters,
     );
     residual = computeResidual(samples.samples, samples.ts, pKept, cp1, cp2, pFar);
   } else {
     const rp = bfsPath(rawKept, rawFar, rawAdj);
     if (!rp) return null;
-    [cp1, cp2] = fitBezierCPs(rp, rawPoints, pKept, pFar, opts.bezierRegularization);
+    [cp1, cp2] = fitBezierCPs(
+      rp, rawPoints, pKept, pFar, opts.bezierRegularization, opts.bezierRefitIters,
+    );
     residual = Infinity;
   }
 

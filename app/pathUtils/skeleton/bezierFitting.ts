@@ -1,7 +1,7 @@
 import { Vec2D } from "@/app/utils/types";
 
-// Number of alternating re-parameterisation iterations (solve → foot-project → repeat).
-const N_REFIT_ITERS = 10;
+/** Default alternating re-parameterisation iterations for the bezier fitters. */
+export const DEFAULT_REFIT_ITERS = 10;
 
 /**
  * Evaluate a point on a cubic Bezier at t ∈ [0, 1].
@@ -183,7 +183,7 @@ function projectOnBezier(
 /**
  * Shared alternating re-parameterisation loop for both fitting functions.
  *
- * Iterates N_REFIT_ITERS+1 times: parametric LSQ solve → Newton foot-point
+ * Iterates `iterations`+1 times: parametric LSQ solve → Newton foot-point
  * re-projection of interior parameters → repeat.  ts[0] and ts[n-1] are kept
  * fixed at 0 and 1.  On an ill-conditioned matrix at the first iteration,
  * returns onFirstIterFail(); on later iterations returns the last valid CPs.
@@ -197,6 +197,7 @@ function fitBezierCPsCore(
   totalLen: number,
   regularization: number,
   onFirstIterFail: () => [Vec2D, Vec2D],
+  iterations: number,
 ): [Vec2D, Vec2D] {
   const cp1NatX = pA.x + (pB.x - pA.x) / 3,
     cp1NatY = pA.y + (pB.y - pA.y) / 3;
@@ -207,7 +208,7 @@ function fitBezierCPsCore(
   let cp2x = cp2NatX,
     cp2y = cp2NatY;
 
-  for (let iter = 0; iter <= N_REFIT_ITERS; iter++) {
+  for (let iter = 0; iter <= iterations; iter++) {
     let sumA2 = 0,
       sumAB = 0,
       sumB2 = 0;
@@ -253,7 +254,7 @@ function fitBezierCPsCore(
     cp2x = (rA2 * rBRx - sumAB * rARx) / det;
     cp2y = (rA2 * rBRy - sumAB * rARy) / det;
 
-    if (iter < N_REFIT_ITERS) {
+    if (iter < iterations) {
       for (let i = 1; i < n - 1; i++) {
         const pt = getPoint(i);
         ts[i] = projectOnBezier(
@@ -377,6 +378,7 @@ export function fitBezierCPs(
   pA: Vec2D,
   pB: Vec2D,
   regularization: number,
+  iterations: number = DEFAULT_REFIT_ITERS,
 ): [Vec2D, Vec2D] {
   const n = rawPath.length;
   if (n < 4) return tangentFallbackCPs(rawPath, rawPoints, pA, pB);
@@ -401,6 +403,7 @@ export function fitBezierCPs(
     totalLen,
     regularization,
     () => tangentFallbackCPs(rawPath, rawPoints, pA, pB),
+    iterations,
   );
 }
 
@@ -415,6 +418,7 @@ export function fitBezierCPsFromSamples(
   pA: Vec2D,
   pB: Vec2D,
   regularization: number,
+  iterations: number = DEFAULT_REFIT_ITERS,
 ): [Vec2D, Vec2D] {
   const n = samples.length;
   if (n < 4) {
@@ -474,5 +478,6 @@ export function fitBezierCPsFromSamples(
     totalLen,
     regularization,
     () => [cp1Nat, cp2Nat],
+    iterations,
   );
 }

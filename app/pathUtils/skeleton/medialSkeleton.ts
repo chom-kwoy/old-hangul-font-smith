@@ -7,6 +7,7 @@ import {
   nearestDistFlatBoundary,
 } from "@/app/pathUtils/flatBoundary";
 import {
+  DEFAULT_REFIT_ITERS,
   evalBezier,
   fitBezierCPs,
 } from "@/app/pathUtils/skeleton/bezierFitting";
@@ -38,6 +39,8 @@ export type SkeletonConstructionOptions = {
    * Default: 0.5.
    */
   bezierLSQRegularization: number;
+  /** Alternating re-parameterisation iterations for the Bezier fit. Default: 10. */
+  bezierRefitIters: number;
 };
 
 /**
@@ -63,6 +66,7 @@ export function constructMedialSkeleton(
     centerThresholdValid: options.centerThresholdValid ?? 0.25,
     centerNSamp: options.centerNSamp ?? 12,
     bezierLSQRegularization: options.bezierLSQRegularization ?? 0.5,
+    bezierRefitIters: options.bezierRefitIters ?? DEFAULT_REFIT_ITERS,
   };
 
   // ---------------------------------------------------------
@@ -317,6 +321,7 @@ export function constructMedialSkeleton(
       pA,
       pB,
       opts.bezierLSQRegularization,
+      opts.bezierRefitIters,
     );
   }
 
