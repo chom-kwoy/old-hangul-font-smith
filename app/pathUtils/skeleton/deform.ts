@@ -120,7 +120,7 @@ type RigPrimitive = {
 
 // Accurate-warp tuning (1000-unit em space).
 const WARP_K = 16; // samples per non-shared curve (K+1 points)
-const WARP_TOL = 1.0; // max curve deviation before subdividing (em units)
+const WARP_TOL = 1.5; // max curve deviation before subdividing (em units)
 const WARP_MAX_DEPTH = 6; // recursion cap (≤ 2^depth cubics per original curve)
 const WARP_BLEND_L = 150; // arc-length support over which a shared correction decays
 const WARP_RHO_MAX = 6; // cap on the iso-offset stretch before the analytic tangent is rejected
@@ -1031,6 +1031,7 @@ function computeSharedAverages(
   rig: DeformRig,
   sPrime: DeformedSkeleton,
   resolved: (paper.PathItem | null)[],
+  needsRemap: boolean[],
 ): (Vec2D | null)[][] {
   const segments = rig.segments;
   const sOrig: DeformedSkeleton = {
@@ -1053,18 +1054,26 @@ function computeSharedAverages(
       const orig = warpAnchor(own, sOrig, segments);
       const key = coordKey(orig.x, orig.y);
       const raw = warpAnchor(own, sPrime, segments);
-      // Nearest point on the resolved boundary (Compound-safe). A swallowed
-      // anchor (now interior) maps to the surviving crossing vertex.
-      const q = new paper.Point(raw.x, raw.y);
+      // The raw anchor stays on the resolved boundary unless its capsule folded
+      // *and* this vertex was swallowed by the fold — i.e. its foot is past the
+      // deformed bone's centre of curvature (1 − b·κ' ≤ 0). Only then re-map
+      // (nearest point on the resolved boundary — Compound-safe). getNearestPoint
+      // is O(curves), so gating it on the swallow test is the main speedup.
       let reMapped = raw;
-      let bd = Infinity;
-      for (const ring of ringsOf(path)) {
-        const np = ring.getNearestPoint(q);
-        if (!np) continue;
-        const d = np.getDistance(q);
-        if (d < bd) {
-          bd = d;
-          reMapped = { x: np.x, y: np.y };
+      if (needsRemap[pi]) {
+        const f = boneFrameFull(sPrime, segments, own.edge, own.t);
+        if (1 - own.b * f.kappa <= 1e-3) {
+          const q = new paper.Point(raw.x, raw.y);
+          let bd = Infinity;
+          for (const ring of ringsOf(path)) {
+            const np = ring.getNearestPoint(q);
+            if (!np) continue;
+            const d = np.getDistance(q);
+            if (d < bd) {
+              bd = d;
+              reMapped = { x: np.x, y: np.y };
+            }
+          }
         }
       }
       let g = groups.get(key);
@@ -1099,69 +1108,123 @@ function computeSharedAverages(
   return out;
 }
 
-/** Bezier-preserving union of warped primitives into a single outline. */
+/**
+ * Bezier-preserving union of warped primitives into a single outline.
+ * Divide-and-conquer (pairwise tree) rather than a linear accumulate: a linear
+ * fold re-resolves the whole growing union on every step (O(N·|union|)); pairing
+ * keeps operands small, which dominates the cost (paper boolean is the bottleneck).
+ */
 export function unionDeformedPrimitives(
   prims: Primitive[],
 ): paper.PathItem | null {
-  let acc: paper.PathItem | null = null;
+  let level: paper.PathItem[] = [];
   for (const prim of prims) {
-    if (!prim.clippedPath) continue;
-    const shape = prim.clippedPath.clone({ insert: false });
-    if (acc === null) {
-      acc = shape;
-    } else {
-      const united: paper.PathItem = acc.unite(shape, { insert: false });
-      acc.remove();
-      shape.remove();
-      acc = united;
-    }
+    if (prim.clippedPath) level.push(prim.clippedPath.clone({ insert: false }));
   }
-  return acc;
+  if (level.length === 0) return null;
+  while (level.length > 1) {
+    const next: paper.PathItem[] = [];
+    for (let i = 0; i < level.length; i += 2) {
+      if (i + 1 < level.length) {
+        const u: paper.PathItem = level[i].unite(level[i + 1], { insert: false });
+        level[i].remove();
+        level[i + 1].remove();
+        next.push(u);
+      } else {
+        next.push(level[i]);
+      }
+    }
+    level = next;
+  }
+  return level[0];
+}
+
+const selfCrosses = (p: paper.PathItem) =>
+  (p as unknown as { getCrossings(): unknown[] }).getCrossings().length > 0;
+
+/**
+ * The averaged + blended capsules (still possibly folded). Two passes:
+ * (1) raw single-edge warp → resolve only the folded capsules (re-mapping a
+ * shared anchor only matters where its capsule folded — getNearestPoint over
+ * every capsule's curves is otherwise the dominant cost) → re-map + average
+ * shared vertices on the cleaned geometry; (2) re-warp with that `W_avg` + the
+ * smooth blend. Folds are NOT removed here — `deformOutline`'s union resolves
+ * them, and `deformCapsules` resolves per-capsule for visualisation.
+ */
+function averagedCapsules(rig: DeformRig, sPrime: DeformedSkeleton): Primitive[] {
+  const raw = applyDeform(rig, sPrime, false);
+  // Re-mapping (and thus the pass-1 resolve) is only needed where a capsule
+  // folds AND one of its shared vertices is swallowed by the fold (its foot is
+  // past the deformed bone's centre of curvature). Gate the resolve on that, so
+  // a capsule that merely folds on a free boundary isn't resolved here.
+  const needsRemap = raw.map((p, i) => {
+    if (!p.clippedPath || !selfCrosses(p.clippedPath)) return false;
+    const rp = rig.primitives[i];
+    const ownEdge = rp.prim.elementIdx;
+    return rp.sharedVerts.some((sv) => {
+      const m = sv.members.find((x) => x.edge === ownEdge) ?? sv.members[0];
+      const f = boneFrameFull(sPrime, rig.segments, m.edge, m.t);
+      return 1 - m.b * f.kappa <= 1e-3;
+    });
+  });
+  const resolvedRaw = raw.map((p, i) =>
+    p.clippedPath && needsRemap[i]
+      ? resolveSelfIntersections(p.clippedPath)
+      : p.clippedPath ?? null,
+  );
+  const overrides = computeSharedAverages(rig, sPrime, resolvedRaw, needsRemap);
+  const averaged = applyDeform(rig, sPrime, true, overrides);
+  // Free intermediates (re-mapped resolvedRaw are clones; others reuse raw).
+  for (let i = 0; i < resolvedRaw.length; i++)
+    if (needsRemap[i]) resolvedRaw[i]?.remove();
+  for (const p of raw) p.clippedPath?.remove();
+  return averaged;
 }
 
 /**
- * Deform a rig and return the final, fold-free capsules: warp pre-averaging →
- * resolve each → re-map+average shared vertices on the clean boundaries → warp
- * again with that `W_avg` + the smooth blend → resolve each. Folds (offset
- * self-intersections) are removed and the shared averaging is done on the
- * cleaned geometry. Identity-exact (no folds ⇒ every resolve is a no-op and the
- * average equals `warpPoint`).
+ * Deform a rig and return the final, fold-free capsules — `averagedCapsules`
+ * plus a per-capsule self-intersection resolve. For visualisation / standalone
+ * use; `deformOutline` skips this resolve (its union removes folds). Identity-
+ * exact (no folds ⇒ resolves are no-ops and the average equals `warpPoint`).
  */
 export function deformCapsules(
   rig: DeformRig,
   sPrime: DeformedSkeleton,
 ): Primitive[] {
-  // Pass 1: raw single-edge warp, then resolve each capsule (for re-mapping).
-  const raw = applyDeform(rig, sPrime, false);
-  const resolvedRaw = raw.map((p) =>
-    p.clippedPath ? resolveSelfIntersections(p.clippedPath) : null,
-  );
-  const overrides = computeSharedAverages(rig, sPrime, resolvedRaw);
+  return averagedCapsules(rig, sPrime).map((p) => {
+    if (p.clippedPath && selfCrosses(p.clippedPath)) {
+      const resolved = resolveSelfIntersections(p.clippedPath);
+      p.clippedPath.remove();
+      return { ...p, clippedPath: resolved };
+    }
+    return p;
+  });
+}
 
-  // Pass 2: averaged + blended warp using the re-mapped W_avg, then resolve.
-  const averaged = applyDeform(rig, sPrime, true, overrides);
-  const out = averaged.map((p) =>
-    p.clippedPath
-      ? { ...p, clippedPath: resolveSelfIntersections(p.clippedPath) }
-      : p,
-  );
-
-  // Free the intermediates.
-  for (const p of raw) p.clippedPath?.remove();
-  for (const p of resolvedRaw) p?.remove();
-  for (const p of averaged) p.clippedPath?.remove();
+/**
+ * Deformed, fold-free outline from a prebuilt rig — the interactive per-frame
+ * call (build the rig once, then this per drag frame). Capsules are fed to the
+ * union unresolved: paper's boolean resolves each operand's fold, so a separate
+ * per-capsule resolve would be redundant.
+ */
+export function deformOutlineFromRig(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+): paper.PathItem | null {
+  const caps = averagedCapsules(rig, sPrime);
+  const out = unionDeformedPrimitives(caps);
+  for (const p of caps) p.clippedPath?.remove();
   return out;
 }
 
 /**
  * Stateless deformation: deform(S, S', C). Builds the rig from `fitted` (S + C)
  * and returns the deformed, fold-free bezier outline. Identity when sPrime
- * equals the original skeleton.
+ * equals S.
  */
 export function deformOutline(
   fitted: FittedMedialAxisGraph,
   sPrime: DeformedSkeleton,
 ): paper.PathItem | null {
-  const rig = buildDeformRig(fitted);
-  return unionDeformedPrimitives(deformCapsules(rig, sPrime));
+  return deformOutlineFromRig(buildDeformRig(fitted), sPrime);
 }

@@ -26,6 +26,7 @@ import {
   boneLinks,
   buildDeformRig,
   deformCapsules,
+  deformOutlineFromRig,
   deformOutline,
   resolveSelfIntersections,
   sharedFootLinks,
@@ -683,22 +684,21 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
       `max ${trackErr.toFixed(3)}px`,
     );
 
-    // Latency of the deformation under the random edit: the full stateless
-    // deform() (rig rebuilt) vs. the cached apply+union (interactive per-frame
-    // cost), averaged over N runs.
+    // Latency under the random edit: the full stateless deform() (rig rebuilt)
+    // vs. the cached per-frame cost (rig reused: capsules + union), avg of N.
     const N = 20;
     const tFull = performance.now();
     for (let it = 0; it < N; it++)
       deformOutline(fitted, edit.skeleton)?.remove();
     const fullMs = (performance.now() - tFull) / N;
-    const tApply = performance.now();
+    const tCached = performance.now();
     for (let it = 0; it < N; it++) {
-      unionDeformedPrimitives(applyDeform(rig, edit.skeleton))?.remove();
+      deformOutlineFromRig(rig, edit.skeleton)?.remove();
     }
-    const applyMs = (performance.now() - tApply) / N;
+    const cachedMs = (performance.now() - tCached) / N;
     console.log(
-      `  ⏱  deform() ${fullMs.toFixed(2)}ms (rig+apply+union) | ` +
-        `apply+union ${applyMs.toFixed(2)}ms (cached rig), avg of ${N}`,
+      `  ⏱  deform() ${fullMs.toFixed(2)}ms (rig+capsules+union) | ` +
+        `${cachedMs.toFixed(2)}ms (cached rig), avg of ${N}`,
     );
 
     // --- 3. Faithful bezier outline + visualization. ---
