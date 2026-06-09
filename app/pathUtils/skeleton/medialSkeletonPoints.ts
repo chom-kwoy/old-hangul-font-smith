@@ -17,9 +17,9 @@ import {
 import { constructMedialSkeleton } from "@/app/pathUtils/skeleton/medialSkeleton";
 import { Vec2D } from "@/app/utils/types";
 
-// Energy weights (paper Sec. 5.3) — used as defaults for SkeletonPointsOptions.
-const C1 = 1;     // centrality
-const C2 = 1e-3;  // count — penalises excess vertices (paper value)
+// Energy weights (paper Sec. 5.3) — defaults for SkeletonPointsOptions.
+const DEFAULT_CENTRALITY_WEIGHT = 1; // weight of the E_centrality term
+const DEFAULT_SEED_COUNT_PENALTY = 1e-3; // per-seed penalty (paper value)
 
 export type SkeletonPointsOptions = {
   /** Maximum outer (NM) iterations. Default: 12. */
@@ -32,10 +32,10 @@ export type SkeletonPointsOptions = {
   growthStart: number;
   /** Base number of new seeds added per growth step. Default: 1. */
   nNew: number;
-  /** Energy weight for centrality term (paper §5.3). Default: 1. */
-  c1: number;
-  /** Energy weight for seed-count penalty (paper §5.3). Default: 1e-3. */
-  c2: number;
+  /** Energy weight for the centrality term (paper §5.3). Default: 1. */
+  centralityWeight: number;
+  /** Energy weight penalising each extra seed/vertex (paper §5.3). Default: 1e-3. */
+  seedCountPenalty: number;
 };
 
 export type SkeletonIterCallback = (
@@ -64,8 +64,8 @@ export function computeMedialSkeletonPoints(
     nmItersPerDim: options.nmItersPerDim ?? 20,
     growthStart:   options.growthStart   ?? 50,
     nNew:          options.nNew          ?? 1,
-    c1:            options.c1            ?? C1,
-    c2:            options.c2            ?? C2,
+    centralityWeight: options.centralityWeight ?? DEFAULT_CENTRALITY_WEIGHT,
+    seedCountPenalty: options.seedCountPenalty ?? DEFAULT_SEED_COUNT_PENALTY,
   };
 
   const { points: boundarySamples } = sampleBoundary(path, { step: 10 });
@@ -131,7 +131,7 @@ export function computeMedialSkeletonPoints(
         return computeEnergyPartial(
           projFrozen, inscribedFrozen,
           currentFree, medialAxis, axisAdj, boundarySamples, medialAxisR, flatBoundary, normSq,
-          opts.c1, opts.c2, centralityScratch,
+          opts.centralityWeight, opts.seedCountPenalty, centralityScratch,
         );
       },
       x0,
@@ -202,8 +202,8 @@ function computeEnergyPartial(
   medialAxisR: Float64Array,
   flatBoundary: FlatBoundary,
   normSq: number,
-  c1: number,
-  c2: number,
+  centralityWeight: number,
+  seedCountPenalty: number,
   scratch: CentralityScratch,
 ): number {
   const freeProjected = freeV.map((p) => projectToMedialAxis(p, medialAxis, medialAxisR, flatBoundary));
@@ -211,7 +211,7 @@ function computeEnergyPartial(
   const inscribedFree = freeProjected.map((r) => r.inscribed);
   const projV = [...projFrozen, ...projFree];
   const inscribed = [...inscribedFrozen, ...inscribedFree];
-  return computeEnergyCore(projV, inscribed, medialAxis, axisAdj, boundarySamples, medialAxisR, normSq, c1, c2, scratch);
+  return computeEnergyCore(projV, inscribed, medialAxis, axisAdj, boundarySamples, medialAxisR, normSq, centralityWeight, seedCountPenalty, scratch);
 }
 
 
@@ -223,8 +223,8 @@ function computeEnergyCore(
   boundarySamples: paper.Point[],
   medialAxisR: Float64Array,
   normSq: number,
-  c1: number,
-  c2: number,
+  centralityWeight: number,
+  seedCountPenalty: number,
   scratch: CentralityScratch,
 ): number {
   if (projV.length === 0) return 0;
@@ -306,7 +306,7 @@ function computeEnergyCore(
     }
   }
 
-  return eCoverage + c1 * eCentrality + c2 * nSeeds;
+  return eCoverage + centralityWeight * eCentrality + seedCountPenalty * nSeeds;
 }
 
 // ---------------------------------------------------------------------------
