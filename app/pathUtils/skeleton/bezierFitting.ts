@@ -125,55 +125,30 @@ export function footParamOnBezier(
   for (let k = 0; k <= coarseSamples; k++) consider(k / coarseSamples);
   if (seed !== undefined) consider(Math.max(0, Math.min(1, seed)));
 
-  return projectOnBezier(
-    q.x, q.y, pA.x, pA.y, cp1.x, cp1.y, cp2.x, cp2.y, pB.x, pB.y, bestT,
-  );
+  return projectOnBezier(q, pA, cp1, cp2, pB, bestT);
 }
 
 /**
- * Newton foot-point projection: returns t* ∈ [0,1] on B(t; pA,c1,c2,pB)
- * nearest to (px, py), starting from t0.
+ * Newton foot-point projection: returns t* ∈ [0,1] on B(t; pA,cp1,cp2,pB)
+ * nearest to q, starting from t0.
  */
 function projectOnBezier(
-  px: number,
-  py: number,
-  pAx: number,
-  pAy: number,
-  c1x: number,
-  c1y: number,
-  c2x: number,
-  c2y: number,
-  pBx: number,
-  pBy: number,
+  q: Vec2D,
+  pA: Vec2D,
+  cp1: Vec2D,
+  cp2: Vec2D,
+  pB: Vec2D,
   t0: number,
 ): number {
   let t = t0;
   for (let k = 0; k < 4; k++) {
-    const u = 1 - t;
-    // B(t) - p
-    const ex =
-      u * u * u * pAx +
-      3 * u * u * t * c1x +
-      3 * u * t * t * c2x +
-      t * t * t * pBx -
-      px;
-    const ey =
-      u * u * u * pAy +
-      3 * u * u * t * c1y +
-      3 * u * t * t * c2y +
-      t * t * t * pBy -
-      py;
-    // B'(t)
-    const dx =
-      3 * (u * u * (c1x - pAx) + 2 * u * t * (c2x - c1x) + t * t * (pBx - c2x));
-    const dy =
-      3 * (u * u * (c1y - pAy) + 2 * u * t * (c2y - c1y) + t * t * (pBy - c2y));
-    // B''(t)
-    const d2x = 6 * (u * (c2x - 2 * c1x + pAx) + t * (pBx - 2 * c2x + c1x));
-    const d2y = 6 * (u * (c2y - 2 * c1y + pAy) + t * (pBy - 2 * c2y + c1y));
-    // f(t) = B'(t)·(B(t)-p),  f'(t) = |B'(t)|² + B''(t)·(B(t)-p)
-    const f = dx * ex + dy * ey;
-    const fp = dx * dx + dy * dy + d2x * ex + d2y * ey;
+    const b = evalBezier(pA, cp1, cp2, pB, t); // B(t)
+    const d1 = bezierTangent(pA, cp1, cp2, pB, t); // B'(t)
+    const d2 = bezierSecondDerivative(pA, cp1, cp2, pB, t); // B''(t)
+    const ex = b.x - q.x, ey = b.y - q.y; // B(t) - q
+    // f(t) = B'(t)·(B(t)-q),  f'(t) = |B'(t)|² + B''(t)·(B(t)-q)
+    const f = d1.x * ex + d1.y * ey;
+    const fp = d1.x * d1.x + d1.y * d1.y + d2.x * ex + d2.y * ey;
     if (Math.abs(fp) < 1e-10) break;
     t = Math.max(0, Math.min(1, t - f / fp));
   }
@@ -255,21 +230,12 @@ function fitBezierCPsCore(
     cp2y = (rA2 * rBRy - sumAB * rARy) / det;
 
     if (iter < iterations) {
+      // CPs are fixed during this re-projection pass — build the Vec2D wrappers
+      // once and reuse them across all interior samples.
+      const cp1 = { x: cp1x, y: cp1y };
+      const cp2 = { x: cp2x, y: cp2y };
       for (let i = 1; i < n - 1; i++) {
-        const pt = getPoint(i);
-        ts[i] = projectOnBezier(
-          pt.x,
-          pt.y,
-          pA.x,
-          pA.y,
-          cp1x,
-          cp1y,
-          cp2x,
-          cp2y,
-          pB.x,
-          pB.y,
-          ts[i],
-        );
+        ts[i] = projectOnBezier(getPoint(i), pA, cp1, cp2, pB, ts[i]);
       }
     }
   }
