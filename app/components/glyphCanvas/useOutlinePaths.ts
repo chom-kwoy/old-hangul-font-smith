@@ -8,6 +8,7 @@ import {
   adjustStrokes,
   bakeFabricPath,
   getTransform,
+  setFabricPathData,
 } from "@/app/components/glyphCanvas/fabricGeometry";
 import { PathObjects } from "@/app/components/glyphCanvas/types";
 import PathData from "@/app/pathUtils/PathData";
@@ -288,6 +289,16 @@ export function useOutlinePaths({
         }
       }
     };
+    // Bezier point editing mutates `main`'s path commands, but `main` is
+    // near-invisible and `display` only follows `main`'s transform (move/scale),
+    // not path edits — so live-sync `display` from `main` on each drag frame.
+    const onModifyPath = (opt: { target?: fabric.Object }) => {
+      const state = pathObjectsRef.current.find((p) => p.main === opt.target);
+      if (!state) return;
+      setFabricPathData(state.display, bakeFabricPath(state.main));
+      adjustStroke(state.display);
+      canvas.requestRenderAll();
+    };
     const onModified = (opt: { transform?: { action?: string } }) => {
       if (!currentPathRef.current) return;
       const committed = commitOutlineModified(
@@ -309,6 +320,7 @@ export function useOutlinePaths({
 
     canvas.on("object:moving", onMoving);
     canvas.on("object:scaling", onScaling);
+    canvas.on("object:modifyPath", onModifyPath);
     canvas.on("object:modified", onModified);
     return () => {
       // Skip if the canvas was already disposed (recreation nulls the ref first).
@@ -316,6 +328,7 @@ export function useOutlinePaths({
       if (canvasRef.current !== canvas) return;
       canvas.off("object:moving", onMoving);
       canvas.off("object:scaling", onScaling);
+      canvas.off("object:modifyPath", onModifyPath);
       canvas.off("object:modified", onModified);
     };
   }, [
