@@ -41,6 +41,14 @@ type SkeletonSub = {
   deformCoalescer: Coalescer<DeformedSkeleton>;
 };
 
+// A vertex handle tagged with its owning sub + point index, so canvas-level
+// transform events (which fire for group/ActiveSelection drags that bypass the
+// per-object events) can map it back to the skeleton it edits.
+type SkeletonHandle = fabric.Circle & {
+  handleBaseRadiusPx?: number;
+  skeletonHandle?: { sub: SkeletonSub; pointIdx: number };
+};
+
 const HANDLE_RADIUS_PX = 6;
 
 function getTransform(obj: fabric.FabricObject) {
@@ -195,6 +203,62 @@ function setFabricPathData(obj: fabric.Path, data: TSimplePathData) {
 
 function adjustStrokes(canvas: fabric.Canvas) {
   canvas.forEachObject(adjustStroke);
+}
+
+// Syncs every currently-selected skeleton handle's absolute position back into
+// its sub's S', then redraws bones + requests a deform. Driven by canvas-level
+// transform events so it works for single drags AND ActiveSelection (group)
+// move/scale/rotate, which don't fire the per-object "moving" event. Absolute
+// centres are read from calcTransformMatrix (via getTransform), which composes
+// any parent-group transform — left/top would be group-relative mid-drag.
+function syncActiveSkeletonHandles(canvas: fabric.Canvas) {
+  const affected = new Set<SkeletonSub>();
+  for (const obj of canvas.getActiveObjects()) {
+    const meta = (obj as SkeletonHandle).skeletonHandle;
+    if (!meta) continue;
+    const { sub, pointIdx } = meta;
+    const t = getTransform(obj);
+    const prev = sub.sPrime.points[pointIdx];
+    const dx = t.translateX - prev.x;
+    const dy = t.translateY - prev.y;
+    if (dx === 0 && dy === 0) continue;
+    sub.sPrime.points[pointIdx] = { x: t.translateX, y: t.translateY };
+    // Drag the anchor's adjacent bezier control points along by the same delta
+    // (cp1 belongs to a segment's start anchor, cp2 to its end anchor).
+    const cps = sub.sPrime.controlPoints;
+    if (cps) {
+      sub.segments.forEach(([a, b], si) => {
+        const cp = cps[si];
+        if (!cp) return;
+        if (a === pointIdx) cp[0] = { x: cp[0].x + dx, y: cp[0].y + dy };
+        if (b === pointIdx) cp[1] = { x: cp[1].x + dx, y: cp[1].y + dy };
+      });
+    }
+    sub.dirty = true;
+    affected.add(sub);
+  }
+  for (const sub of affected) {
+    setFabricPathData(sub.bones, bonePathData(sub.sPrime, sub.segments));
+    adjustStroke(sub.bones);
+    sub.deformCoalescer.request(sub.sPrime);
+  }
+  if (affected.size > 0) canvas.requestRenderAll();
+}
+
+// After an ActiveSelection scale/rotate, fabric bakes the group's scale/angle
+// into each child, leaving handles the wrong size/orientation. Disband the
+// selection and rebuild every handle from S' (the synced source of truth) at
+// unit scale/angle, so position and on-screen size are both correct.
+function resetSkeletonHandles(canvas: fabric.Canvas, subs: SkeletonSub[]) {
+  canvas.discardActiveObject();
+  for (const sub of subs) {
+    sub.handles.forEach((handle, i) => {
+      const pt = sub.sPrime.points[i];
+      handle.set({ left: pt.x, top: pt.y, scaleX: 1, scaleY: 1, angle: 0 });
+      adjustStroke(handle);
+      handle.setCoords();
+    });
+  }
 }
 
 let nextCanvasInstanceId = 0;
@@ -377,12 +441,16 @@ export function FabricGlyphCanvas({
     });
 
     if (interactive) {
+      // Set when a group scale/rotate has distorted handle size/angle, so the
+      // gesture-end handler knows to rebuild them from S' (see resetSkeletonHandles).
+      let skeletonNeedsReset = false;
       canvas.on("object:moving", () => {
         const activeObjects = canvas.getActiveObjects();
         for (const obj of activeObjects) {
           const state = pathObjectsRef.current.find((p) => p.main === obj);
           if (state) handleMove(state);
         }
+        syncActiveSkeletonHandles(canvas);
       });
       canvas.on("object:scaling", () => {
         const activeObjects = canvas.getActiveObjects();
@@ -396,7 +464,25 @@ export function FabricGlyphCanvas({
               enableRescaling,
             );
           }
+          if ((obj as SkeletonHandle).skeletonHandle) skeletonNeedsReset = true;
         }
+        syncActiveSkeletonHandles(canvas);
+      });
+      // Group scale/rotate moves handle centres; the per-object events don't
+      // fire for an ActiveSelection, so sync at the canvas level for every
+      // transform and rebuild distorted handles once the gesture finishes.
+      canvas.on("object:rotating", () => {
+        if (canvas.getActiveObjects().some((o) => (o as SkeletonHandle).skeletonHandle))
+          skeletonNeedsReset = true;
+        syncActiveSkeletonHandles(canvas);
+      });
+      canvas.on("object:modified", () => {
+        syncActiveSkeletonHandles(canvas);
+        if (skeletonNeedsReset) {
+          skeletonNeedsReset = false;
+          resetSkeletonHandles(canvas, skeletonSubsRef.current);
+        }
+        canvas.requestRenderAll();
       });
     }
 
@@ -679,40 +765,11 @@ export function FabricGlyphCanvas({
             selectable: true,
             evented: true,
           });
-          (
-            handle as fabric.Circle & { handleBaseRadiusPx?: number }
-          ).handleBaseRadiusPx = HANDLE_RADIUS_PX;
-          handle.on("moving", () => {
-            const c = handle.getCenterPoint();
-            const prev = sub.sPrime.points[pointIdx];
-            const dx = c.x - prev.x;
-            const dy = c.y - prev.y;
-            sub.sPrime.points[pointIdx] = { x: c.x, y: c.y };
-            // Drag the anchor's adjacent bezier control points along with it so
-            // the bone curve translates rigidly near the moved vertex (cp1 of a
-            // segment belongs to its start anchor, cp2 to its end anchor).
-            const cps = sub.sPrime.controlPoints;
-            if (cps) {
-              sub.segments.forEach(([a, b], si) => {
-                const cp = cps[si];
-                if (!cp) return;
-                if (a === pointIdx) {
-                  cp[0] = { x: cp[0].x + dx, y: cp[0].y + dy };
-                }
-                if (b === pointIdx) {
-                  cp[1] = { x: cp[1].x + dx, y: cp[1].y + dy };
-                }
-              });
-            }
-            sub.dirty = true;
-            setFabricPathData(
-              sub.bones,
-              bonePathData(sub.sPrime, sub.segments),
-            );
-            adjustStroke(sub.bones);
-            sub.deformCoalescer.request(sub.sPrime);
-            canvas.requestRenderAll();
-          });
+          const h = handle as SkeletonHandle;
+          h.handleBaseRadiusPx = HANDLE_RADIUS_PX;
+          h.skeletonHandle = { sub, pointIdx };
+          // Movement (single or grouped) is synced at the canvas level — see
+          // syncActiveSkeletonHandles wired to object:moving/scaling/rotating.
           sub.handles.push(handle);
         }
 
