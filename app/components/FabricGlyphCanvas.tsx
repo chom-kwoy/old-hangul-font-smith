@@ -6,6 +6,7 @@ import React, { useEffect, useRef } from "react";
 import {
   adjustStroke,
   adjustStrokes,
+  bakeFabricPath,
   bonePathData,
   cloneDeformedSkeleton,
   getTransform,
@@ -146,6 +147,29 @@ function resetSkeletonHandles(canvas: fabric.Canvas, subs: SkeletonSub[]) {
       handle.setCoords();
     });
   }
+}
+
+// Bakes the just-modified outline objects back into a new PathData so the edit
+// lands in Redux (undoable + saved). A move/rotate/point edit is read from the
+// interactive `main`; a scale is read from `display`, which already holds the
+// stroke-aware refit positioned correctly. Returns null if nothing committable
+// was modified (e.g. in skeleton mode, where the outline isn't interactive).
+function commitOutlineModified(
+  canvas: fabric.Canvas,
+  action: string | undefined,
+  pathObjects: PathObjects[],
+  basePath: PathData,
+): PathData | null {
+  const isScale = action === "scale" || action === "scaleX" || action === "scaleY";
+  const replacements = new Map<number, TSimplePathData>();
+  for (const obj of canvas.getActiveObjects()) {
+    const idx = pathObjects.findIndex((p) => p.main === obj);
+    if (idx < 0) continue;
+    const src = isScale ? pathObjects[idx].display : pathObjects[idx].main;
+    replacements.set(idx, bakeFabricPath(src));
+  }
+  if (replacements.size === 0) return null;
+  return basePath.withReplacedSubPaths(replacements);
 }
 
 let nextCanvasInstanceId = 0;
@@ -362,7 +386,19 @@ export function FabricGlyphCanvas({
           skeletonNeedsReset = true;
         syncActiveSkeletonHandles(canvas);
       });
-      canvas.on("object:modified", () => {
+      canvas.on("object:modified", (opt) => {
+        // Commit outline move/scale/rotate/point edits back to the PathData so
+        // they're undoable and saved (no-op in skeleton mode — outline isn't
+        // interactive there, so nothing committable is in the active set).
+        if (currentPathRef.current) {
+          const committed = commitOutlineModified(
+            canvas,
+            opt.transform?.action,
+            pathObjectsRef.current,
+            currentPathRef.current,
+          );
+          if (committed) onPathChangedRef.current?.(committed);
+        }
         syncActiveSkeletonHandles(canvas);
         if (skeletonNeedsReset) {
           skeletonNeedsReset = false;

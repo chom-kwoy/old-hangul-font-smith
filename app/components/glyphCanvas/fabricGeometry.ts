@@ -93,6 +93,32 @@ export function cloneDeformedSkeleton(
   };
 }
 
+// Bakes a fabric.Path's current transform (translate/scale/rotate) and edited
+// command data back into absolute em-space path data. Mirrors how fabric renders
+// a path — matrix · (point − pathOffset) — so it round-trips an unmodified path
+// and captures any move/scale/rotate/point edit. Used to commit canvas edits
+// back into a PathData. The transform matrix composes any parent ActiveSelection.
+export function bakeFabricPath(obj: fabric.Path): TSimplePathData {
+  const m = obj.calcTransformMatrix();
+  const off = obj.pathOffset;
+  return obj.path.map((cmd) => {
+    const out = cmd.slice() as typeof cmd;
+    const coords = out as unknown as number[];
+    for (let i = 1; i < cmd.length; i += 2) {
+      const p = fabric.util.transformPoint(
+        new fabric.Point(
+          (cmd[i] as number) - off.x,
+          (cmd[i + 1] as number) - off.y,
+        ),
+        m,
+      );
+      coords[i] = p.x;
+      coords[i + 1] = p.y;
+    }
+    return out;
+  });
+}
+
 // Replaces a fabric.Path's geometry with new absolute-coordinate path data,
 // re-centring its origin so it renders in place (mirrors how display/skeleton
 // overlay paths are positioned at their bbox centre).
