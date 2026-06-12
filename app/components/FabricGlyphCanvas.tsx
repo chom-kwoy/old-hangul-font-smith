@@ -1,4 +1,4 @@
-import { amber, blue, teal } from "@mui/material/colors";
+import { amber, blue } from "@mui/material/colors";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
 import React, { useEffect, useRef } from "react";
@@ -12,6 +12,7 @@ import {
   primitiveColors,
   setFabricPathData,
 } from "@/app/components/glyphCanvas/fabricGeometry";
+import { useBackgroundPaths } from "@/app/components/glyphCanvas/useBackgroundPaths";
 import {
   PathObjects,
   SkeletonHandle,
@@ -179,7 +180,6 @@ export function FabricGlyphCanvas({
   const instanceIdRef = useRef<number>(nextCanvasInstanceId++);
 
   const pathObjectsRef = useRef<PathObjects[]>([]);
-  const bgPathObjectsRef = useRef<fabric.Path[]>([]);
   const skeletonSubsRef = useRef<SkeletonSub[]>([]);
   const currentPathRef = useRef<PathData | null>(null);
 
@@ -379,7 +379,6 @@ export function FabricGlyphCanvas({
     // Skeleton fabric objects are owned by the canvas and vanish on dispose; the
     // skeleton effect rebuilds them (its session data is rebuilt on re-enter).
     pathObjectsRef.current = [];
-    bgPathObjectsRef.current = [];
     skeletonSubsRef.current = [];
     currentPathRef.current = null;
 
@@ -391,34 +390,15 @@ export function FabricGlyphCanvas({
     };
   }, [interactive, width, height, enableRescaling]);
 
-  // Effect 2: background paths — runs after canvas init when bgPaths or dimensions change.
-  useEffect(() => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
-
-    for (const obj of bgPathObjectsRef.current) {
-      canvas.remove(obj);
-    }
-    bgPathObjectsRef.current = [];
-
-    for (const p of bgPaths) {
-      bgPathObjectsRef.current.push(
-        ...p.makeFabricPaths({
-          selectable: false,
-          evented: false,
-          strokeWidth: 2,
-          stroke: teal[800],
-          fill: "transparent",
-          opacity: 0.3,
-        }),
-      );
-    }
-    canvas.add(...bgPathObjectsRef.current);
-    for (const obj of bgPathObjectsRef.current) {
-      canvas.sendObjectToBack(obj);
-    }
-    adjustStrokes(canvas);
-  }, [bgPaths, width, height, interactive, enableRescaling]);
+  // Effect 2: background reference glyphs.
+  useBackgroundPaths(
+    fabricCanvasRef,
+    bgPaths,
+    width,
+    height,
+    interactive,
+    enableRescaling,
+  );
 
   // Effect 3: foreground path — runs after canvas init when path or dimensions change.
   useEffect(() => {
