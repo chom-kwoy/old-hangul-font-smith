@@ -296,7 +296,15 @@ export function useOutlinePaths({
         pathObjectsRef.current,
         currentPathRef.current,
       );
-      if (committed) onPathChangedRef.current?.(committed);
+      if (!committed) return;
+      // Echo cancellation: record what we're pushing out so when it comes back
+      // as the `path` prop (via redux), the foreground effect's guard recognises
+      // it and skips rebuilding. The fabric objects already show the baked
+      // geometry (the transform is on `main`), so a rebuild would only churn the
+      // canvas and drop the user's selection. A genuine external change (undo,
+      // jamo switch) won't match, so it still rebuilds.
+      currentPathRef.current = committed;
+      onPathChangedRef.current?.(committed);
     };
 
     canvas.on("object:moving", onMoving);
