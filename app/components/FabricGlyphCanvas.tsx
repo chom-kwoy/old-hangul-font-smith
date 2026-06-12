@@ -1,7 +1,7 @@
 import { amber, blue } from "@mui/material/colors";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 
 import {
   adjustStroke,
@@ -14,6 +14,7 @@ import {
   setFabricPathData,
 } from "@/app/components/glyphCanvas/fabricGeometry";
 import { useBackgroundPaths } from "@/app/components/glyphCanvas/useBackgroundPaths";
+import { useFabricCanvas } from "@/app/components/glyphCanvas/useFabricCanvas";
 import {
   PathObjects,
   SkeletonHandle,
@@ -199,8 +200,6 @@ export function FabricGlyphCanvas({
   skeletonEditMode = skeletonEditMode ?? false;
 
   const canvasElemRef = useRef<HTMLCanvasElement | null>(null);
-  const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
-  const viewportRef = useRef<fabric.TMat2D | null>(null);
   const instanceIdRef = useRef<number>(nextCanvasInstanceId++);
 
   const pathObjectsRef = useRef<PathObjects[]>([]);
@@ -211,224 +210,108 @@ export function FabricGlyphCanvas({
   const onPathChangedRef = useRef(onPathChanged);
   onPathChangedRef.current = onPathChanged;
 
-  // Effect 1: canvas lifecycle — runs when interactive or dimensions change.
-  // Must be defined FIRST so React runs it before the content effects below.
-  useEffect(() => {
-    if (!canvasElemRef.current) return;
-
-    const canvas = new fabric.Canvas(canvasElemRef.current, {
-      width,
-      height,
-      backgroundColor: "white",
-      selectionFullyContained: true,
-    });
-
-    const minZoom = Math.min(width, height) / 1000;
-    const tx = width / 2 - 500 * minZoom;
-    const ty = height / 2 - 500 * minZoom;
-    const initialVpt: fabric.TMat2D = [minZoom, 0, 0, minZoom, tx, ty];
-
-    canvas.selection = interactive;
-
-    // Gridlines
-    const horzGrid: fabric.XY[] = [
-      { x: 0, y: 0 },
-      { x: 1000, y: 0 },
-    ];
-    const vertGrid: fabric.XY[] = [
-      { x: 0, y: 0 },
-      { x: 0, y: 1000 },
-    ];
-    const N_MINOR = 10;
-    for (let i = 1; i < N_MINOR; ++i) {
-      canvas.add(
-        new fabric.Polyline(horzGrid, {
-          left: 1000 / 2,
-          top: (i * 1000) / N_MINOR,
-          stroke: "lightgrey",
-          strokeWidth: 1,
-          selectable: false,
-          evented: false,
-        }),
-      );
-      canvas.add(
-        new fabric.Polyline(vertGrid, {
-          left: (i * 1000) / N_MINOR,
-          top: 1000 / 2,
-          stroke: "lightgrey",
-          strokeWidth: 1,
-          selectable: false,
-          evented: false,
-        }),
-      );
-    }
-    for (const grid of [horzGrid, vertGrid]) {
-      canvas.add(
-        new fabric.Polyline(grid, {
-          left: 1000 / 2,
-          top: 1000 / 2,
-          stroke: "red",
-          strokeWidth: 1,
-          selectable: false,
-          evented: false,
-        }),
-      );
-    }
-
-    // Pan and zoom
-    let isDragging = false;
-    let lastPosX: number | null = null;
-    let lastPosY: number | null = null;
-
-    function constrainViewport(c: fabric.Canvas) {
-      const vpt = c.viewportTransform;
-      vpt[4] = Math.min(vpt[4], 0);
-      vpt[4] = Math.max(vpt[4], width - 1000 * (vpt[0] + vpt[2]));
-      vpt[5] = Math.min(vpt[5], 0);
-      vpt[5] = Math.max(vpt[5], height - 1000 * (vpt[1] + vpt[3]));
-      c.setViewportTransform(c.viewportTransform);
-    }
-
-    canvas.on("mouse:wheel", function (opt) {
-      if (opt.e.ctrlKey) {
-        const delta = opt.e.deltaY;
-        let zoom = canvas.getZoom();
-        zoom *= 0.997 ** delta;
-        zoom = Math.min(Math.max(zoom, minZoom), 20 * minZoom);
-        canvas.zoomToPoint(
-          new fabric.Point(opt.e.offsetX, opt.e.offsetY),
-          zoom,
-        );
-        constrainViewport(canvas);
-        canvas.setViewportTransform(canvas.viewportTransform);
-        viewportRef.current = canvas.viewportTransform;
-        adjustStrokes(canvas);
-        canvas.requestRenderAll();
-        opt.e.preventDefault();
-        opt.e.stopPropagation();
-      }
-    });
-    canvas.on("mouse:down:before", function (opt) {
-      if ((opt.e as MouseEvent).ctrlKey) canvas.isDrawingMode = false;
-    });
-    canvas.on("mouse:down", function (opt) {
-      const evt = opt.e as MouseEvent;
-      if (evt.ctrlKey) {
-        isDragging = true;
-        canvas.selection = false;
-        lastPosX = evt.clientX;
-        lastPosY = evt.clientY;
-        const obj = canvas.getActiveObject();
-        if (obj) {
-          obj.lockMovementX = true;
-          obj.lockMovementY = true;
-        }
-      }
-    });
-    canvas.on("mouse:move", function (opt) {
-      if (isDragging && lastPosX !== null && lastPosY !== null) {
-        const e = opt.e as MouseEvent;
-        const vpt = canvas.viewportTransform;
-        vpt[4] += e.clientX - lastPosX;
-        vpt[5] += e.clientY - lastPosY;
-        constrainViewport(canvas);
-        viewportRef.current = vpt;
-        canvas.requestRenderAll();
-        lastPosX = e.clientX;
-        lastPosY = e.clientY;
-      }
-    });
-    canvas.on("mouse:up", function () {
-      if (isDragging) {
-        canvas.setViewportTransform(canvas.viewportTransform);
-        isDragging = false;
-        canvas.selection = true;
-        for (const obj of canvas.getObjects()) {
-          obj.lockMovementX = false;
-          obj.lockMovementY = false;
-        }
-      }
-    });
-
-    if (interactive) {
-      // Set when a group scale/rotate has distorted handle size/angle, so the
-      // gesture-end handler knows to rebuild them from S' (see resetSkeletonHandles).
-      let skeletonNeedsReset = false;
-      canvas.on("object:moving", () => {
-        const activeObjects = canvas.getActiveObjects();
-        for (const obj of activeObjects) {
-          const state = pathObjectsRef.current.find((p) => p.main === obj);
-          if (state) handleMove(state);
-        }
-        syncActiveSkeletonHandles(canvas);
-      });
-      canvas.on("object:scaling", () => {
-        const activeObjects = canvas.getActiveObjects();
-        for (const obj of activeObjects) {
-          const idx = pathObjectsRef.current.findIndex((p) => p.main === obj);
-          if (idx >= 0 && currentPathRef.current) {
-            handleScale(
-              pathObjectsRef.current[idx],
-              currentPathRef.current,
-              idx,
-              enableRescaling,
-            );
-          }
-          if ((obj as SkeletonHandle).skeletonHandle) skeletonNeedsReset = true;
-        }
-        syncActiveSkeletonHandles(canvas);
-      });
-      // Group scale/rotate moves handle centres; the per-object events don't
-      // fire for an ActiveSelection, so sync at the canvas level for every
-      // transform and rebuild distorted handles once the gesture finishes.
-      canvas.on("object:rotating", () => {
-        if (canvas.getActiveObjects().some((o) => (o as SkeletonHandle).skeletonHandle))
-          skeletonNeedsReset = true;
-        syncActiveSkeletonHandles(canvas);
-      });
-      canvas.on("object:modified", (opt) => {
-        // Commit outline move/scale/rotate/point edits back to the PathData so
-        // they're undoable and saved (no-op in skeleton mode — outline isn't
-        // interactive there, so nothing committable is in the active set).
-        if (currentPathRef.current) {
-          const committed = commitOutlineModified(
-            canvas,
-            opt.transform?.action,
-            pathObjectsRef.current,
-            currentPathRef.current,
-          );
-          if (committed) onPathChangedRef.current?.(committed);
-        }
-        syncActiveSkeletonHandles(canvas);
-        if (skeletonNeedsReset) {
-          skeletonNeedsReset = false;
-          resetSkeletonHandles(canvas, skeletonSubsRef.current);
-        }
-        canvas.requestRenderAll();
-      });
-    }
-
-    canvas.viewportTransform = viewportRef.current ?? initialVpt;
-    adjustStrokes(canvas);
-
-    // Reset content refs so the content effects below repopulate the new canvas.
-    // Skeleton fabric objects are owned by the canvas and vanish on dispose; the
-    // skeleton effect rebuilds them (its session data is rebuilt on re-enter).
+  // Reset content refs whenever a fresh canvas is created, so the content
+  // effects rebuild onto it. Runs (from useFabricCanvas) before those effects.
+  // Skeleton fabric objects are owned by the canvas and vanish on dispose; the
+  // skeleton effect rebuilds them (its session data is rebuilt on re-enter).
+  const resetContent = useCallback(() => {
     pathObjectsRef.current = [];
     skeletonSubsRef.current = [];
     currentPathRef.current = null;
+  }, []);
 
-    fabricCanvasRef.current = canvas;
+  // Effect 1: canvas lifecycle (creation, grid, pan/zoom).
+  const { canvas, canvasRef } = useFabricCanvas(
+    canvasElemRef,
+    width,
+    height,
+    interactive,
+    resetContent,
+  );
 
-    return () => {
-      canvas?.dispose();
-      fabricCanvasRef.current = null;
+  // Interaction wiring: drag/scale/rotate of outline paths and skeleton handles.
+  // Lives here (not in useFabricCanvas) because it spans both concerns; attaches
+  // to the live canvas and re-attaches when it's recreated.
+  useEffect(() => {
+    if (!canvas || !interactive) return;
+
+    // Set when a group scale/rotate has distorted handle size/angle, so the
+    // gesture-end handler knows to rebuild them from S' (see resetSkeletonHandles).
+    let skeletonNeedsReset = false;
+    const onMoving = () => {
+      for (const obj of canvas.getActiveObjects()) {
+        const state = pathObjectsRef.current.find((p) => p.main === obj);
+        if (state) handleMove(state);
+      }
+      syncActiveSkeletonHandles(canvas);
     };
-  }, [interactive, width, height, enableRescaling]);
+    const onScaling = () => {
+      for (const obj of canvas.getActiveObjects()) {
+        const idx = pathObjectsRef.current.findIndex((p) => p.main === obj);
+        if (idx >= 0 && currentPathRef.current) {
+          handleScale(
+            pathObjectsRef.current[idx],
+            currentPathRef.current,
+            idx,
+            enableRescaling,
+          );
+        }
+        if ((obj as SkeletonHandle).skeletonHandle) skeletonNeedsReset = true;
+      }
+      syncActiveSkeletonHandles(canvas);
+    };
+    // Group scale/rotate moves handle centres; the per-object events don't fire
+    // for an ActiveSelection, so sync at the canvas level for every transform
+    // and rebuild distorted handles once the gesture finishes.
+    const onRotating = () => {
+      if (
+        canvas
+          .getActiveObjects()
+          .some((o) => (o as SkeletonHandle).skeletonHandle)
+      )
+        skeletonNeedsReset = true;
+      syncActiveSkeletonHandles(canvas);
+    };
+    const onModified = (opt: { transform?: { action?: string } }) => {
+      // Commit outline move/scale/rotate/point edits back to the PathData so
+      // they're undoable and saved (no-op in skeleton mode — outline isn't
+      // interactive there, so nothing committable is in the active set).
+      if (currentPathRef.current) {
+        const committed = commitOutlineModified(
+          canvas,
+          opt.transform?.action,
+          pathObjectsRef.current,
+          currentPathRef.current,
+        );
+        if (committed) onPathChangedRef.current?.(committed);
+      }
+      syncActiveSkeletonHandles(canvas);
+      if (skeletonNeedsReset) {
+        skeletonNeedsReset = false;
+        resetSkeletonHandles(canvas, skeletonSubsRef.current);
+      }
+      canvas.requestRenderAll();
+    };
+
+    canvas.on("object:moving", onMoving);
+    canvas.on("object:scaling", onScaling);
+    canvas.on("object:rotating", onRotating);
+    canvas.on("object:modified", onModified);
+    return () => {
+      // Skip if the canvas was already disposed (recreation nulls the ref first).
+      // Intentionally reads the live ref at cleanup time to detect that.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (canvasRef.current !== canvas) return;
+      canvas.off("object:moving", onMoving);
+      canvas.off("object:scaling", onScaling);
+      canvas.off("object:rotating", onRotating);
+      canvas.off("object:modified", onModified);
+    };
+  }, [canvas, canvasRef, interactive, enableRescaling]);
 
   // Effect 2: background reference glyphs.
   useBackgroundPaths(
-    fabricCanvasRef,
+    canvasRef,
     bgPaths,
     width,
     height,
@@ -438,7 +321,7 @@ export function FabricGlyphCanvas({
 
   // Effect 3: foreground path — runs after canvas init when path or dimensions change.
   useEffect(() => {
-    const canvas = fabricCanvasRef.current;
+    const canvas = canvasRef.current;
     if (!canvas) return;
 
     if (JSON.stringify(currentPathRef.current) === JSON.stringify(path)) return;
@@ -549,7 +432,7 @@ export function FabricGlyphCanvas({
 
     canvas.add(...mainFabricPaths, ...displayFabricPaths);
     adjustStrokes(canvas);
-  }, [path, width, height, interactive, enableRescaling]);
+  }, [canvasRef, path, width, height, interactive, enableRescaling]);
 
   // Tracks which deform rigs (by rigKey) are built in the worker pool for this
   // canvas instance, so resize-driven re-renders reuse them instead of
@@ -560,7 +443,7 @@ export function FabricGlyphCanvas({
   // handles + a deformed-outline preview, and wires per-vertex dragging.
   // Recreated whenever the canvas, path, or mode changes; rig build is lazy.
   useEffect(() => {
-    const canvas = fabricCanvasRef.current;
+    const canvas = canvasRef.current;
     if (!canvas || !interactive || !skeletonEditMode) return;
     const basePath = currentPathRef.current;
     if (!basePath) return;
@@ -688,9 +571,10 @@ export function FabricGlyphCanvas({
       valid = false;
       for (const sub of subs) sub.deformCoalescer.cancel();
       // Only touch the canvas if it's still the live one. On width/height change
-      // Effect 1's cleanup disposes it first (nulling the ref) and drops these
-      // objects for us; touching a disposed canvas would throw.
-      if (fabricCanvasRef.current !== canvas) return;
+      // useFabricCanvas's cleanup disposes it first (nulling the ref) and drops
+      // these objects for us; touching a disposed canvas would throw.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (canvasRef.current !== canvas) return;
       for (const sub of subs) {
         canvas.remove(...sub.capsules, sub.bones, ...sub.handles);
       }
@@ -703,7 +587,7 @@ export function FabricGlyphCanvas({
       }
       canvas.requestRenderAll();
     };
-  }, [path, width, height, interactive, skeletonEditMode]);
+  }, [canvasRef, path, width, height, interactive, skeletonEditMode]);
 
   // Effect S2: commit on leaving skeleton-edit mode (true → false). Fires a
   // final deform for each edited subpath and writes the result back through
@@ -757,7 +641,7 @@ export function FabricGlyphCanvas({
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
-      const canvas = fabricCanvasRef.current;
+      const canvas = canvasRef.current;
       if (!canvas || !currentPathRef.current) return;
 
       const activeObjects = new Set(canvas.getActiveObjects());
@@ -788,7 +672,7 @@ export function FabricGlyphCanvas({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [canvasRef]);
 
   // Wrap canvas in a div so React unmounts the outer div rather than the canvas
   // element itself. fabric.js moves the canvas into its own wrapper div on init,
