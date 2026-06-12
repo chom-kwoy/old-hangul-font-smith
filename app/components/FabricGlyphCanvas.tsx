@@ -21,6 +21,9 @@ type PathObjects = {
   boundOffsetY: number;
   origCenter: Vec2D;
   editing: boolean;
+  scaleInFlight: boolean;
+  pendingScale: { scaleX: number; scaleY: number } | null;
+  disposed: boolean;
 };
 
 function getTransform(obj: fabric.FabricObject) {
@@ -50,39 +53,65 @@ function handleScale(
   state.main.canvas?.requestRenderAll();
 
   if (enableRescaling) {
-    const scaleX = mainTransform.scaleX;
-    const scaleY = mainTransform.scaleY;
-    pathData
-      .scalePath(subPathIndex, scaleX, scaleY, {
-        strokeWidth: 40.0,
-        doSimplify: false,
-        verbose: false,
-      })
-      .then((scaled) => {
-        if (scaled) {
-          state.baseScaleX = scaleX;
-          state.baseScaleY = scaleY;
-
-          const bounds = fabricPathDataToPaper(scaled).bounds;
-          state.boundOffsetX = bounds.center.x - state.origCenter.x;
-          state.boundOffsetY = bounds.center.y - state.origCenter.y;
-
-          const mainTransform = getTransform(state.main);
-          state.display.scaleX = mainTransform.scaleX / state.baseScaleX;
-          state.display.scaleY = mainTransform.scaleY / state.baseScaleY;
-          state.display.left = mainTransform.translateX + state.boundOffsetX;
-          state.display.top = mainTransform.translateY + state.boundOffsetY;
-
-          state.display.set({ path: scaled });
-          state.display.setBoundingBox();
-          state.display.setDimensions();
-          state.display.setCoords();
-
-          adjustStroke(state.display);
-          state.main.canvas?.requestRenderAll();
-        }
-      });
+    // Always record the latest requested scale; coalesce so that at most one
+    // refit task is in flight per path. This bounds the worker queue regardless
+    // of drag speed and removes any out-of-order/stale-result races.
+    state.pendingScale = {
+      scaleX: mainTransform.scaleX,
+      scaleY: mainTransform.scaleY,
+    };
+    if (!state.scaleInFlight) runRescale(state, pathData, subPathIndex);
   }
+}
+
+function runRescale(
+  state: PathObjects,
+  pathData: PathData,
+  subPathIndex: number,
+) {
+  const scale = state.pendingScale;
+  if (!scale) return;
+  state.pendingScale = null;
+  state.scaleInFlight = true;
+
+  pathData
+    .scalePath(subPathIndex, scale.scaleX, scale.scaleY, {
+      strokeWidth: 40.0,
+      doSimplify: false,
+      verbose: false,
+    })
+    .then((scaled) => {
+      if (scaled && !state.disposed) {
+        // baseScale must match the scale we actually sent to the worker.
+        state.baseScaleX = scale.scaleX;
+        state.baseScaleY = scale.scaleY;
+
+        const bounds = fabricPathDataToPaper(scaled).bounds;
+        state.boundOffsetX = bounds.center.x - state.origCenter.x;
+        state.boundOffsetY = bounds.center.y - state.origCenter.y;
+
+        const mainTransform = getTransform(state.main);
+        state.display.scaleX = mainTransform.scaleX / state.baseScaleX;
+        state.display.scaleY = mainTransform.scaleY / state.baseScaleY;
+        state.display.left = mainTransform.translateX + state.boundOffsetX;
+        state.display.top = mainTransform.translateY + state.boundOffsetY;
+
+        state.display.set({ path: scaled });
+        state.display.setBoundingBox();
+        state.display.setDimensions();
+        state.display.setCoords();
+
+        adjustStroke(state.display);
+        state.main.canvas?.requestRenderAll();
+      }
+    })
+    .finally(() => {
+      state.scaleInFlight = false;
+      // A newer scale arrived while we were busy — run the latest one now.
+      if (state.pendingScale && !state.disposed) {
+        runRescale(state, pathData, subPathIndex);
+      }
+    });
 }
 
 function adjustStroke(obj_: fabric.FabricObject) {
@@ -358,6 +387,7 @@ export function FabricGlyphCanvas({
     currentPathRef.current?.getMedialSkeleton();
 
     for (const obj of pathObjectsRef.current) {
+      obj.disposed = true;
       canvas.remove(obj.main);
       canvas.remove(obj.display);
     }
@@ -406,6 +436,9 @@ export function FabricGlyphCanvas({
           boundOffsetY: 0,
           origCenter,
           editing: false,
+          scaleInFlight: false,
+          pendingScale: null,
+          disposed: false,
         };
       }),
     );
@@ -548,6 +581,7 @@ export function FabricGlyphCanvas({
 
       canvas.discardActiveObject();
       for (const p of toDelete) {
+        p.disposed = true;
         canvas.remove(p.main);
         canvas.remove(p.display);
       }
