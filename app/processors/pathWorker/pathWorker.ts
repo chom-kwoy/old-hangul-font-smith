@@ -2,6 +2,7 @@ import { paperToFabricPathData } from "@/app/pathUtils/convert";
 import {
   DeformRig,
   buildDeformRig,
+  deformCapsules,
   deformOutlineFromRig,
 } from "@/app/pathUtils/skeleton/deform";
 import { scalePath, skeletonize } from "@/app/pathUtils/skeleton/skeleton";
@@ -86,6 +87,23 @@ async function handleEvent(
       type: "deformOutline",
       reqId: event.data.reqId,
       path,
+    };
+  } else if (event.data.type === "deformCapsules") {
+    const { rigKey, sPrime } = event.data;
+    const rig = deformRigs.get(rigKey);
+    if (!rig) {
+      throw new Error(`No deform rig for key: ${rigKey}`);
+    }
+    const caps = deformCapsules(rig, sPrime);
+    const capsules = caps.map((c) =>
+      c.clippedPath ? paperToFabricPathData(c.clippedPath) : null,
+    );
+    // Free the orphaned capsule paper items (this fires once per drag frame).
+    for (const c of caps) c.clippedPath?.remove();
+    return {
+      type: "deformCapsules",
+      reqId: event.data.reqId,
+      capsules,
     };
   } else if (event.data.type === "releaseDeformRig") {
     const { rigKey } = event.data;

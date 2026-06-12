@@ -1,11 +1,10 @@
 import { amber, blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
-import paper from "paper";
 import React, { useEffect, useRef } from "react";
 
-import { pathWorkerPool } from "@/app/pathUtils/PathWorkerPool";
 import PathData from "@/app/pathUtils/PathData";
+import { pathWorkerPool } from "@/app/pathUtils/PathWorkerPool";
 import { fabricPathDataToPaper } from "@/app/pathUtils/convert";
 import { DeformedSkeleton } from "@/app/pathUtils/skeleton/deform";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
@@ -38,7 +37,7 @@ type SkeletonSub = {
   dirty: boolean; // a vertex has been moved → needs commit on exit
   bones: fabric.Path; // curve-aware centreline overlay (non-evented)
   handles: fabric.Circle[]; // draggable vertex handles, parallel to points
-  preview: fabric.Path; // deformed-outline preview (non-evented)
+  capsules: fabric.Path[]; // deformed per-primitive preview (non-evented)
   deformCoalescer: Coalescer<DeformedSkeleton>;
 };
 
@@ -149,8 +148,27 @@ function bonePathData(graph: DeformedSkeleton, segments: [number, number][]) {
   return data;
 }
 
+// Per-primitive preview colours (test6_deform scheme): one hue per edge spread
+// over the segment count, vertex disks red. Fill is translucent so overlapping
+// capsules read as the composed glyph.
+function primitiveColors(
+  prim: { type: "point" | "edge"; elementIdx: number },
+  nSegs: number,
+): { fill: string; stroke: string } {
+  if (prim.type === "edge") {
+    const hue = Math.round((prim.elementIdx * 360) / Math.max(1, nSegs));
+    return {
+      fill: `hsla(${hue}, 70%, 60%, 0.22)`,
+      stroke: `hsl(${hue}, 70%, 35%)`,
+    };
+  }
+  return { fill: "rgba(255,100,100,0.22)", stroke: "rgb(255,0,0)" };
+}
+
 // Deep-copies a fitted skeleton's editable fields into a fresh S' for editing.
-function cloneDeformedSkeleton(fitted: FittedMedialAxisGraph): DeformedSkeleton {
+function cloneDeformedSkeleton(
+  fitted: FittedMedialAxisGraph,
+): DeformedSkeleton {
   return {
     points: fitted.points.map((p) => ({ x: p.x, y: p.y })),
     controlPoints: fitted.controlPoints?.map(
@@ -212,7 +230,6 @@ export function FabricGlyphCanvas({
 
   const pathObjectsRef = useRef<PathObjects[]>([]);
   const bgPathObjectsRef = useRef<fabric.Path[]>([]);
-  const otherObjectsRef = useRef<fabric.FabricObject[]>([]);
   const skeletonSubsRef = useRef<SkeletonSub[]>([]);
   const currentPathRef = useRef<PathData | null>(null);
 
@@ -391,7 +408,6 @@ export function FabricGlyphCanvas({
     // skeleton effect rebuilds them (its session data is rebuilt on re-enter).
     pathObjectsRef.current = [];
     bgPathObjectsRef.current = [];
-    otherObjectsRef.current = [];
     skeletonSubsRef.current = [];
     currentPathRef.current = null;
 
@@ -450,10 +466,6 @@ export function FabricGlyphCanvas({
       canvas.remove(obj.display);
     }
     pathObjectsRef.current = [];
-    for (const obj of otherObjectsRef.current) {
-      canvas.remove(obj);
-    }
-    otherObjectsRef.current = [];
 
     const pathSelectable = interactive;
     const mainFabricPaths =
@@ -549,79 +561,7 @@ export function FabricGlyphCanvas({
 
     canvas.add(...mainFabricPaths, ...displayFabricPaths);
     adjustStrokes(canvas);
-
-    let isValid = true;
-    currentPathRef.current?.getMedialSkeleton().then((medialSkeletons) => {
-      // Skip the static centreline overlay while editing — the skeleton effect
-      // draws its own interactive bones + handles instead.
-      if (!isValid || !medialSkeletons || skeletonEditMode) {
-        // Don't update the canvas if the path has changed
-        return;
-      }
-      const medialAxisLines = medialSkeletons.map((skeleton) => {
-        const pathData = skeleton.segments.flatMap((seg): TSimplePathData => {
-          const p0 = skeleton.points[seg[0]];
-          const p1 = skeleton.points[seg[1]];
-          return [["M", p0.x, p0.y], ["L", p1.x, p1.y], ["Z"]];
-        });
-        const bbox = fabricPathDataToPaper(pathData).bounds;
-        return new fabric.Path(pathData, {
-          left: bbox.center.x,
-          top: bbox.center.y,
-          stroke: "#FFFFAA",
-          strokeWidth: 2,
-          selectable: false,
-          evented: false,
-        });
-      });
-      const localPrimitives = medialSkeletons.flatMap((skeleton) => {
-        return skeleton.primitives.map((prim, primIdx) => {
-          const path: TSimplePathData = [];
-          for (let i = 0; i < prim.origins.length; ++i) {
-            const origin = prim.origins[i];
-            const dir = prim.directions[i];
-            const r = prim.radii[i];
-            const pt = new paper.Point(origin).add(
-              new paper.Point(dir).multiply(r),
-            );
-            if (path.length === 0) {
-              path.push(["M", pt.x, pt.y]);
-            } else {
-              path.push(["L", pt.x, pt.y]);
-            }
-          }
-          path.push(["Z"]);
-          const bbox = fabricPathDataToPaper(path).bounds;
-          const color = [
-            "#AAAAFF",
-            "#FFAAAA",
-            "#AAFFAA",
-            "#ffd1fa",
-            "#96f8ff",
-            "#ffdac1",
-            "#72ffdb",
-          ][primIdx % 7];
-          return new fabric.Path(path, {
-            left: bbox.center.x,
-            top: bbox.center.y,
-            stroke: color,
-            strokeWidth: 2,
-            fill: null,
-            selectable: false,
-            evented: false,
-          });
-        });
-      });
-      // medialAxisLines.push(...localPrimitives);
-      otherObjectsRef.current.push(...medialAxisLines);
-      canvas.add(...medialAxisLines);
-      adjustStrokes(canvas);
-    });
-
-    return () => {
-      isValid = false;
-    };
-  }, [path, width, height, interactive, enableRescaling, skeletonEditMode]);
+  }, [path, width, height, interactive, enableRescaling]);
 
   // Tracks which deform rigs (by rigKey) are built in the worker pool for this
   // canvas instance, so resize-driven re-renders reuse them instead of
@@ -668,20 +608,20 @@ export function FabricGlyphCanvas({
           pathWorkerPool.buildDeformRig(rigKey, basePath.getSubPath(i));
         }
 
-        // Preview seeded with the original outline (identity deform).
-        const origDisplay = pathObjectsRef.current[i]?.display;
-        const previewData: TSimplePathData = origDisplay
-          ? (JSON.parse(JSON.stringify(origDisplay.path)) as TSimplePathData)
-          : [];
-        const pbounds = fabricPathDataToPaper(previewData).bounds;
-        const preview = new fabric.Path(previewData, {
-          left: pbounds.center.x,
-          top: pbounds.center.y,
-          fill: "black",
-          stroke: amber[600],
-          strokeWidth: 3,
-          selectable: false,
-          evented: false,
+        // One translucent, coloured fabric.Path per primitive (parallel to
+        // fitted.primitives / the worker's rig primitives). Seeded empty and
+        // populated by an identity deformCapsules request below.
+        const nSegs = fitted.segments.length;
+        const capsules = fitted.primitives.map((prim) => {
+          const { fill, stroke } = primitiveColors(prim, nSegs);
+          return new fabric.Path([["M", 0, 0]], {
+            fill,
+            stroke,
+            strokeWidth: 1.5,
+            visible: false,
+            selectable: false,
+            evented: false,
+          });
         });
 
         const boneData = bonePathData(sPrime, fitted.segments);
@@ -704,12 +644,20 @@ export function FabricGlyphCanvas({
           dirty: false,
           bones,
           handles: [],
-          preview,
+          capsules,
           deformCoalescer: new Coalescer<DeformedSkeleton>(async (sp) => {
-            const outline = await pathWorkerPool.deformOutline(rigKey, sp);
-            if (!valid || !outline) return;
-            setFabricPathData(preview, outline);
-            adjustStroke(preview);
+            const result = await pathWorkerPool.deformCapsules(rigKey, sp);
+            if (!valid) return;
+            for (let j = 0; j < capsules.length; j++) {
+              const data = result[j];
+              if (!data || data.length === 0) {
+                capsules[j].set({ visible: false });
+                continue;
+              }
+              setFabricPathData(capsules[j], data);
+              capsules[j].set({ visible: true });
+              adjustStroke(capsules[j]);
+            }
             canvas.requestRenderAll();
           }),
         };
@@ -731,13 +679,36 @@ export function FabricGlyphCanvas({
             selectable: true,
             evented: true,
           });
-          (handle as fabric.Circle & { handleBaseRadiusPx?: number })
-            .handleBaseRadiusPx = HANDLE_RADIUS_PX;
+          (
+            handle as fabric.Circle & { handleBaseRadiusPx?: number }
+          ).handleBaseRadiusPx = HANDLE_RADIUS_PX;
           handle.on("moving", () => {
             const c = handle.getCenterPoint();
+            const prev = sub.sPrime.points[pointIdx];
+            const dx = c.x - prev.x;
+            const dy = c.y - prev.y;
             sub.sPrime.points[pointIdx] = { x: c.x, y: c.y };
+            // Drag the anchor's adjacent bezier control points along with it so
+            // the bone curve translates rigidly near the moved vertex (cp1 of a
+            // segment belongs to its start anchor, cp2 to its end anchor).
+            const cps = sub.sPrime.controlPoints;
+            if (cps) {
+              sub.segments.forEach(([a, b], si) => {
+                const cp = cps[si];
+                if (!cp) return;
+                if (a === pointIdx) {
+                  cp[0] = { x: cp[0].x + dx, y: cp[0].y + dy };
+                }
+                if (b === pointIdx) {
+                  cp[1] = { x: cp[1].x + dx, y: cp[1].y + dy };
+                }
+              });
+            }
             sub.dirty = true;
-            setFabricPathData(sub.bones, bonePathData(sub.sPrime, sub.segments));
+            setFabricPathData(
+              sub.bones,
+              bonePathData(sub.sPrime, sub.segments),
+            );
             adjustStroke(sub.bones);
             sub.deformCoalescer.request(sub.sPrime);
             canvas.requestRenderAll();
@@ -746,7 +717,9 @@ export function FabricGlyphCanvas({
         }
 
         subs.push(sub);
-        canvas.add(preview, bones, ...sub.handles);
+        canvas.add(...sub.capsules, bones, ...sub.handles);
+        // Populate the capsules with the identity deform.
+        sub.deformCoalescer.request(sub.sPrime);
       }
       adjustStrokes(canvas);
       canvas.requestRenderAll();
@@ -760,7 +733,7 @@ export function FabricGlyphCanvas({
       // objects for us; touching a disposed canvas would throw.
       if (fabricCanvasRef.current !== canvas) return;
       for (const sub of subs) {
-        canvas.remove(sub.preview, sub.bones, ...sub.handles);
+        canvas.remove(...sub.capsules, sub.bones, ...sub.handles);
       }
       // Restore the outline (commit + rig release happen in Effect S2/S3).
       for (const po of pathObjectsRef.current) {

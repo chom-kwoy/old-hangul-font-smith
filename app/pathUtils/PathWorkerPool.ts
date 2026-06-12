@@ -77,6 +77,20 @@ class PathWorkerPool extends WorkerPool<
     return result.path;
   }
 
+  // Applies the stored rig for `rigKey` and returns the per-primitive capsules
+  // (pre-union), parallel to the rig's primitives, for live preview.
+  async deformCapsules(
+    rigKey: string,
+    sPrime: DeformedSkeleton,
+  ): Promise<(TSimplePathData | null)[]> {
+    const result = await this.requestPinned(rigKey, {
+      type: "deformCapsules",
+      rigKey,
+      sPrime,
+    });
+    return result.capsules;
+  }
+
   // Frees the stored rig and its worker pin.
   async releaseDeformRig(rigKey: string): Promise<void> {
     await this.requestPinned(rigKey, {

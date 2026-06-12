@@ -12,6 +12,7 @@ export type MessageToPathWorker =
   | ScalePathRequest
   | BuildDeformRigRequest
   | DeformOutlineRequest
+  | DeformCapsulesRequest
   | ReleaseDeformRigRequest;
 
 export interface SkeletonizePathRequest {
@@ -54,6 +55,16 @@ export interface DeformOutlineRequest {
   sPrime: DeformedSkeleton;
 }
 
+// Applies a previously built rig to S' and returns the fold-free per-primitive
+// capsules (pre-union), parallel to the rig's primitives, for live preview.
+// Must be routed to the worker that holds `rigKey`.
+export interface DeformCapsulesRequest {
+  type: "deformCapsules";
+  reqId: number;
+  rigKey: string;
+  sPrime: DeformedSkeleton;
+}
+
 // Drops a stored rig to free memory once a skeleton-edit session ends.
 export interface ReleaseDeformRigRequest {
   type: "releaseDeformRig";
@@ -66,6 +77,7 @@ export type MessageFromPathWorker =
   | ScalePathResult
   | BuildDeformRigResult
   | DeformOutlineResult
+  | DeformCapsulesResult
   | ReleaseDeformRigResult;
 
 export interface SkeletonizePathResult {
@@ -91,6 +103,13 @@ export interface DeformOutlineResult {
   reqId: number;
   // null when the deform produced an empty outline.
   path: TSimplePathData | null;
+}
+
+export interface DeformCapsulesResult {
+  type: "deformCapsules";
+  reqId: number;
+  // One entry per rig primitive (parallel order); null for empty capsules.
+  capsules: (TSimplePathData | null)[];
 }
 
 export interface ReleaseDeformRigResult {
