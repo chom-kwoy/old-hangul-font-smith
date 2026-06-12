@@ -310,6 +310,11 @@ export function useSkeletonEditing({
   }, [
     canvasRef,
     path,
+    // width/height: not used directly — they re-fire this effect in the same
+    // render useFabricCanvas recreates the canvas (it keys on the same deps), so
+    // the session rebuilds onto the fresh canvas synchronously via canvasRef.
+    // Depending on the `canvas` state instead would lag a render and lose content
+    // during the ResizeObserver's initial size churn.
     width,
     height,
     interactive,

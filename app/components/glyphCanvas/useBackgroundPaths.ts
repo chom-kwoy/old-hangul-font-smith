@@ -45,5 +45,10 @@ export function useBackgroundPaths(
       canvas.sendObjectToBack(obj);
     }
     adjustStrokes(canvas);
+    // width/height: not used directly — they re-fire this effect in the same
+    // render useFabricCanvas recreates the canvas (it keys on the same deps), so
+    // the backgrounds rebuild onto the fresh canvas synchronously via canvasRef.
+    // Depending on the `canvas` state instead would lag a render and lose content
+    // during the ResizeObserver's initial size churn.
   }, [canvasRef, bgPaths, width, height, interactive, enableRescaling]);
 }
