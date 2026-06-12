@@ -44,6 +44,7 @@ export function GlyphView({
   height = Math.max(height, 1);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [skeletonEditMode, setSkeletonEditMode] = useState(false);
   const [dialogContentSize, setDialogContentSize] = useState({
     width: 0,
     height: 0,
@@ -109,6 +110,8 @@ export function GlyphView({
             onResetToSyllable={onResetToSyllable}
             importFromSVG={importFromSVG}
             downloadSVG={downloadSVG}
+            skeletonEditMode={skeletonEditMode}
+            toggleSkeletonEdit={() => setSkeletonEditMode((v) => !v)}
             tooltipPlacement="top"
           />
         </div>
@@ -122,6 +125,7 @@ export function GlyphView({
         bgPaths={bgPaths}
         interactive={interactive}
         onPathChanged={onPathChanged}
+        skeletonEditMode={skeletonEditMode}
       />
 
       {/* Fullscreen dialog */}
@@ -163,6 +167,8 @@ export function GlyphView({
                 onResetToSyllable={onResetToSyllable}
                 importFromSVG={importFromSVG}
                 downloadSVG={downloadSVG}
+                skeletonEditMode={skeletonEditMode}
+                toggleSkeletonEdit={() => setSkeletonEditMode((v) => !v)}
                 tooltipPlacement="right"
               />
             </div>
@@ -180,6 +186,7 @@ export function GlyphView({
                 bgPaths={bgPaths}
                 interactive={interactive}
                 onPathChanged={onPathChanged}
+                skeletonEditMode={skeletonEditMode}
               />
             )}
           </div>
@@ -196,6 +203,8 @@ function GlyphViewMenu({
   onResetToSyllable,
   importFromSVG,
   downloadSVG,
+  skeletonEditMode,
+  toggleSkeletonEdit,
   tooltipPlacement,
 }: {
   isFullScreen: boolean;
@@ -204,6 +213,8 @@ function GlyphViewMenu({
   onResetToSyllable?: (target: HTMLElement) => void;
   importFromSVG: () => void;
   downloadSVG: () => void;
+  skeletonEditMode: boolean;
+  toggleSkeletonEdit: () => void;
   tooltipPlacement: "right" | "left" | "top" | "bottom";
 }) {
   return (
@@ -222,6 +233,17 @@ function GlyphViewMenu({
           </Tooltip>
         </IconButton>
       )}
+      <IconButton
+        onClick={toggleSkeletonEdit}
+        color={skeletonEditMode ? "primary" : "default"}
+      >
+        <Tooltip
+          title={skeletonEditMode ? "Exit Skeleton Edit" : "Edit Skeleton"}
+          placement={tooltipPlacement}
+        >
+          <MaterialSymbol icon={"polyline"} size={24} fill={skeletonEditMode} />
+        </Tooltip>
+      </IconButton>
       <IconButton
         onClick={(event) => {
           if (onResetToSyllable) {

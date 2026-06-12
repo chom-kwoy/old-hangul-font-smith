@@ -268,6 +268,26 @@ export default class PathData {
     this.#skeletons = null;
   }
 
+  subPathCount(): number {
+    return this.#originalPaths.length;
+  }
+
+  // Returns the raw command data for subpath `index` (1000-unit em space).
+  getSubPath(index: number): TSimplePathData {
+    return this.#originalPaths[index];
+  }
+
+  // Returns a new PathData with the given subpaths swapped out by index.
+  // Subpaths not present in `replacements` are carried over unchanged. Used to
+  // commit per-subpath skeleton deformations back into an immutable PathData.
+  withReplacedSubPaths(
+    replacements: Map<number, TSimplePathData>,
+  ): PathData {
+    return new PathData(
+      this.#originalPaths.map((path, index) => replacements.get(index) ?? path),
+    );
+  }
+
   async getMedialSkeleton(): Promise<FittedMedialAxisGraph[]> {
     if (this.#skeletons === null) {
       if (this.#skeletonPromise === null) {

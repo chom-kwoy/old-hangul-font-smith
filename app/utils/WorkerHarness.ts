@@ -91,6 +91,9 @@ export class WorkerPool<
   RetT extends { type: string; reqId: number },
 > {
   readonly #workers: WorkerHarness<ReqT, RetT>[];
+  // Sticky key → worker index, for tasks that depend on worker-local state
+  // (e.g. a stored deform rig). All requests for a key go to the same worker.
+  readonly #pins: Map<string, number> = new Map();
 
   constructor(workerFactory: () => Worker | null, poolSize: number) {
     this.#workers = Array.from(
@@ -99,13 +102,37 @@ export class WorkerPool<
     );
   }
 
+  #leastLoadedIndex(): number {
+    let best = 0;
+    for (let i = 1; i < this.#workers.length; ++i) {
+      if (this.#workers[i].getNumPending() < this.#workers[best].getNumPending())
+        best = i;
+    }
+    return best;
+  }
+
   async requestTask<R extends Omit<ReqT, "reqId"> & { type: string }>(
     request: R,
   ): Promise<Extract<RetT, { type: R["type"] }>> {
-    // find worker with least pending tasks
-    const worker = this.#workers.reduce((prev, curr) =>
-      prev.getNumPending() <= curr.getNumPending() ? prev : curr,
-    );
-    return worker.requestTask(request);
+    return this.#workers[this.#leastLoadedIndex()].requestTask(request);
+  }
+
+  // Routes a request to the worker pinned to `key`, assigning the least-loaded
+  // worker on first use. Use for tasks that read/write worker-local state keyed
+  // by `key`; pair with releasePin() when that state is freed.
+  async requestPinned<R extends Omit<ReqT, "reqId"> & { type: string }>(
+    key: string,
+    request: R,
+  ): Promise<Extract<RetT, { type: R["type"] }>> {
+    let idx = this.#pins.get(key);
+    if (idx === undefined) {
+      idx = this.#leastLoadedIndex();
+      this.#pins.set(key, idx);
+    }
+    return this.#workers[idx].requestTask(request);
+  }
+
+  releasePin(key: string): void {
+    this.#pins.delete(key);
   }
 }

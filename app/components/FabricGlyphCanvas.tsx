@@ -1,11 +1,15 @@
-import { amber, teal } from "@mui/material/colors";
+import { amber, blue, teal } from "@mui/material/colors";
 import * as fabric from "fabric";
 import { TSimplePathData } from "fabric";
 import paper from "paper";
 import React, { useEffect, useRef } from "react";
 
+import { pathWorkerPool } from "@/app/pathUtils/PathWorkerPool";
 import PathData from "@/app/pathUtils/PathData";
 import { fabricPathDataToPaper } from "@/app/pathUtils/convert";
+import { DeformedSkeleton } from "@/app/pathUtils/skeleton/deform";
+import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
+import { Coalescer } from "@/app/utils/Coalescer";
 import {
   createPathControls,
   deselectPathControls,
@@ -21,10 +25,24 @@ type PathObjects = {
   boundOffsetY: number;
   origCenter: Vec2D;
   editing: boolean;
-  scaleInFlight: boolean;
-  pendingScale: { scaleX: number; scaleY: number } | null;
+  scaleCoalescer: Coalescer<{ scaleX: number; scaleY: number }> | null;
   disposed: boolean;
 };
+
+// Per-subpath state for an interactive skeleton-editing session.
+type SkeletonSub = {
+  index: number; // subpath index (parallel to PathData subpaths / skeletons)
+  rigKey: string; // worker-pinned deform rig key
+  segments: [number, number][]; // skeleton bone connectivity (from original S)
+  sPrime: DeformedSkeleton; // live edited points/controlPoints (mutable)
+  dirty: boolean; // a vertex has been moved → needs commit on exit
+  bones: fabric.Path; // curve-aware centreline overlay (non-evented)
+  handles: fabric.Circle[]; // draggable vertex handles, parallel to points
+  preview: fabric.Path; // deformed-outline preview (non-evented)
+  deformCoalescer: Coalescer<DeformedSkeleton>;
+};
+
+const HANDLE_RADIUS_PX = 6;
 
 function getTransform(obj: fabric.FabricObject) {
   const mat = obj.calcTransformMatrix();
@@ -53,48 +71,29 @@ function handleScale(
   state.main.canvas?.requestRenderAll();
 
   if (enableRescaling) {
-    // Always record the latest requested scale; coalesce so that at most one
-    // refit task is in flight per path. This bounds the worker queue regardless
-    // of drag speed and removes any out-of-order/stale-result races.
-    state.pendingScale = {
-      scaleX: mainTransform.scaleX,
-      scaleY: mainTransform.scaleY,
-    };
-    if (!state.scaleInFlight) runRescale(state, pathData, subPathIndex);
-  }
-}
-
-function runRescale(
-  state: PathObjects,
-  pathData: PathData,
-  subPathIndex: number,
-) {
-  const scale = state.pendingScale;
-  if (!scale) return;
-  state.pendingScale = null;
-  state.scaleInFlight = true;
-
-  pathData
-    .scalePath(subPathIndex, scale.scaleX, scale.scaleY, {
-      strokeWidth: 40.0,
-      doSimplify: false,
-      verbose: false,
-    })
-    .then((scaled) => {
-      if (scaled && !state.disposed) {
+    // Coalesce refits so that at most one is in flight per path: bounds the
+    // worker queue regardless of drag speed and avoids stale-result races.
+    if (!state.scaleCoalescer) {
+      state.scaleCoalescer = new Coalescer(async ({ scaleX, scaleY }) => {
+        const scaled = await pathData.scalePath(subPathIndex, scaleX, scaleY, {
+          strokeWidth: 40.0,
+          doSimplify: false,
+          verbose: false,
+        });
+        if (!scaled || state.disposed) return;
         // baseScale must match the scale we actually sent to the worker.
-        state.baseScaleX = scale.scaleX;
-        state.baseScaleY = scale.scaleY;
+        state.baseScaleX = scaleX;
+        state.baseScaleY = scaleY;
 
         const bounds = fabricPathDataToPaper(scaled).bounds;
         state.boundOffsetX = bounds.center.x - state.origCenter.x;
         state.boundOffsetY = bounds.center.y - state.origCenter.y;
 
-        const mainTransform = getTransform(state.main);
-        state.display.scaleX = mainTransform.scaleX / state.baseScaleX;
-        state.display.scaleY = mainTransform.scaleY / state.baseScaleY;
-        state.display.left = mainTransform.translateX + state.boundOffsetX;
-        state.display.top = mainTransform.translateY + state.boundOffsetY;
+        const t = getTransform(state.main);
+        state.display.scaleX = t.scaleX / state.baseScaleX;
+        state.display.scaleY = t.scaleY / state.baseScaleY;
+        state.display.left = t.translateX + state.boundOffsetX;
+        state.display.top = t.translateY + state.boundOffsetY;
 
         state.display.set({ path: scaled });
         state.display.setBoundingBox();
@@ -103,33 +102,84 @@ function runRescale(
 
         adjustStroke(state.display);
         state.main.canvas?.requestRenderAll();
-      }
-    })
-    .finally(() => {
-      state.scaleInFlight = false;
-      // A newer scale arrived while we were busy — run the latest one now.
-      if (state.pendingScale && !state.disposed) {
-        runRescale(state, pathData, subPathIndex);
-      }
+      });
+    }
+    state.scaleCoalescer.request({
+      scaleX: mainTransform.scaleX,
+      scaleY: mainTransform.scaleY,
     });
+  }
 }
 
 function adjustStroke(obj_: fabric.FabricObject) {
   const obj = obj_ as typeof obj_ & {
     originalScale: number | undefined;
     originalStrokeWidth: number | undefined;
+    handleBaseRadiusPx?: number;
   };
   if (obj.originalStrokeWidth === undefined) {
     obj.originalStrokeWidth = obj.strokeWidth;
   }
+  const zoom = obj.canvas!.getZoom();
   const objScale = (obj.scaleX + obj.scaleY) / 2;
-  const multiplier = 1 / obj.canvas!.getZoom() / objScale;
+  const multiplier = 1 / zoom / objScale;
   obj.set("strokeWidth", obj.originalStrokeWidth * multiplier);
+  // Keep skeleton handles a constant on-screen size regardless of zoom.
+  if (obj.handleBaseRadiusPx !== undefined) {
+    obj.set("radius", obj.handleBaseRadiusPx / zoom);
+    obj.setCoords();
+  }
+}
+
+// Builds curve-aware bone path data for a deformed skeleton: a cubic when the
+// segment carries control points, otherwise a straight line.
+function bonePathData(graph: DeformedSkeleton, segments: [number, number][]) {
+  const data: TSimplePathData = [];
+  segments.forEach(([a, b], i) => {
+    const p0 = graph.points[a];
+    const p1 = graph.points[b];
+    const cp = graph.controlPoints?.[i];
+    data.push(["M", p0.x, p0.y]);
+    if (cp) {
+      data.push(["C", cp[0].x, cp[0].y, cp[1].x, cp[1].y, p1.x, p1.y]);
+    } else {
+      data.push(["L", p1.x, p1.y]);
+    }
+  });
+  return data;
+}
+
+// Deep-copies a fitted skeleton's editable fields into a fresh S' for editing.
+function cloneDeformedSkeleton(fitted: FittedMedialAxisGraph): DeformedSkeleton {
+  return {
+    points: fitted.points.map((p) => ({ x: p.x, y: p.y })),
+    controlPoints: fitted.controlPoints?.map(
+      ([c1, c2]) =>
+        [
+          { x: c1.x, y: c1.y },
+          { x: c2.x, y: c2.y },
+        ] as [Vec2D, Vec2D],
+    ),
+  };
+}
+
+// Replaces a fabric.Path's geometry with new absolute-coordinate path data,
+// re-centring its origin so it renders in place (mirrors how display/skeleton
+// overlay paths are positioned at their bbox centre).
+function setFabricPathData(obj: fabric.Path, data: TSimplePathData) {
+  const bounds = fabricPathDataToPaper(data).bounds;
+  obj.set({ path: data });
+  obj.setBoundingBox();
+  obj.setDimensions();
+  obj.set({ left: bounds.center.x, top: bounds.center.y });
+  obj.setCoords();
 }
 
 function adjustStrokes(canvas: fabric.Canvas) {
   canvas.forEachObject(adjustStroke);
 }
+
+let nextCanvasInstanceId = 0;
 
 export function FabricGlyphCanvas({
   path,
@@ -140,6 +190,7 @@ export function FabricGlyphCanvas({
   onPathChanged,
   className,
   enableRescaling,
+  skeletonEditMode,
 }: {
   path: PathData | null;
   bgPaths?: PathData[];
@@ -149,16 +200,20 @@ export function FabricGlyphCanvas({
   onPathChanged?: (path: PathData | null) => void;
   className?: string;
   enableRescaling?: boolean;
+  skeletonEditMode?: boolean;
 }) {
   enableRescaling = enableRescaling ?? true;
+  skeletonEditMode = skeletonEditMode ?? false;
 
   const canvasElemRef = useRef<HTMLCanvasElement | null>(null);
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
   const viewportRef = useRef<fabric.TMat2D | null>(null);
+  const instanceIdRef = useRef<number>(nextCanvasInstanceId++);
 
   const pathObjectsRef = useRef<PathObjects[]>([]);
   const bgPathObjectsRef = useRef<fabric.Path[]>([]);
   const otherObjectsRef = useRef<fabric.FabricObject[]>([]);
+  const skeletonSubsRef = useRef<SkeletonSub[]>([]);
   const currentPathRef = useRef<PathData | null>(null);
 
   // Keep latest callback in a ref so fabric event closures never go stale
@@ -331,10 +386,13 @@ export function FabricGlyphCanvas({
     canvas.viewportTransform = viewportRef.current ?? initialVpt;
     adjustStrokes(canvas);
 
-    // Reset content refs so the content effects below repopulate the new canvas
+    // Reset content refs so the content effects below repopulate the new canvas.
+    // Skeleton fabric objects are owned by the canvas and vanish on dispose; the
+    // skeleton effect rebuilds them (its session data is rebuilt on re-enter).
     pathObjectsRef.current = [];
     bgPathObjectsRef.current = [];
     otherObjectsRef.current = [];
+    skeletonSubsRef.current = [];
     currentPathRef.current = null;
 
     fabricCanvasRef.current = canvas;
@@ -436,8 +494,7 @@ export function FabricGlyphCanvas({
           boundOffsetY: 0,
           origCenter,
           editing: false,
-          scaleInFlight: false,
-          pendingScale: null,
+          scaleCoalescer: null,
           disposed: false,
         };
       }),
@@ -495,7 +552,9 @@ export function FabricGlyphCanvas({
 
     let isValid = true;
     currentPathRef.current?.getMedialSkeleton().then((medialSkeletons) => {
-      if (!isValid || !medialSkeletons) {
+      // Skip the static centreline overlay while editing — the skeleton effect
+      // draws its own interactive bones + handles instead.
+      if (!isValid || !medialSkeletons || skeletonEditMode) {
         // Don't update the canvas if the path has changed
         return;
       }
@@ -562,7 +621,205 @@ export function FabricGlyphCanvas({
     return () => {
       isValid = false;
     };
-  }, [path, width, height, interactive, enableRescaling]);
+  }, [path, width, height, interactive, enableRescaling, skeletonEditMode]);
+
+  // Tracks which deform rigs (by rigKey) are built in the worker pool for this
+  // canvas instance, so resize-driven re-renders reuse them instead of
+  // rebuilding, and they can be released on exit/unmount.
+  const builtRigsRef = useRef<Set<string>>(new Set());
+
+  // Effect S1: skeleton editing session — renders interactive bones + vertex
+  // handles + a deformed-outline preview, and wires per-vertex dragging.
+  // Recreated whenever the canvas, path, or mode changes; rig build is lazy.
+  useEffect(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !interactive || !skeletonEditMode) return;
+    const basePath = currentPathRef.current;
+    if (!basePath) return;
+
+    const instanceId = instanceIdRef.current;
+    let valid = true;
+
+    // Disable the static outline and hide its filled display while editing.
+    for (const po of pathObjectsRef.current) {
+      po.main.selectable = false;
+      po.main.evented = false;
+      po.display.visible = false;
+    }
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+
+    const subs: SkeletonSub[] = [];
+    skeletonSubsRef.current = subs;
+
+    (async () => {
+      const skeletons = await basePath.getMedialSkeleton();
+      if (!valid || !skeletons) return;
+
+      for (let i = 0; i < skeletons.length; i++) {
+        const fitted = skeletons[i];
+        const rigKey = `${instanceId}:${i}`;
+        const sPrime = cloneDeformedSkeleton(fitted);
+
+        // Build the rig once per (instance, subpath); reused across resizes.
+        // Pass the subpath so the worker re-skeletonizes it for live geometry.
+        if (!builtRigsRef.current.has(rigKey)) {
+          builtRigsRef.current.add(rigKey);
+          pathWorkerPool.buildDeformRig(rigKey, basePath.getSubPath(i));
+        }
+
+        // Preview seeded with the original outline (identity deform).
+        const origDisplay = pathObjectsRef.current[i]?.display;
+        const previewData: TSimplePathData = origDisplay
+          ? (JSON.parse(JSON.stringify(origDisplay.path)) as TSimplePathData)
+          : [];
+        const pbounds = fabricPathDataToPaper(previewData).bounds;
+        const preview = new fabric.Path(previewData, {
+          left: pbounds.center.x,
+          top: pbounds.center.y,
+          fill: "black",
+          stroke: amber[600],
+          strokeWidth: 3,
+          selectable: false,
+          evented: false,
+        });
+
+        const boneData = bonePathData(sPrime, fitted.segments);
+        const bbounds = fabricPathDataToPaper(boneData).bounds;
+        const bones = new fabric.Path(boneData, {
+          left: bbounds.center.x,
+          top: bbounds.center.y,
+          stroke: amber[400],
+          strokeWidth: 2,
+          fill: null,
+          selectable: false,
+          evented: false,
+        });
+
+        const sub: SkeletonSub = {
+          index: i,
+          rigKey,
+          segments: fitted.segments,
+          sPrime,
+          dirty: false,
+          bones,
+          handles: [],
+          preview,
+          deformCoalescer: new Coalescer<DeformedSkeleton>(async (sp) => {
+            const outline = await pathWorkerPool.deformOutline(rigKey, sp);
+            if (!valid || !outline) return;
+            setFabricPathData(preview, outline);
+            adjustStroke(preview);
+            canvas.requestRenderAll();
+          }),
+        };
+
+        for (let p = 0; p < sPrime.points.length; p++) {
+          const pointIdx = p;
+          const pt = sPrime.points[p];
+          const handle = new fabric.Circle({
+            left: pt.x,
+            top: pt.y,
+            originX: "center",
+            originY: "center",
+            radius: HANDLE_RADIUS_PX / canvas.getZoom(),
+            fill: "white",
+            stroke: blue[700],
+            strokeWidth: 1.5,
+            hasControls: false,
+            hasBorders: false,
+            selectable: true,
+            evented: true,
+          });
+          (handle as fabric.Circle & { handleBaseRadiusPx?: number })
+            .handleBaseRadiusPx = HANDLE_RADIUS_PX;
+          handle.on("moving", () => {
+            const c = handle.getCenterPoint();
+            sub.sPrime.points[pointIdx] = { x: c.x, y: c.y };
+            sub.dirty = true;
+            setFabricPathData(sub.bones, bonePathData(sub.sPrime, sub.segments));
+            adjustStroke(sub.bones);
+            sub.deformCoalescer.request(sub.sPrime);
+            canvas.requestRenderAll();
+          });
+          sub.handles.push(handle);
+        }
+
+        subs.push(sub);
+        canvas.add(preview, bones, ...sub.handles);
+      }
+      adjustStrokes(canvas);
+      canvas.requestRenderAll();
+    })();
+
+    return () => {
+      valid = false;
+      for (const sub of subs) sub.deformCoalescer.cancel();
+      // Only touch the canvas if it's still the live one. On width/height change
+      // Effect 1's cleanup disposes it first (nulling the ref) and drops these
+      // objects for us; touching a disposed canvas would throw.
+      if (fabricCanvasRef.current !== canvas) return;
+      for (const sub of subs) {
+        canvas.remove(sub.preview, sub.bones, ...sub.handles);
+      }
+      // Restore the outline (commit + rig release happen in Effect S2/S3).
+      for (const po of pathObjectsRef.current) {
+        if (po.disposed) continue;
+        po.main.selectable = interactive;
+        po.main.evented = interactive;
+        po.display.visible = true;
+      }
+      canvas.requestRenderAll();
+    };
+  }, [path, width, height, interactive, skeletonEditMode]);
+
+  // Effect S2: commit on leaving skeleton-edit mode (true → false). Fires a
+  // final deform for each edited subpath and writes the result back through
+  // onPathChanged (undoable). Rigs are NOT released here — they're kept cached
+  // so toggling the mode off and on reuses them (rig lifetime is tied to the
+  // path; see Effect S3). The final deformOutline is awaited before onPathChanged
+  // fires, so the path-change release in S3 runs only after the rig is done.
+  const prevSkeletonModeRef = useRef(false);
+  useEffect(() => {
+    const exiting = prevSkeletonModeRef.current && !skeletonEditMode;
+    prevSkeletonModeRef.current = skeletonEditMode;
+    if (!exiting) return;
+
+    const subs = skeletonSubsRef.current;
+    const basePath = currentPathRef.current;
+    skeletonSubsRef.current = [];
+
+    (async () => {
+      const replacements = new Map<number, TSimplePathData>();
+      for (const sub of subs) {
+        if (!sub.dirty) continue;
+        const outline = await pathWorkerPool.deformOutline(
+          sub.rigKey,
+          sub.sPrime,
+        );
+        if (outline) replacements.set(sub.index, outline);
+      }
+      if (replacements.size > 0 && basePath) {
+        onPathChangedRef.current?.(basePath.withReplacedSubPaths(replacements));
+      }
+    })();
+  }, [skeletonEditMode]);
+
+  // Effect S3: rig lifetime tied to path identity. Rebuilding a rig means
+  // re-skeletonizing, so we cache rigs and release them only when the path they
+  // were built from changes (they're then stale) or on unmount. Toggling
+  // skeleton mode off/on with the same path reuses the cached rigs.
+  useEffect(() => {
+    // builtRigsRef.current is a stable Set instance (mutated, never reassigned),
+    // so this reference sees every key added during this path's lifetime.
+    const builtRigs = builtRigsRef.current;
+    return () => {
+      for (const key of builtRigs) {
+        pathWorkerPool.releaseDeformRig(key);
+      }
+      builtRigs.clear();
+    };
+  }, [path]);
 
   // Effect 4: Delete/Backspace key handling, scoped to this canvas instance.
   useEffect(() => {

@@ -1,5 +1,9 @@
 import { TSimplePathData } from "fabric";
 
+import {
+  DeformedSkeleton,
+  WarpOptions,
+} from "@/app/pathUtils/skeleton/deform";
 import { FittedMedialAxisGraph } from "@/app/pathUtils/skeleton/localPrimitiveFitting";
 import { PathScaleOptions } from "@/app/pathUtils/skeleton/skeleton";
 import {
@@ -43,6 +47,43 @@ class PathWorkerPool extends WorkerPool<
       options,
     });
     return result.path;
+  }
+
+  // Builds and stores a deform rig in the pinned worker for `rigKey`. The worker
+  // re-skeletonizes `path` to obtain live paper geometry for the rig.
+  async buildDeformRig(
+    rigKey: string,
+    path: TSimplePathData,
+    options?: WarpOptions,
+  ): Promise<void> {
+    await this.requestPinned(rigKey, {
+      type: "buildDeformRig",
+      rigKey,
+      path,
+      options,
+    });
+  }
+
+  // Applies the stored rig for `rigKey` to a deformed skeleton S'.
+  async deformOutline(
+    rigKey: string,
+    sPrime: DeformedSkeleton,
+  ): Promise<TSimplePathData | null> {
+    const result = await this.requestPinned(rigKey, {
+      type: "deformOutline",
+      rigKey,
+      sPrime,
+    });
+    return result.path;
+  }
+
+  // Frees the stored rig and its worker pin.
+  async releaseDeformRig(rigKey: string): Promise<void> {
+    await this.requestPinned(rigKey, {
+      type: "releaseDeformRig",
+      rigKey,
+    });
+    this.releasePin(rigKey);
   }
 }
 
