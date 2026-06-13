@@ -31,8 +31,10 @@ import {
   resolveSelfIntersections,
   sharedFootLinks,
   unionDeformedPrimitives,
+  warpRibDirs,
   warpedCurveSamplePoints,
 } from "@/app/pathUtils/skeleton/deform";
+import type { RibFan } from "@/app/pathUtils/skeleton/deform";
 import {
   FittedMedialAxisGraph,
   Primitive,
@@ -214,96 +216,59 @@ function writeOutlineSvg(label: string, outline: paper.PathItem): void {
   console.log(`  → saved ${outPath}`);
 }
 
-/** A foot→boundary "rib": from a bone foot point out to the capsule boundary. */
-type FootRib = {
-  foot: { x: number; y: number };
-  hit: { x: number; y: number };
-};
+/** A foot→boundary rib (native em coords). */
+type FootRib = { foot: { x: number; y: number }; hit: { x: number; y: number } };
 
-/** Foot→boundary ribs for one capsule: from the deformed bone's foot point
- *  (sampled at uniform curve-time `step` intervals) to where the bone normal
- *  first meets the capsule boundary on each side. Visualises the foot→boundary
- *  correspondence the warp is built on. Geometry only, in native em coords —
- *  callers style and transform it. */
-function boneFootRibs(
-  clippedPath: paper.PathItem,
-  skeleton: DeformedSkeleton,
-  segments: [number, number][],
-  edge: number,
-  step = 0.1,
-): FootRib[] {
-  const [u, v] = segments[edge];
-  const a = skeleton.points[u],
-    b = skeleton.points[v];
-  const cp = skeleton.controlPoints?.[edge];
-  const bone = new paper.Path({
-    segments: [
-      new paper.Segment(
-        new paper.Point(a.x, a.y),
-        undefined,
-        cp ? new paper.Point(cp[0].x - a.x, cp[0].y - a.y) : undefined,
-      ),
-      new paper.Segment(
-        new paper.Point(b.x, b.y),
-        cp ? new paper.Point(cp[1].x - b.x, cp[1].y - b.y) : undefined,
-        undefined,
-      ),
-    ],
-    insert: false,
-  });
-  const curve = bone.firstCurve;
-  if (!curve) {
-    bone.remove();
-    return [];
-  }
+/** Ray-cast the warp's rib directions (uniform-t fans) onto the drawn capsule
+ *  outline: from each foot along each side's direction to the nearest boundary
+ *  hit. Uniform spacing + endpoints exactly on the outline. */
+function castRibs(clippedPath: paper.PathItem, fans: RibFan[]): FootRib[] {
   const bb = clippedPath.bounds;
-  const reach = bb.width + bb.height + 10; // long enough to cross the capsule
+  const reach = bb.width + bb.height + 10;
   const ribs: FootRib[] = [];
-  for (let t = 0; t <= 1 + 1e-9; t += step) {
-    const tc = Math.min(t, 1);
-    const foot = curve.getPointAtTime(tc);
-    const normal = curve.getNormalAtTime(tc);
-    if (!foot || !normal || !isFinite(foot.x) || normal.length < 1e-9) continue;
-    const n = normal.normalize();
-    for (const sgn of [1, -1]) {
-      const far = foot.add(n.multiply(sgn * reach));
+  for (const fan of fans) {
+    const foot = new paper.Point(fan.foot.x, fan.foot.y);
+    for (const d of fan.dirs) {
+      const len = Math.hypot(d.x, d.y);
+      if (len < 1e-9) continue;
+      const far = foot.add(
+        new paper.Point((d.x / len) * reach, (d.y / len) * reach),
+      );
       const ray = new paper.Path({
         segments: [new paper.Segment(foot), new paper.Segment(far)],
         insert: false,
       });
       const xs = clippedPath.getIntersections(ray);
       ray.remove();
-      if (xs.length === 0) continue;
-      // Nearest boundary hit on this side (the capsule wall, not a far lobe).
+      if (!xs.length) continue;
       let best = xs[0].point,
         bestD = foot.getDistance(best);
       for (const cl of xs) {
-        const d = foot.getDistance(cl.point);
-        if (d < bestD) {
-          bestD = d;
+        const dd = foot.getDistance(cl.point);
+        if (dd < bestD) {
+          bestD = dd;
           best = cl.point;
         }
       }
+      if (bestD < 1) continue; // degenerate cap-tip rib (foot on the boundary)
       ribs.push({
         foot: { x: foot.x, y: foot.y },
         hit: { x: best.x, y: best.y },
       });
     }
   }
-  bone.remove();
   return ribs;
 }
 
 /** Write every warped capsule (pre-union) to a single SVG, one hue per edge
- *  (test5 scheme; vertex disks red), plus thin bone-foot→boundary ribs sampled
- *  at curve-time 0.1 intervals. Used for the pre-averaging capsules. */
+ *  (test5 scheme; vertex disks red), plus the warp's actual foot→boundary ribs
+ *  (`ribsByCap`, index-aligned with `prims`). Used for the pre-averaging capsules. */
 function writeCapsulesSvg(
   label: string,
   prims: Primitive[],
   nSegs: number,
   suffix: string,
-  skeleton: DeformedSkeleton,
-  segments: [number, number][],
+  fansByCap: RibFan[][],
 ): void {
   let bb: paper.Rectangle | null = null;
   for (const p of prims) {
@@ -318,7 +283,8 @@ function writeCapsulesSvg(
   const hue = (i: number) => Math.round((i * 360) / Math.max(1, nSegs));
   const paths: string[] = [];
   const ribs: string[] = [];
-  for (const p of prims) {
+  for (let pi = 0; pi < prims.length; pi++) {
+    const p = prims[pi];
     const d = p.clippedPath?.pathData;
     if (!d) continue;
     const isEdge = p.type === "edge";
@@ -328,8 +294,8 @@ function writeCapsulesSvg(
       `  <path d="${d}" fill="${fill}" fill-opacity="0.22" ` +
         `stroke="${stroke}" stroke-width="1.5" fill-rule="evenodd"/>`,
     );
-    if (isEdge && p.clippedPath) {
-      for (const r of boneFootRibs(p.clippedPath, skeleton, segments, p.elementIdx)) {
+    if (isEdge && p.clippedPath && fansByCap[pi]) {
+      for (const r of castRibs(p.clippedPath, fansByCap[pi])) {
         ribs.push(
           `  <line x1="${r.foot.x.toFixed(2)}" y1="${r.foot.y.toFixed(2)}" ` +
             `x2="${r.hit.x.toFixed(2)}" y2="${r.hit.y.toFixed(2)}" ` +
@@ -547,8 +513,8 @@ function renderDeform(
       );
   }
 
-  // Bone-foot → capsule-boundary ribs (pre-averaging capsules), sampled at
-  // curve-time 0.1 intervals. Thin and dashed, matching the preavg capsules.
+  // The warp's actual foot→boundary ribs (pre-averaging capsules): tilted off
+  // the normal in tilt mode, perpendicular otherwise. Thin and dashed.
   for (const r of ribs) {
     canvas.add(
       new FabricLine([tx(r.foot.x), ty(r.foot.y), tx(r.hit.x), ty(r.hit.y)], {
@@ -903,21 +869,22 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           );
         }
         // Pre-averaging capsules, resolved (dashed, no fill, same hue) on top.
-        const warpedPre = applyDeform(rig, edit.skeleton, false).map((p) =>
+        // Built with concave fold relief (tilt) — self-consistent here because
+        // averageShared=false has no shared corrections (the relief is not yet
+        // integrated with the shared-vertex averaging used by the real outline).
+        const vizRig = buildDeformRig(fitted, { foldRelief: "tilt" });
+        const warpedPre = applyDeform(vizRig, edit.skeleton, false).map((p) =>
           p.clippedPath
             ? { ...p, clippedPath: resolveSelfIntersections(p.clippedPath) }
             : p,
         );
-        writeCapsulesSvg(
-          label,
-          warpedPre,
-          nSegs,
-          "_capsules_preavg",
-          edit.skeleton,
-          fitted.segments,
-        );
+        // The warp's rib directions (tilted in tilt mode), index-aligned with
+        // warpedPre; ray-cast onto each capsule's outline for the overlay.
+        const fansByCap = warpRibDirs(vizRig, edit.skeleton);
+        writeCapsulesSvg(label, warpedPre, nSegs, "_capsules_preavg", fansByCap);
         const capRibs: (FootRib & { stroke: string })[] = [];
-        for (const prim of warpedPre) {
+        for (let pi = 0; pi < warpedPre.length; pi++) {
+          const prim = warpedPre[pi];
           if (!prim.clippedPath) continue;
           capLayers.push({
             item: prim.clippedPath,
@@ -931,14 +898,8 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           });
           if (prim.type === "edge") {
             const stroke = `hsl(${hue(prim.elementIdx)}, 70%, 40%)`;
-            for (const r of boneFootRibs(
-              prim.clippedPath,
-              edit.skeleton,
-              fitted.segments,
-              prim.elementIdx,
-            )) {
+            for (const r of castRibs(prim.clippedPath, fansByCap[pi]))
               capRibs.push({ ...r, stroke });
-            }
           }
         }
         renderDeform(

@@ -138,6 +138,17 @@ export interface WarpOptions {
   blendSupport?: number;
   /** Cap on the iso-offset stretch ρ before the analytic tangent is rejected. */
   rhoMax?: number;
+  /**
+   * Concave offset-fold relief (experimental). When an edit curls a bone tighter
+   * than the capsule is wide (b·κ' > 1), the normal-offset boundary folds.
+   *  - "off"   — no relief (default; identity-preserving, original behaviour).
+   *  - "clamp" — pointwise: saturate the normal offset so it stays short of the
+   *              centre of curvature (sacrifices width at the curl).
+   *  - "tilt"  — also tilt the rib away from the normal via a per-bone tridiagonal
+   *              solve that minimises crossing while staying near perpendicular,
+   *              with the clamp as a guaranteed safety net.
+   */
+  foldRelief?: "off" | "clamp" | "tilt";
 }
 
 type ResolvedWarpOptions = Required<WarpOptions>;
@@ -148,6 +159,7 @@ export const DEFAULT_WARP_OPTIONS: ResolvedWarpOptions = {
   maxDepth: 6,
   blendSupport: 150,
   rhoMax: 6,
+  foldRelief: "off",
 };
 
 function resolveWarpOptions(o?: WarpOptions): ResolvedWarpOptions {
@@ -830,6 +842,224 @@ function warpCurveChain(
   );
 }
 
+// --- Concave offset-fold relief (experimental) ----------------------------
+
+// Tilt-solve tuning (see WarpOptions.foldRelief). All deterministic.
+const FOLD_NODES = 65; // tridiagonal grid resolution over t∈[0,1]
+const FOLD_MARGIN = 0.05; // keep the offset Jacobian ≥ this fraction of σ'
+const FOLD_CLAMP_ONSET = 0.85; // saturate the offset once b·κ' exceeds this…
+const FOLD_CLAMP_CAP = 0.97; // …asymptoting here (<1, short of the cusp)
+const FOLD_SMOOTH = 1.0; // μ: rib-angle smoothness
+const FOLD_NORMAL_PULL = 0.1; // λ: pull θ back toward 90°
+const FOLD_STRENGTH = 10.0; // ν: how hard to chase the fold-relief turning rate
+
+/**
+ * Pointwise radial clamp: saturate the signed normal offset `b` so `b·κ'` never
+ * reaches 1 (the centre of curvature), keeping the offset boundary fold-free.
+ * Identity-preserving: for `b·κ' ≤ FOLD_CLAMP_ONSET` it returns `b` unchanged.
+ */
+function clampOffset(b: number, kappa: number): number {
+  const u = b * kappa; // signed; concave fold risk when u > 0 and → 1
+  if (u <= FOLD_CLAMP_ONSET) return b; // convex or safe → untouched
+  const span = FOLD_CLAMP_CAP - FOLD_CLAMP_ONSET;
+  const uSat = FOLD_CLAMP_ONSET + span * Math.tanh((u - FOLD_CLAMP_ONSET) / span);
+  return uSat / kappa; // sign(kappa) = sign(b) here, so sign preserved
+}
+
+/**
+ * Solve a per-bone rib-tilt field φ(t) (radians off the normal) that relieves
+ * concave folds while staying near perpendicular. Minimises a quadratic energy
+ * (smoothness μ, normal-pull λ, fold-relief ν chasing the max safe turning rate)
+ * → a symmetric tridiagonal system, solved directly (Thomas), pinned φ=0 at the
+ * bone ends. Returns the φ samples (length FOLD_NODES), or null if the bone never
+ * folds (so the caller stays on the pure normal warp).
+ */
+function solveTiltField(
+  rp: RigPrimitive,
+  sPrime: DeformedSkeleton,
+  segments: [number, number][],
+  edge: number,
+): Float64Array | null {
+  const M = FOLD_NODES;
+  const h = 1 / (M - 1);
+  const sigma = new Float64Array(M);
+  const kappa = new Float64Array(M);
+  for (let j = 0; j < M; j++) {
+    const ff = boneFrameFull(sPrime, segments, edge, j * h);
+    sigma[j] = ff.sigma;
+    kappa[j] = ff.kappa;
+  }
+  // Concave-side half-width B(t): max |b| among this capsule's samples whose foot
+  // lands at node j and sit on the bend's inner (folding) side.
+  const B = new Float64Array(M);
+  for (const ring of rp.curveSamples) {
+    for (const cs of ring) {
+      if (!cs) continue;
+      for (const s of cs) {
+        const j = Math.round(s.t * (M - 1));
+        if (j < 0 || j >= M) continue;
+        if (Math.sign(s.b) !== Math.sign(kappa[j])) continue;
+        const ab = Math.abs(s.b);
+        if (ab > B[j]) B[j] = ab;
+      }
+    }
+  }
+  // Fold-relief target ψ(t) = desired rib turning-rate correction where the
+  // perpendicular offset folds (|κ'|·B beyond the safe bound 1−margin).
+  const g = new Float64Array(M);
+  const psi = new Float64Array(M);
+  let folds = false;
+  for (let j = 0; j < M; j++) {
+    if (B[j] <= 1e-6) continue;
+    if (Math.abs(kappa[j]) * B[j] > 1 - FOLD_MARGIN) {
+      g[j] = 1;
+      folds = true;
+      psi[j] =
+        Math.sign(kappa[j]) *
+        ((1 - FOLD_MARGIN) / B[j] - Math.abs(kappa[j])) *
+        sigma[j];
+    }
+  }
+  if (!folds) return null;
+
+  // Assemble the symmetric tridiagonal system for interior nodes 1..M-2
+  // (φ_0 = φ_{M-1} = 0). Interval stiffness k_j = (μ + ν·ḡ_j)/h.
+  const k = new Float64Array(M - 1);
+  for (let j = 0; j < M - 1; j++)
+    k[j] = (FOLD_SMOOTH + FOLD_STRENGTH * 0.5 * (g[j] + g[j + 1])) / h;
+  const n = M - 2;
+  const lo = new Float64Array(n); // sub-diagonal
+  const di = new Float64Array(n); // diagonal
+  const up = new Float64Array(n); // super-diagonal
+  const rhs = new Float64Array(n);
+  for (let i = 1; i <= n; i++) {
+    const idx = i - 1;
+    lo[idx] = -k[i - 1];
+    up[idx] = -k[i];
+    di[idx] = k[i - 1] + k[i] + FOLD_NORMAL_PULL * h;
+    rhs[idx] =
+      FOLD_STRENGTH * (g[i - 1] * psi[i - 1] - g[i] * psi[i]);
+  }
+  // Thomas algorithm (lo[0] and up[n-1] touch pinned zeros → ignored).
+  for (let i = 1; i < n; i++) {
+    const w = lo[i] / di[i - 1];
+    di[i] -= w * up[i - 1];
+    rhs[i] -= w * rhs[i - 1];
+  }
+  const phi = new Float64Array(M); // φ_0 = φ_{M-1} = 0 already
+  phi[n] = rhs[n - 1] / di[n - 1];
+  for (let i = n - 2; i >= 0; i--) phi[i + 1] = (rhs[i] - up[i] * phi[i + 2]) / di[i];
+  return phi;
+}
+
+/** Linearly sample a tilt field at bone parameter t∈[0,1]. */
+function sampleTilt(phi: Float64Array, t: number): number {
+  const x = Math.min(Math.max(t, 0), 1) * (phi.length - 1);
+  const i = Math.floor(x);
+  if (i >= phi.length - 1) return phi[phi.length - 1];
+  const f = x - i;
+  return phi[i] * (1 - f) + phi[i + 1] * f;
+}
+
+/**
+ * Base single-edge warp of a boundary point with fold relief applied — plus its
+ * foot `o` and the (un-tilted) frame axes the shared correction is expressed in.
+ * No shared term. In tilt mode the offset rides the rib direction `ν'` rotated by
+ * φ(t) on the concave side; clamp/off keep it on `ν'`.
+ */
+function warpBoundaryBase(
+  m: AnchorMember,
+  sPrime: DeformedSkeleton,
+  segments: [number, number][],
+  reliefMode: "off" | "clamp" | "tilt",
+  tiltPhi: Float64Array | null,
+  ownEdge: number,
+): { o: Vec2D; tau: Vec2D; nu: Vec2D; point: Vec2D } {
+  if (reliefMode !== "off" && m.edge === ownEdge) {
+    const ff = boneFrameFull(sPrime, segments, m.edge, m.t);
+    const b = clampOffset(m.b, ff.kappa);
+    let bx = ff.nu.x,
+      by = ff.nu.y;
+    // Tilt only the concave (folding) side; convex stays on its normal.
+    if (tiltPhi && m.b * ff.kappa > 0) {
+      const phi = sampleTilt(tiltPhi, m.t);
+      const c = Math.cos(phi),
+        s = Math.sin(phi);
+      bx = c * ff.nu.x + s * ff.tau.x;
+      by = c * ff.nu.y + s * ff.tau.y;
+    }
+    return {
+      o: ff.o,
+      tau: ff.tau,
+      nu: ff.nu,
+      point: {
+        x: ff.o.x + m.a * ff.tau.x + b * bx,
+        y: ff.o.y + m.a * ff.tau.y + b * by,
+      },
+    };
+  }
+  const f = frameAt(sPrime, segments, m.edge, m.t);
+  return {
+    o: f.o,
+    tau: f.tau,
+    nu: f.nu,
+    point: {
+      x: f.o.x + m.a * f.tau.x + m.b * f.nu.x,
+      y: f.o.y + m.a * f.tau.y + m.b * f.nu.y,
+    },
+  };
+}
+
+/** A bone foot and the warp's outward rib directions there — one unit vector per
+ *  side, tilted off the normal on the concave side in tilt mode. */
+export type RibFan = { foot: Vec2D; dirs: Vec2D[] };
+
+/**
+ * The warp's rib directions sampled at uniform bone parameter (`step`), per
+ * capsule, computed with the active `foldRelief`. Each fan gives the foot and the
+ * outward offset direction on each side — perpendicular in off/clamp, tilted by
+ * φ(t) on the concave side in tilt mode. Callers ray-cast along these onto the
+ * drawn outline (so spacing is uniform and endpoints land on the boundary).
+ * Indexed [primitiveIndex][sample]. Length, not direction, carries the clamp —
+ * the ray-cast picks it up from the (clamped) outline.
+ */
+export function warpRibDirs(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+  step = 0.1,
+): RibFan[][] {
+  const segments = rig.segments;
+  const mode = rig.options.foldRelief;
+  return rig.primitives.map((rp) => {
+    const out: RibFan[] = [];
+    if (rp.prim.type !== "edge") return out;
+    const edge = rp.prim.elementIdx;
+    const tiltPhi =
+      mode === "tilt" ? solveTiltField(rp, sPrime, segments, edge) : null;
+    for (let t = 0; t <= 1 + 1e-9; t += step) {
+      const tc = Math.min(t, 1);
+      const ff = boneFrameFull(sPrime, segments, edge, tc);
+      const dirs: Vec2D[] = [];
+      for (const sgn of [1, -1]) {
+        const concave = sgn * Math.sign(ff.kappa) > 0;
+        if (tiltPhi && concave) {
+          const phi = sampleTilt(tiltPhi, tc);
+          const c = Math.cos(phi),
+            s = Math.sin(phi);
+          dirs.push({
+            x: sgn * (c * ff.nu.x + s * ff.tau.x),
+            y: sgn * (c * ff.nu.y + s * ff.tau.y),
+          });
+        } else {
+          dirs.push({ x: sgn * ff.nu.x, y: sgn * ff.nu.y });
+        }
+      }
+      out.push({ foot: { x: ff.o.x, y: ff.o.y }, dirs });
+    }
+    return out;
+  });
+}
+
 /**
  * Apply a precomputed rig to an edited skeleton, returning the deformed
  * primitives (each with a warped `clippedPath`; original boundaryTags / type /
@@ -868,6 +1098,13 @@ export function applyDeform(
     // original boundaryTags no longer align with the warped path's curves).
     const ownEdge = prim.elementIdx;
 
+    // Concave fold relief for this bone (experimental; off by default).
+    const reliefMode = opts.foldRelief;
+    const tiltPhi =
+      reliefMode === "tilt"
+        ? solveTiltField(rp, sPrime, segments, ownEdge)
+        : null;
+
     // Shared-vertex corrections, stored in the owning bone's frame at each shared
     // vertex: (p,q) = (δ·τ', δ·ν') with δ = W_avg − W_own. Applied at a point by
     // re-expressing (p,q) in *that point's* frame (pure rotational transport), so
@@ -895,14 +1132,22 @@ export function applyDeform(
         })
       : [];
     const warpCorrected = (m: AnchorMember, blend: BlendRef[]): Vec2D => {
-      const f = frameAt(sPrime, segments, m.edge, m.t);
-      let x = f.o.x + m.a * f.tau.x + m.b * f.nu.x;
-      let y = f.o.y + m.a * f.tau.y + m.b * f.nu.y;
+      const base = warpBoundaryBase(
+        m,
+        sPrime,
+        segments,
+        reliefMode,
+        tiltPhi,
+        ownEdge,
+      );
+      let x = base.point.x,
+        y = base.point.y;
       if (averageShared) {
+        // Shared correction lives in the (un-tilted) bone frame.
         for (const { v, w } of blend) {
           const { p, q } = deltas[v];
-          x += w * (p * f.tau.x + q * f.nu.x);
-          y += w * (p * f.tau.y + q * f.nu.y);
+          x += w * (p * base.tau.x + q * base.nu.x);
+          y += w * (p * base.tau.y + q * base.nu.y);
         }
       }
       return { x, y };
