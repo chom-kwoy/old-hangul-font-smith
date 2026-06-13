@@ -116,6 +116,7 @@ type RandomEdit = {
 function randomEdit(
   fitted: FittedMedialAxisGraph,
   rng: () => number,
+  label: string,
 ): RandomEdit {
   const points = fitted.points.map((p) => ({ x: p.x, y: p.y }));
   const controlPoints = fitted.controlPoints?.map(
@@ -125,9 +126,14 @@ function randomEdit(
         { x: c2.x, y: c2.y },
       ] as [typeof c1, typeof c2],
   );
-  const movedIdx = Math.floor(rng() * points.length);
-  const angle = rng() * 2 * Math.PI;
-  const dist = 10 + rng() * 90;
+  let movedIdx = Math.floor(rng() * points.length);
+  let angle = rng() * 2 * Math.PI;
+  let dist = 10 + rng() * 90;
+  if (label === "nieun_chieuch[0]") {
+    movedIdx = 5;
+    angle = 220 / 180 * Math.PI;
+    dist = 110;
+  }
   const from = { ...points[movedIdx] };
   const to = {
     x: from.x + Math.cos(angle) * dist,
@@ -636,7 +642,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
     // --- 2. Random deformation: move one skeleton vertex 10–100px. ---
     // Seeded per-glyph so the "random" move is reproducible across runs.
     const rng = mulberry32(hashSeed(label));
-    const edit = randomEdit(fitted, rng);
+    const edit = randomEdit(fitted, rng, label);
     const moveDist = Math.hypot(
       edit.to.x - edit.from.x,
       edit.to.y - edit.from.y,
