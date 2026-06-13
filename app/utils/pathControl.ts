@@ -172,8 +172,21 @@ function pathActionHandler(
   x: number,
   y: number,
 ) {
-  if (Date.now() - dragStartTime < DRAG_DELAY_MS) return false;
   const { target } = transform;
+  // Suppress the move until the pointer has dragged past the threshold, then
+  // latch so it keeps dragging even if it comes back within tolerance.
+  if (withinTolerance) {
+    const canvas = target.canvas;
+    if (dragOrigin && canvas) {
+      const p = canvas.getViewportPoint(eventData);
+      if (
+        Math.hypot(p.x - dragOrigin.x, p.y - dragOrigin.y) < DRAG_THRESHOLD_PX
+      ) {
+        return false;
+      }
+    }
+    withinTolerance = false;
+  }
   const { commandIndex, pointIndex, linkedControlPoints } = this;
   const actionPerformed = movePathPoint(
     target as Path,
@@ -196,8 +209,15 @@ function pathActionHandler(
 const indexFromPrevCommand = (previousCommandType: TSimpleParseCommandType) =>
   previousCommandType === "C" ? 5 : previousCommandType === "Q" ? 3 : 1;
 
-const DRAG_DELAY_MS = 200;
-let dragStartTime = 0;
+// Inkscape-style click/drag threshold: the pointer must move at least this many
+// screen pixels from the grab point before a node drag begins; less is a click.
+// Measured in viewport (screen) pixels, so it's independent of the canvas zoom.
+const DRAG_THRESHOLD_PX = 4;
+let dragOrigin: Point | null = null;
+// True until the pointer has moved past the threshold; once it flips off the
+// drag continues even if the pointer returns within tolerance (matches
+// Inkscape's `within_tolerance`).
+let withinTolerance = true;
 
 const selectedControls: PathPointControl[] = [];
 const lastControlPoints: Control[] = [];
@@ -429,7 +449,8 @@ const createControl = (
     positionHandler: pathPositionHandler,
     actionHandler: pathActionHandler,
     mouseDownHandler: (event, transform) => {
-      dragStartTime = Date.now();
+      dragOrigin = transform.target.canvas?.getViewportPoint(event) ?? null;
+      withinTolerance = true;
       const path = transform.target as Path;
       if (!isControlPoint) {
         if (!event.ctrlKey && !event.shiftKey) {
