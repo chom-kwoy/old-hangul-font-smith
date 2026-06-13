@@ -3,6 +3,42 @@ import { RefObject, useEffect, useRef, useState } from "react";
 
 import { adjustStrokes } from "@/app/components/glyphCanvas/fabricGeometry";
 
+// A fabric canvas that ignores object interaction while the user is ctrl-panning.
+//
+// Fabric caches the mousedown target in `_cacheTransformEventData` *before* it
+// fires `mouse:down:before`, so a flag toggled from an event handler is always
+// too late to influence target finding. Both hooks below therefore read ctrl
+// straight from the event:
+//   - findTarget: force fabric's own skip-target-find path so the press can't
+//     transfer the selection to (or start a transform on) an object under the
+//     cursor.
+//   - _shouldClearSelection: veto the deselect-on-empty-canvas so the active
+//     object — and any in-progress point editing — survives the pan.
+// (The rubber-band box is suppressed separately by clearing `canvas.selection`
+// in the mouse:down:before handler, which runs early enough for that check.)
+class GlyphCanvas extends fabric.Canvas {
+  override findTarget(e: fabric.TPointerEvent) {
+    if (!this._targetInfo && (e as MouseEvent)?.ctrlKey) {
+      const prev = this.skipTargetFind;
+      this.skipTargetFind = true;
+      try {
+        return super.findTarget(e);
+      } finally {
+        this.skipTargetFind = prev;
+      }
+    }
+    return super.findTarget(e);
+  }
+
+  override _shouldClearSelection(
+    e: fabric.TPointerEvent,
+    target?: fabric.FabricObject,
+  ): target is undefined {
+    if ((e as MouseEvent)?.ctrlKey) return false;
+    return super._shouldClearSelection(e, target);
+  }
+}
+
 // Owns the fabric.Canvas lifecycle: creation, the em-square grid, and ctrl-based
 // pan/zoom (with the viewport persisted across recreations). Returns the canvas
 // both as state (so event-wiring/content effects can depend on its identity) and
@@ -27,7 +63,7 @@ export function useFabricCanvas(
   useEffect(() => {
     if (!canvasElemRef.current) return;
 
-    const canvas = new fabric.Canvas(canvasElemRef.current, {
+    const canvas = new GlyphCanvas(canvasElemRef.current, {
       width,
       height,
       backgroundColor: "white",
@@ -117,20 +153,20 @@ export function useFabricCanvas(
       }
     });
     canvas.on("mouse:down:before", function (opt) {
-      if ((opt.e as MouseEvent).ctrlKey) canvas.isDrawingMode = false;
+      if ((opt.e as MouseEvent).ctrlKey) {
+        // The subclass already keeps fabric from changing the selection on this
+        // press; here we just ensure drawing mode is off and stop the rubber-band
+        // selection box from starting (selection is restored on mouse:up).
+        canvas.isDrawingMode = false;
+        canvas.selection = false;
+      }
     });
     canvas.on("mouse:down", function (opt) {
       const evt = opt.e as MouseEvent;
       if (evt.ctrlKey) {
         isDragging = true;
-        canvas.selection = false;
         lastPosX = evt.clientX;
         lastPosY = evt.clientY;
-        const obj = canvas.getActiveObject();
-        if (obj) {
-          obj.lockMovementX = true;
-          obj.lockMovementY = true;
-        }
       }
     });
     canvas.on("mouse:move", function (opt) {
@@ -150,11 +186,8 @@ export function useFabricCanvas(
       if (isDragging) {
         canvas.setViewportTransform(canvas.viewportTransform);
         isDragging = false;
-        canvas.selection = true;
-        for (const obj of canvas.getObjects()) {
-          obj.lockMovementX = false;
-          obj.lockMovementY = false;
-        }
+        // Re-enable the rubber-band selection box now that the pan is over.
+        canvas.selection = interactive;
       }
     });
 
