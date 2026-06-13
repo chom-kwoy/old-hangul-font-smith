@@ -214,13 +214,96 @@ function writeOutlineSvg(label: string, outline: paper.PathItem): void {
   console.log(`  → saved ${outPath}`);
 }
 
+/** A foot→boundary "rib": from a bone foot point out to the capsule boundary. */
+type FootRib = {
+  foot: { x: number; y: number };
+  hit: { x: number; y: number };
+};
+
+/** Foot→boundary ribs for one capsule: from the deformed bone's foot point
+ *  (sampled at uniform curve-time `step` intervals) to where the bone normal
+ *  first meets the capsule boundary on each side. Visualises the foot→boundary
+ *  correspondence the warp is built on. Geometry only, in native em coords —
+ *  callers style and transform it. */
+function boneFootRibs(
+  clippedPath: paper.PathItem,
+  skeleton: DeformedSkeleton,
+  segments: [number, number][],
+  edge: number,
+  step = 0.1,
+): FootRib[] {
+  const [u, v] = segments[edge];
+  const a = skeleton.points[u],
+    b = skeleton.points[v];
+  const cp = skeleton.controlPoints?.[edge];
+  const bone = new paper.Path({
+    segments: [
+      new paper.Segment(
+        new paper.Point(a.x, a.y),
+        undefined,
+        cp ? new paper.Point(cp[0].x - a.x, cp[0].y - a.y) : undefined,
+      ),
+      new paper.Segment(
+        new paper.Point(b.x, b.y),
+        cp ? new paper.Point(cp[1].x - b.x, cp[1].y - b.y) : undefined,
+        undefined,
+      ),
+    ],
+    insert: false,
+  });
+  const curve = bone.firstCurve;
+  if (!curve) {
+    bone.remove();
+    return [];
+  }
+  const bb = clippedPath.bounds;
+  const reach = bb.width + bb.height + 10; // long enough to cross the capsule
+  const ribs: FootRib[] = [];
+  for (let t = 0; t <= 1 + 1e-9; t += step) {
+    const tc = Math.min(t, 1);
+    const foot = curve.getPointAtTime(tc);
+    const normal = curve.getNormalAtTime(tc);
+    if (!foot || !normal || !isFinite(foot.x) || normal.length < 1e-9) continue;
+    const n = normal.normalize();
+    for (const sgn of [1, -1]) {
+      const far = foot.add(n.multiply(sgn * reach));
+      const ray = new paper.Path({
+        segments: [new paper.Segment(foot), new paper.Segment(far)],
+        insert: false,
+      });
+      const xs = clippedPath.getIntersections(ray);
+      ray.remove();
+      if (xs.length === 0) continue;
+      // Nearest boundary hit on this side (the capsule wall, not a far lobe).
+      let best = xs[0].point,
+        bestD = foot.getDistance(best);
+      for (const cl of xs) {
+        const d = foot.getDistance(cl.point);
+        if (d < bestD) {
+          bestD = d;
+          best = cl.point;
+        }
+      }
+      ribs.push({
+        foot: { x: foot.x, y: foot.y },
+        hit: { x: best.x, y: best.y },
+      });
+    }
+  }
+  bone.remove();
+  return ribs;
+}
+
 /** Write every warped capsule (pre-union) to a single SVG, one hue per edge
- *  (test5 scheme; vertex disks red). Used for the pre-averaging capsules. */
+ *  (test5 scheme; vertex disks red), plus thin bone-foot→boundary ribs sampled
+ *  at curve-time 0.1 intervals. Used for the pre-averaging capsules. */
 function writeCapsulesSvg(
   label: string,
   prims: Primitive[],
   nSegs: number,
   suffix: string,
+  skeleton: DeformedSkeleton,
+  segments: [number, number][],
 ): void {
   let bb: paper.Rectangle | null = null;
   for (const p of prims) {
@@ -234,6 +317,7 @@ function writeCapsulesSvg(
     .join(" ");
   const hue = (i: number) => Math.round((i * 360) / Math.max(1, nSegs));
   const paths: string[] = [];
+  const ribs: string[] = [];
   for (const p of prims) {
     const d = p.clippedPath?.pathData;
     if (!d) continue;
@@ -244,10 +328,21 @@ function writeCapsulesSvg(
       `  <path d="${d}" fill="${fill}" fill-opacity="0.22" ` +
         `stroke="${stroke}" stroke-width="1.5" fill-rule="evenodd"/>`,
     );
+    if (isEdge && p.clippedPath) {
+      for (const r of boneFootRibs(p.clippedPath, skeleton, segments, p.elementIdx)) {
+        ribs.push(
+          `  <line x1="${r.foot.x.toFixed(2)}" y1="${r.foot.y.toFixed(2)}" ` +
+            `x2="${r.hit.x.toFixed(2)}" y2="${r.hit.y.toFixed(2)}" ` +
+            `stroke="${stroke}" stroke-width="0.5" stroke-opacity="0.8" ` +
+            `stroke-dasharray="1 1"/>`,
+        );
+      }
+    }
   }
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}">\n` +
     paths.join("\n") +
+    (ribs.length ? "\n" + ribs.join("\n") : "") +
     `\n</svg>\n`;
   const safeName = label.replace(/\[/g, "_").replace(/\]/g, "");
   const outPath = `test_outputs/deform_${safeName}${suffix}.svg`;
@@ -363,6 +458,7 @@ function renderDeform(
   sharedLinks: BoneLink[],
   suffix: string,
   drawControlNet: boolean,
+  ribs: (FootRib & { stroke: string })[] = [],
 ): void {
   const SIZE = 1000;
   const PAD = 60;
@@ -449,6 +545,19 @@ function renderDeform(
           selectable: false,
         }),
       );
+  }
+
+  // Bone-foot → capsule-boundary ribs (pre-averaging capsules), sampled at
+  // curve-time 0.1 intervals. Thin and dashed, matching the preavg capsules.
+  for (const r of ribs) {
+    canvas.add(
+      new FabricLine([tx(r.foot.x), ty(r.foot.y), tx(r.hit.x), ty(r.hit.y)], {
+        stroke: r.stroke,
+        strokeWidth: 0.5,
+        strokeDashArray: [1, 1],
+        selectable: false,
+      }),
+    );
   }
 
   // Original skeleton (faint) and deformed skeleton (orange).
@@ -799,7 +908,15 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             ? { ...p, clippedPath: resolveSelfIntersections(p.clippedPath) }
             : p,
         );
-        writeCapsulesSvg(label, warpedPre, nSegs, "_capsules_preavg");
+        writeCapsulesSvg(
+          label,
+          warpedPre,
+          nSegs,
+          "_capsules_preavg",
+          edit.skeleton,
+          fitted.segments,
+        );
+        const capRibs: (FootRib & { stroke: string })[] = [];
         for (const prim of warpedPre) {
           if (!prim.clippedPath) continue;
           capLayers.push({
@@ -812,6 +929,17 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             strokeWidth: 1.5,
             dash: [1, 1],
           });
+          if (prim.type === "edge") {
+            const stroke = `hsl(${hue(prim.elementIdx)}, 70%, 40%)`;
+            for (const r of boneFootRibs(
+              prim.clippedPath,
+              edit.skeleton,
+              fitted.segments,
+              prim.elementIdx,
+            )) {
+              capRibs.push({ ...r, stroke });
+            }
+          }
         }
         renderDeform(
           label,
@@ -823,6 +951,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           sharedLinks,
           "_capsules",
           false,
+          capRibs,
         );
         original.remove();
       }
