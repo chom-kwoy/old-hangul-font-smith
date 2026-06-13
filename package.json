@@ -60,7 +60,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/seedrandom": "^3.0.8",
-    "eslint": "^10.0.2",
+    "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.1",
     "prettier": "^3.6.2",
     "raw-loader": "^4.0.2",
