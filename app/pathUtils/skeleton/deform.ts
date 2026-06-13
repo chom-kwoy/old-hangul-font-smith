@@ -231,11 +231,15 @@ function ringsOf(path: paper.PathItem): paper.Path[] {
   return [path as paper.Path];
 }
 
-/** Clamped smoothstep on [0,1]. */
+/**
+ * Clamped quintic smootherstep on [0,1] (Perlin): C² at both ends, so the shared
+ * correction it weights has continuous curvature across the edge of its support —
+ * no curvature seam where the blend fades out. (The cubic 3x²−2x³ is only C¹.)
+ */
 function smooth01(x: number): number {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
-  return x * x * (3 - 2 * x);
+  return x * x * x * (x * (x * 6 - 15) + 10);
 }
 
 /**
@@ -864,32 +868,44 @@ export function applyDeform(
     // original boundaryTags no longer align with the warped path's curves).
     const ownEdge = prim.elementIdx;
 
-    // Shared-vertex corrections δ = W_avg − W_own. Blended smoothly into the
-    // surrounding boundary (per-anchor / per-sample `blend` weights) so the
-    // shared snap no longer jumps at the shared vertex. Disabled when
+    // Shared-vertex corrections, stored in the owning bone's frame at each shared
+    // vertex: (p,q) = (δ·τ', δ·ν') with δ = W_avg − W_own. Applied at a point by
+    // re-expressing (p,q) in *that point's* frame (pure rotational transport), so
+    // the correction rotates with the bone along the run rather than being a
+    // frozen world vector. At the vertex itself the frame matches, so it
+    // reproduces δ exactly and joint coincidence is preserved. Disabled when
     // !averageShared (raw single-edge warp, for visualisation).
     const ownOf = (enc: PointEnc): AnchorMember =>
       enc.kind === "single"
         ? enc.m
         : (enc.members.find((m) => m.edge === ownEdge) ?? enc.members[0]);
-    const deltas: Vec2D[] = averageShared
+    const deltas: { p: number; q: number }[] = averageShared
       ? rp.sharedVerts.map((sv, si) => {
           const avg =
             sharedOverride?.[pi]?.[si] ?? warpPoint(sv, sPrime, segments);
-          const own = warpAnchor(ownOf(sv), sPrime, segments);
-          return { x: avg.x - own.x, y: avg.y - own.y };
+          const m = ownOf(sv);
+          const own = warpAnchor(m, sPrime, segments);
+          const f = frameAt(sPrime, segments, m.edge, m.t);
+          const dx = avg.x - own.x,
+            dy = avg.y - own.y;
+          return {
+            p: dx * f.tau.x + dy * f.tau.y,
+            q: dx * f.nu.x + dy * f.nu.y,
+          };
         })
       : [];
     const warpCorrected = (m: AnchorMember, blend: BlendRef[]): Vec2D => {
-      const base = warpAnchor(m, sPrime, segments);
-      if (!averageShared) return base; // raw single-edge warp (visualisation)
-      let cx = 0,
-        cy = 0;
-      for (const { v, w } of blend) {
-        cx += w * deltas[v].x;
-        cy += w * deltas[v].y;
+      const f = frameAt(sPrime, segments, m.edge, m.t);
+      let x = f.o.x + m.a * f.tau.x + m.b * f.nu.x;
+      let y = f.o.y + m.a * f.tau.y + m.b * f.nu.y;
+      if (averageShared) {
+        for (const { v, w } of blend) {
+          const { p, q } = deltas[v];
+          x += w * (p * f.tau.x + q * f.nu.x);
+          y += w * (p * f.tau.y + q * f.nu.y);
+        }
       }
-      return { x: base.x + cx, y: base.y + cy };
+      return { x, y };
     };
 
     const newTags: BoundaryTag[] = [];
@@ -1006,26 +1022,28 @@ export function warpedCurveSamplePoints(
     const ownEdge = rp.prim.elementIdx;
     const deltas = rp.sharedVerts.map((sv) => {
       const avg = warpPoint(sv, sPrime, segments);
-      const own = warpAnchor(
-        sv.members.find((m) => m.edge === ownEdge) ?? sv.members[0],
-        sPrime,
-        segments,
-      );
-      return { x: avg.x - own.x, y: avg.y - own.y };
+      const m = sv.members.find((mm) => mm.edge === ownEdge) ?? sv.members[0];
+      const own = warpAnchor(m, sPrime, segments);
+      const f = frameAt(sPrime, segments, m.edge, m.t);
+      const dx = avg.x - own.x,
+        dy = avg.y - own.y;
+      return { p: dx * f.tau.x + dy * f.tau.y, q: dx * f.nu.x + dy * f.nu.y };
     });
     const pts: Vec2D[] = [];
     for (const ring of rp.curveSamples) {
       for (const cs of ring) {
         if (!cs) continue;
         for (let j = 1; j < cs.length - 1; j++) {
-          const base = warpAnchor(cs[j], sPrime, segments);
-          let cx = 0,
-            cy = 0;
-          for (const { v, w } of cs[j].blend) {
-            cx += w * deltas[v].x;
-            cy += w * deltas[v].y;
+          const s = cs[j];
+          const f = frameAt(sPrime, segments, s.edge, s.t);
+          let x = f.o.x + s.a * f.tau.x + s.b * f.nu.x;
+          let y = f.o.y + s.a * f.tau.y + s.b * f.nu.y;
+          for (const { v, w } of s.blend) {
+            const { p, q } = deltas[v];
+            x += w * (p * f.tau.x + q * f.nu.x);
+            y += w * (p * f.tau.y + q * f.nu.y);
           }
-          pts.push({ x: base.x + cx, y: base.y + cy });
+          pts.push({ x, y });
         }
       }
     }
