@@ -1466,8 +1466,12 @@ function buildTiltField(rig: DeformRig, sPrime: DeformedSkeleton): TiltField[] {
 }
 
 /** Rest-referenced applied tilt `θ(S') − θ_rest`, per primitive/ring/curve/sample
- *  (so it is exactly 0 at S'=S). */
-function appliedTiltField(rig: DeformRig, sPrime: DeformedSkeleton): TiltField[] {
+ *  (so it is exactly 0 at S'=S). This is the tilt `applyDeform`/`averagedCapsules`
+ *  use; pass it as `applyDeform`'s `tilt` arg to reproduce the warp's geometry. */
+export function appliedTiltField(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+): TiltField[] {
   const def = buildTiltField(rig, sPrime);
   return def.map((dPrim, pi) =>
     dPrim.map((dRing, r) =>

@@ -23,6 +23,7 @@ import {
   BoneLink,
   DeformedSkeleton,
   Rib,
+  appliedTiltField,
   applyDeform,
   boneLinks,
   buildDeformRig,
@@ -891,7 +892,16 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           );
         }
         // Pre-averaging capsules, resolved (dashed, no fill, same hue) on top.
-        const warpedPre = applyDeform(rig, edit.skeleton, false).map((p) =>
+        // Tilt-ful single-edge (pre-averaging) capsules — the same θ field the
+        // real warp applies, so the dashed outlines reflect the actual warp.
+        const warpTilt = appliedTiltField(rig, edit.skeleton);
+        const warpedPre = applyDeform(
+          rig,
+          edit.skeleton,
+          false,
+          undefined,
+          warpTilt,
+        ).map((p) =>
           p.clippedPath
             ? { ...p, clippedPath: resolveSelfIntersections(p.clippedPath) }
             : p,
