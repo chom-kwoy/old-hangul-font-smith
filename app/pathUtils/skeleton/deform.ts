@@ -154,6 +154,10 @@ function resolveWarpOptions(o?: WarpOptions): ResolvedWarpOptions {
   return { ...DEFAULT_WARP_OPTIONS, ...o };
 }
 
+/** Per-primitive anti-crossing tilt field, aligned with `rp.curveSamples`:
+ *  `θ[ring][curve][sample]`, `null` for shared (bisector) curves. */
+export type TiltField = (number[] | null)[][];
+
 export type DeformRig = {
   segments: [number, number][];
   points: Vec2D[];
@@ -161,6 +165,9 @@ export type DeformRig = {
   primitives: RigPrimitive[];
   /** Resolved warp options used to build this rig (and reused at apply). */
   options: ResolvedWarpOptions;
+  /** Rest (S'=S) tilt field per primitive; the applied tilt is referenced to
+   *  this (`θ_applied = θ(S') − θ_rest`) so identity reproduces exactly. */
+  tiltRest: TiltField[];
 };
 
 // --- Bone frame helpers ---------------------------------------------------
@@ -556,13 +563,21 @@ export function buildDeformRig(
     return { prim, rings, closed, curveSamples, sharedVerts };
   });
 
-  return {
+  const rig: DeformRig = {
     segments,
     points: fitted.points,
     controlPoints: fitted.controlPoints,
     primitives: rigPrims,
     options: opts,
+    tiltRest: [],
   };
+  // Cache the rest tilt field (S-only) so the applied tilt can be referenced to
+  // it (θ_applied = θ(S') − θ_rest) and identity reproduces exactly.
+  rig.tiltRest = buildTiltField(rig, {
+    points: rig.points,
+    controlPoints: rig.controlPoints,
+  });
+  return rig;
 }
 
 // --- applyDeform ----------------------------------------------------------
@@ -752,6 +767,14 @@ function warpVelocity(
 
 type CubicPiece = { p0: Vec2D; cp1: Vec2D; cp2: Vec2D; p3: Vec2D };
 
+/** Rotate a vector by `theta` (no-op at θ=0, so identity is exact). */
+function rotateVec(v: Vec2D, theta: number): Vec2D {
+  if (!theta) return v;
+  const c = Math.cos(theta),
+    s = Math.sin(theta);
+  return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+}
+
 /**
  * Warp one original curve into a chain of cubic pieces. The default is a single
  * Hermite cubic matching the warped endpoint positions (A,B) and the analytic
@@ -764,7 +787,7 @@ function warpCurveChain(
   hi: number,
   A: Vec2D,
   B: Vec2D,
-  warpPt: (i: number) => Vec2D, // corrected true warp of sample i
+  warpPt: (i: number) => Vec2D, // corrected true warp of sample i (tilt-carrying)
   sPrime: DeformedSkeleton,
   segments: [number, number][],
   depth: number,
@@ -778,6 +801,10 @@ function warpCurveChain(
   // toward the other endpoint, giving a well-behaved cubic that subdivision then
   // refines against the true sample positions.
   const chord = { x: (B.x - A.x) / ds, y: (B.y - A.y) / ds };
+  // The analytic velocity is the *untilted* boundary velocity (dominated by the
+  // bone tangent, which the offset tilt must not rotate). The tilt enters only
+  // through the endpoints A,B and the per-sample `warpPt`; subdivision against
+  // those tilted points refines the handles, so no velocity rotation is applied.
   const vlo = warpVelocity(samples[lo], sPrime, segments, opts.rhoMax) ?? chord;
   const vhi = warpVelocity(samples[hi], sPrime, segments, opts.rhoMax) ?? chord;
   const cp1 = { x: A.x + (vlo.x * ds) / 3, y: A.y + (vlo.y * ds) / 3 };
@@ -846,6 +873,12 @@ export function applyDeform(
    * two-pass in `deformOutline`. When absent, `warpPoint` is used (back-compat).
    */
   sharedOverride?: (Vec2D | null)[][],
+  /**
+   * Per-primitive anti-crossing tilt field (`appliedTiltField`), aligned with
+   * `rp.curveSamples`. Rotates the boundary offset by θ so the deformed outline
+   * is fold-free by construction. Absent ⇒ no tilt (θ=0, exact reproduction).
+   */
+  tilt?: TiltField[],
 ): Primitive[] {
   const segments = rig.segments;
   const opts = rig.options;
@@ -894,10 +927,25 @@ export function applyDeform(
           };
         })
       : [];
-    const warpCorrected = (m: AnchorMember, blend: BlendRef[]): Vec2D => {
+    const tiltP = tilt?.[pi];
+    const warpCorrected = (
+      m: AnchorMember,
+      blend: BlendRef[],
+      theta = 0,
+    ): Vec2D => {
       const f = frameAt(sPrime, segments, m.edge, m.t);
-      let x = f.o.x + m.a * f.tau.x + m.b * f.nu.x;
-      let y = f.o.y + m.a * f.tau.y + m.b * f.nu.y;
+      // Rotate the bone-frame offset (a·τ' + b·ν') by the anti-crossing tilt θ.
+      let ox = m.a * f.tau.x + m.b * f.nu.x;
+      let oy = m.a * f.tau.y + m.b * f.nu.y;
+      if (theta) {
+        const c = Math.cos(theta),
+          s = Math.sin(theta);
+        const rx = ox * c - oy * s;
+        oy = ox * s + oy * c;
+        ox = rx;
+      }
+      let x = f.o.x + ox,
+        y = f.o.y + oy;
       if (averageShared) {
         for (const { v, w } of blend) {
           const { p, q } = deltas[v];
@@ -923,9 +971,19 @@ export function applyDeform(
       for (let ci = 0; ci < nc; ci++) {
         const encA = ringEnc[ci],
           encB = ringEnc[(ci + 1) % n];
-        const A = warpCorrected(ownOf(encA.point), encA.blend);
-        const B = warpCorrected(ownOf(encB.point), encB.blend);
         const samples = csRing[ci];
+        // θ per sample of this curve (0 if no tilt field). Anchors are forced to
+        // θ=0 when shared, so they stay on their averaged position (watertight).
+        const thetaArr = tiltP?.[r]?.[ci] ?? null;
+        const last = samples ? samples.length - 1 : 0;
+        const sharedA = encA.point.kind === "shared";
+        const sharedB = encB.point.kind === "shared";
+        const thetaA = sharedA ? 0 : (thetaArr?.[0] ?? 0);
+        const thetaB = sharedB ? 0 : (thetaArr?.[last] ?? 0);
+        const thetaOf = (i: number) =>
+          i === 0 ? thetaA : i === last ? thetaB : (thetaArr?.[i] ?? 0);
+        const A = warpCorrected(ownOf(encA.point), encA.blend, thetaA);
+        const B = warpCorrected(ownOf(encB.point), encB.blend, thetaB);
         const tag: BoundaryTag = rp.prim.boundaryTags?.[ci] ?? {
           kind: "bezier",
         };
@@ -943,7 +1001,7 @@ export function applyDeform(
           newTags.push(tag);
         } else {
           const warpPt = (i: number) =>
-            warpCorrected(samples[i], samples[i].blend);
+            warpCorrected(samples[i], samples[i].blend, thetaOf(i));
           const before = pieces.length;
           warpCurveChain(
             samples,
@@ -1018,37 +1076,408 @@ export function warpedCurveSamplePoints(
   sPrime: DeformedSkeleton,
 ): Vec2D[][] {
   const segments = rig.segments;
-  return rig.primitives.map((rp) => {
-    const ownEdge = rp.prim.elementIdx;
-    const deltas = rp.sharedVerts.map((sv) => {
-      const avg = warpPoint(sv, sPrime, segments);
-      const m = sv.members.find((mm) => mm.edge === ownEdge) ?? sv.members[0];
-      const own = warpAnchor(m, sPrime, segments);
-      const f = frameAt(sPrime, segments, m.edge, m.t);
-      const dx = avg.x - own.x,
-        dy = avg.y - own.y;
-      return { p: dx * f.tau.x + dy * f.tau.y, q: dx * f.nu.x + dy * f.nu.y };
-    });
+  const tilt = appliedTiltField(rig, sPrime);
+  return rig.primitives.map((rp, pi) => {
+    const deltas = sharedCorrectionDeltas(rp, sPrime, segments);
+    const tiltP = tilt[pi];
     const pts: Vec2D[] = [];
-    for (const ring of rp.curveSamples) {
-      for (const cs of ring) {
+    for (let r = 0; r < rp.curveSamples.length; r++) {
+      const ring = rp.curveSamples[r];
+      for (let ci = 0; ci < ring.length; ci++) {
+        const cs = ring[ci];
         if (!cs) continue;
+        const thetaArr = tiltP?.[r]?.[ci] ?? null;
+        // Interior samples only — endpoints are placed by the shared averaging,
+        // which intentionally differs from the single-edge warp.
         for (let j = 1; j < cs.length - 1; j++) {
-          const s = cs[j];
-          const f = frameAt(sPrime, segments, s.edge, s.t);
-          let x = f.o.x + s.a * f.tau.x + s.b * f.nu.x;
-          let y = f.o.y + s.a * f.tau.y + s.b * f.nu.y;
-          for (const { v, w } of s.blend) {
-            const { p, q } = deltas[v];
-            x += w * (p * f.tau.x + q * f.nu.x);
-            y += w * (p * f.tau.y + q * f.nu.y);
-          }
-          pts.push({ x, y });
+          pts.push(
+            warpCurveSample(
+              cs[j],
+              deltas,
+              sPrime,
+              segments,
+              true,
+              thetaArr?.[j] ?? 0,
+            ).point,
+          );
         }
       }
     }
     return pts;
   });
+}
+
+/** Per-shared-vertex correction δ = W_avg − W_own, expressed in the owning
+ *  bone's frame at that vertex's foot (p = δ·τ', q = δ·ν'). Shared by the
+ *  curve-sample warp and the rib export. */
+function sharedCorrectionDeltas(
+  rp: RigPrimitive,
+  sPrime: DeformedSkeleton,
+  segments: [number, number][],
+): { p: number; q: number }[] {
+  const ownEdge = rp.prim.elementIdx;
+  return rp.sharedVerts.map((sv) => {
+    const avg = warpPoint(sv, sPrime, segments);
+    const m = sv.members.find((mm) => mm.edge === ownEdge) ?? sv.members[0];
+    const own = warpAnchor(m, sPrime, segments);
+    const f = frameAt(sPrime, segments, m.edge, m.t);
+    const dx = avg.x - own.x,
+      dy = avg.y - own.y;
+    return { p: dx * f.tau.x + dy * f.tau.y, q: dx * f.nu.x + dy * f.nu.y };
+  });
+}
+
+/** The warp of one boundary sample: the deformed bone foot (frame origin at the
+ *  sample's foot param) and the warped boundary point. With `applyShared` the
+ *  blended shared correction is added (single-edge warp + correction — the target
+ *  the deformed outline tracks); without it, the raw single-edge warp, matching
+ *  `applyDeform(..., averageShared=false)`. */
+function warpCurveSample(
+  s: CurveSample,
+  deltas: { p: number; q: number }[],
+  sPrime: DeformedSkeleton,
+  segments: [number, number][],
+  applyShared = true,
+  theta = 0,
+): { foot: Vec2D; point: Vec2D } {
+  const f = frameAt(sPrime, segments, s.edge, s.t);
+  const o = rotateVec(
+    { x: s.a * f.tau.x + s.b * f.nu.x, y: s.a * f.tau.y + s.b * f.nu.y },
+    theta,
+  );
+  let x = f.o.x + o.x;
+  let y = f.o.y + o.y;
+  if (applyShared) {
+    for (const { v, w } of s.blend) {
+      const { p, q } = deltas[v];
+      x += w * (p * f.tau.x + q * f.nu.x);
+      y += w * (p * f.tau.y + q * f.nu.y);
+    }
+  }
+  return { foot: { x: f.o.x, y: f.o.y }, point: { x, y } };
+}
+
+/**
+ * A foot→boundary "rib": the deformed bone foot and the warped boundary point it
+ * maps to, with the bone foot parameter `t`, the `side` (sign of normal offset),
+ * the originating non-shared segment `seg`, and — for the per-bone uniform
+ * sampling — the `run` index and within-run arc length `arc`. `boundaryLen` is
+ * the rib's free-boundary run length. `point0`/`theta` are filled by
+ * `resolveRibTilts` (original endpoint + applied tilt).
+ */
+export type Rib = {
+  side: number;
+  seg: number;
+  t: number;
+  boundaryLen: number;
+  run: number;
+  arc: number;
+  foot: Vec2D;
+  point: Vec2D;
+  point0?: Vec2D;
+  theta?: number;
+};
+
+/** One node of a free-boundary run: a `CurveSample` (`ring`,`ci`,`j`) with its
+ *  cumulative within-run arc length and the S-fixed warp encoding (`t`,`a`,`b`). */
+type RunNode = {
+  ring: number;
+  ci: number;
+  j: number;
+  arc: number;
+  t: number;
+  a: number;
+  b: number;
+  seg: number;
+};
+type BoundaryRun = { nodes: RunNode[]; length: number };
+
+/** Split a primitive's boundary into maximal runs of consecutive non-shared
+ *  segments (a shared bisector / `null` curve breaks a run), concatenating each
+ *  run's per-segment samples onto one within-run arc axis. The shared anchor
+ *  where two segments meet appears as duplicate coincident nodes (same arc), so
+ *  every `CurveSample` (ring,ci,j) is represented exactly once. */
+function boundaryRuns(rp: RigPrimitive): BoundaryRun[] {
+  const runs: BoundaryRun[] = [];
+  let seg = 0;
+  for (let r = 0; r < rp.curveSamples.length; r++) {
+    const ring = rp.curveSamples[r];
+    let nodes: RunNode[] = [];
+    let arcOff = 0;
+    const flush = () => {
+      const len = nodes.length ? nodes[nodes.length - 1].arc : 0;
+      if (nodes.length >= 2 && len > 1e-9) runs.push({ nodes, length: len });
+      nodes = [];
+      arcOff = 0;
+    };
+    for (let ci = 0; ci < ring.length; ci++) {
+      const cs = ring[ci];
+      if (!cs) {
+        flush(); // shared bisector breaks the run
+        continue;
+      }
+      for (let k = 0; k < cs.length; k++) {
+        nodes.push({
+          ring: r,
+          ci,
+          j: k,
+          arc: arcOff + cs[k].arc,
+          t: cs[k].t,
+          a: cs[k].a,
+          b: cs[k].b,
+          seg,
+        });
+      }
+      arcOff += cs[cs.length - 1].arc;
+      seg++;
+    }
+    flush();
+  }
+  return runs;
+}
+
+/**
+ * Faithful foot→boundary ribs per primitive (index-aligned with
+ * `rig.primitives`), sampled per bone at a uniform arc-length `spacing` rather
+ * than a fixed count per boundary segment — so rib density is consistent however
+ * the boundary is split. Each primitive's free (non-shared) boundary is broken
+ * into maximal runs (see `boundaryRuns`); each run's total length / `spacing`
+ * gives its rib count, placed at uniform arc-length midpoints, with `(t,a,b)`
+ * linearly interpolated from the rig's dense per-segment samples.
+ *
+ * Uses the raw single-edge (pre-averaging) warp — the same one
+ * `applyDeform(..., averageShared=false)` produces.
+ */
+export function warpedBoundaryRibs(
+  rig: DeformRig,
+  sPrime: DeformedSkeleton,
+  spacing: number,
+): Rib[][] {
+  const segments = rig.segments;
+  return rig.primitives.map((rp) => {
+    const ribs: Rib[] = [];
+    if (rp.prim.type !== "edge") return ribs;
+    const edge = rp.prim.elementIdx;
+    const runs = boundaryRuns(rp);
+    for (let ri = 0; ri < runs.length; ri++) {
+      const { nodes, length: total } = runs[ri];
+      const n = Math.max(1, Math.round(total / spacing));
+      const step = total / n;
+      let j = 0;
+      for (let i = 0; i < n; i++) {
+        const u = (i + 0.5) * step;
+        while (j < nodes.length - 2 && nodes[j + 1].arc < u) j++;
+        const a0 = nodes[j],
+          a1 = nodes[j + 1];
+        const f = Math.max(0, Math.min(1, (u - a0.arc) / (a1.arc - a0.arc || 1e-9)));
+        const t = a0.t + f * (a1.t - a0.t);
+        const a = a0.a + f * (a1.a - a0.a);
+        const b = a0.b + f * (a1.b - a0.b);
+        const fr = frameAt(sPrime, segments, edge, t);
+        ribs.push({
+          side: Math.sign(b) || 1,
+          seg: a0.seg,
+          t,
+          boundaryLen: total,
+          run: ri,
+          arc: u,
+          foot: { x: fr.o.x, y: fr.o.y },
+          point: {
+            x: fr.o.x + a * fr.tau.x + b * fr.nu.x,
+            y: fr.o.y + a * fr.tau.y + b * fr.nu.y,
+          },
+        });
+      }
+    }
+    return ribs;
+  });
+}
+
+/** Tunables for the deterministic anti-crossing rib tilt (1000-unit em space). */
+const TILT_THETA_MAX = (30 * Math.PI) / 180; // cap on per-rib splay
+// Target rib-end gap = this × free-boundary run length. 0 ⇒ the minimal tilt that
+// just un-crosses the ribs (focal point at the boundary): no cosmetic margin, so
+// a fold-free rest needs no tilt (θ_rest = 0) and identity is reproduced exactly.
+const TILT_GAP_COEF = 0;
+
+/**
+ * Deterministic anti-crossing rib tilt. Per side of one capsule, ribs are ordered
+ * by foot parameter and each adjacent gap gets an angular budget β = c − σ·g0 from
+ * the focal-distance condition (c = max(0,|Δf×u|−gMin)/b is the increment that
+ * keeps the next rib's focal point a gap gMin past the boundary; g0 the natural
+ * increment; σ the side orientation; gMin = TILT_GAP_COEF·runLen). A forward
+ * (min,0) + backward (max,0) + average sweep caps the increments so converging
+ * ribs splay just enough not to cross, staying at the normal wherever no fold
+ * demands a tilt. Cap ribs (foot pinned to a bone end) fan around the end: the two
+ * border ribs join the sweep with their side; the inner cap ribs are re-fanned at
+ * uniform angular steps between those two adjusted borders.
+ *
+ * Returns the ribs with the tilted `point`, the original endpoint `point0`, and
+ * the applied tilt `theta` (capped at TILT_THETA_MAX).
+ */
+export function resolveRibTilts(ribs: Rib[]): Rib[] {
+  const wrapPi = (d: number) => {
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d <= -Math.PI) d += 2 * Math.PI;
+    return d;
+  };
+  const T_EPS = 1e-4; // cap ribs: foot pinned to a bone end (t≈0 or t≈1)
+  const out = ribs.map((r) => ({ ...r, point0: { ...r.point } }));
+  const nR = out.length;
+
+  const dirOf = out.map((r) => {
+    const dx = r.point0!.x - r.foot.x,
+      dy = r.point0!.y - r.foot.y;
+    const b = Math.hypot(dx, dy) || 1e-9;
+    return { ux: dx / b, uy: dy / b, b, ang: Math.atan2(dy, dx) };
+  });
+  const theta = new Array<number>(nR).fill(0);
+  const apply = (i: number, ang: number) => {
+    theta[i] = ang - dirOf[i].ang;
+    out[i].point = {
+      x: out[i].foot.x + Math.cos(ang) * dirOf[i].b,
+      y: out[i].foot.y + Math.sin(ang) * dirOf[i].b,
+    };
+  };
+
+  // Cap blocks: maximal contiguous runs of same-end cap ribs in boundary order.
+  const isCap = (i: number) => out[i].t <= T_EPS || out[i].t >= 1 - T_EPS;
+  const capBlocks: { lo: number; hi: number }[] = [];
+  const innerCap = new Array<boolean>(nR).fill(false);
+  for (let k = 0; k < nR; ) {
+    if (!isCap(k)) {
+      k++;
+      continue;
+    }
+    const end0 = out[k].t <= T_EPS;
+    let j = k;
+    while (j + 1 < nR && isCap(j + 1) && out[j + 1].t <= T_EPS === end0) j++;
+    capBlocks.push({ lo: k, hi: j });
+    for (let m = k + 1; m < j; m++) innerCap[m] = true;
+    k = j + 1;
+  }
+
+  // Sweep groups: every wall rib plus the cap-block border ribs, by side.
+  const bySide = new Map<number, number[]>();
+  out.forEach((r, i) => {
+    if (innerCap[i]) return;
+    const g = bySide.get(r.side) ?? [];
+    g.push(i);
+    bySide.set(r.side, g);
+  });
+  for (const idxs of bySide.values()) {
+    idxs.sort((a, b) => out[a].t - out[b].t);
+    const n = idxs.length;
+    if (n < 2) continue;
+    const beta = new Array<number>(n - 1);
+    let sumN = 0;
+    const g0s = new Array<number>(n - 1);
+    const cs = new Array<number>(n - 1);
+    for (let k = 0; k < n - 1; k++) {
+      const d0 = dirOf[idxs[k]],
+        d1 = dirOf[idxs[k + 1]];
+      const fa = out[idxs[k]].foot,
+        fb = out[idxs[k + 1]].foot;
+      const dfx = fb.x - fa.x,
+        dfy = fb.y - fa.y;
+      const N = dfx * d0.uy - dfy * d0.ux; // cross(Δf, u_k)
+      const g0 = wrapPi(d1.ang - d0.ang);
+      const bmax = Math.max(d0.b, d1.b, 1e-6);
+      const gMin =
+        TILT_GAP_COEF *
+        Math.min(out[idxs[k]].boundaryLen, out[idxs[k + 1]].boundaryLen);
+      g0s[k] = g0;
+      cs[k] = Math.max(0, Math.abs(N) - gMin) / bmax;
+      sumN += N;
+    }
+    const sigma = sumN >= 0 ? 1 : -1;
+    for (let k = 0; k < n - 1; k++) beta[k] = cs[k] - sigma * g0s[k];
+    const phiF = new Array<number>(n).fill(0);
+    for (let m = 1; m < n; m++) phiF[m] = Math.min(0, phiF[m - 1] + beta[m - 1]);
+    const phiB = new Array<number>(n).fill(0);
+    for (let m = n - 2; m >= 0; m--) phiB[m] = Math.max(0, phiB[m + 1] - beta[m]);
+    for (let m = 0; m < n; m++) {
+      let th = sigma * 0.5 * (phiF[m] + phiB[m]);
+      th = Math.max(-TILT_THETA_MAX, Math.min(TILT_THETA_MAX, th));
+      apply(idxs[m], dirOf[idxs[m]].ang + th);
+    }
+  }
+
+  // Fan each cap block's inner ribs uniformly between its two tilted border ribs.
+  for (const { lo, hi } of capBlocks) {
+    if (hi - lo < 2) continue;
+    let dOrig = 0; // original cumulative angle lo→hi (the long way, via the tip)
+    for (let m = lo; m < hi; m++) dOrig += wrapPi(dirOf[m + 1].ang - dirOf[m].ang);
+    const dNew = dOrig + (theta[hi] - theta[lo]);
+    const base = dirOf[lo].ang + theta[lo];
+    for (let m = lo + 1; m < hi; m++) {
+      apply(m, base + ((m - lo) / (hi - lo)) * dNew);
+    }
+  }
+  for (let i = 0; i < nR; i++) out[i].theta = theta[i];
+  return out;
+}
+
+const TILT_SPACING = 8; // em units between ribs when computing the tilt field
+
+/**
+ * Build the per-primitive anti-crossing tilt field for skeleton `sPrime`:
+ * sample each capsule's free boundary into ribs (`warpedBoundaryRibs`), splay
+ * them (`resolveRibTilts`), then interpolate the per-rib tilt θ back onto every
+ * `CurveSample` by its within-run arc length. θ is pinned to 0 at each run's ends
+ * (the shared vertices) so the free boundary still meets the averaged shared
+ * anchor — preserving watertightness. Index-aligned with `rig.primitives` and,
+ * within each, with `rp.curveSamples`.
+ */
+function buildTiltField(rig: DeformRig, sPrime: DeformedSkeleton): TiltField[] {
+  const ribsByPrim = warpedBoundaryRibs(rig, sPrime, TILT_SPACING);
+  return rig.primitives.map((rp, pi) => {
+    const field: TiltField = rp.curveSamples.map((ring) =>
+      ring.map((cs) => (cs ? new Array<number>(cs.length).fill(0) : null)),
+    );
+    if (rp.prim.type !== "edge") return field;
+    const tilted = resolveRibTilts(ribsByPrim[pi]);
+    const runs = boundaryRuns(rp);
+    const byRun = new Map<number, Rib[]>();
+    for (const r of tilted) {
+      const g = byRun.get(r.run) ?? [];
+      g.push(r);
+      byRun.set(r.run, g);
+    }
+    for (let ri = 0; ri < runs.length; ri++) {
+      const run = runs[ri];
+      const rs = (byRun.get(ri) ?? []).slice().sort((a, b) => a.arc - b.arc);
+      // Knots: θ=0 at both run ends (shared vertices), rib θ in between.
+      const kA = [0, ...rs.map((r) => r.arc), run.length];
+      const kT = [0, ...rs.map((r) => r.theta ?? 0), 0];
+      let kp = 0;
+      for (const node of run.nodes) {
+        const x = node.arc;
+        while (kp < kA.length - 2 && kA[kp + 1] < x) kp++;
+        const a0 = kA[kp],
+          a1 = kA[kp + 1];
+        const f = a1 > a0 ? (x - a0) / (a1 - a0) : 0;
+        const arr = field[node.ring][node.ci];
+        if (arr) arr[node.j] = kT[kp] + f * (kT[kp + 1] - kT[kp]);
+      }
+    }
+    return field;
+  });
+}
+
+/** Rest-referenced applied tilt `θ(S') − θ_rest`, per primitive/ring/curve/sample
+ *  (so it is exactly 0 at S'=S). */
+function appliedTiltField(rig: DeformRig, sPrime: DeformedSkeleton): TiltField[] {
+  const def = buildTiltField(rig, sPrime);
+  return def.map((dPrim, pi) =>
+    dPrim.map((dRing, r) =>
+      dRing.map((dArr, ci) => {
+        if (!dArr) return null;
+        const rArr = rig.tiltRest[pi]?.[r]?.[ci];
+        return dArr.map((v, j) => v - (rArr?.[j] ?? 0));
+      }),
+    ),
+  );
 }
 
 /**
@@ -1215,7 +1644,9 @@ function averagedCapsules(
   rig: DeformRig,
   sPrime: DeformedSkeleton,
 ): Primitive[] {
-  const raw = applyDeform(rig, sPrime, false);
+  // Anti-crossing tilt (rest-referenced ⇒ 0 at identity), shared by both passes.
+  const tilt = appliedTiltField(rig, sPrime);
+  const raw = applyDeform(rig, sPrime, false, undefined, tilt);
   // Re-mapping (and thus the pass-1 resolve) is only needed where a capsule
   // folds AND one of its shared vertices is swallowed by the fold (its foot is
   // past the deformed bone's centre of curvature). Gate the resolve on that, so
@@ -1236,7 +1667,7 @@ function averagedCapsules(
       : (p.clippedPath ?? null),
   );
   const overrides = computeSharedAverages(rig, sPrime, resolvedRaw, needsRemap);
-  const averaged = applyDeform(rig, sPrime, true, overrides);
+  const averaged = applyDeform(rig, sPrime, true, overrides, tilt);
   // Free intermediates (re-mapped resolvedRaw are clones; others reuse raw).
   for (let i = 0; i < resolvedRaw.length; i++)
     if (needsRemap[i]) resolvedRaw[i]?.remove();

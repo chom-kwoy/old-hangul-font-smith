@@ -22,15 +22,18 @@ import paper from "paper";
 import {
   BoneLink,
   DeformedSkeleton,
+  Rib,
   applyDeform,
   boneLinks,
   buildDeformRig,
   deformCapsules,
   deformOutlineFromRig,
   deformOutline,
+  resolveRibTilts,
   resolveSelfIntersections,
   sharedFootLinks,
   unionDeformedPrimitives,
+  warpedBoundaryRibs,
   warpedCurveSamplePoints,
 } from "@/app/pathUtils/skeleton/deform";
 import {
@@ -132,7 +135,7 @@ function randomEdit(
   if (label === "nieun_chieuch[0]") {
     movedIdx = 5;
     angle = 220 / 180 * Math.PI;
-    dist = 110;
+    dist = 120;
   }
   const from = { ...points[movedIdx] };
   const to = {
@@ -214,96 +217,71 @@ function writeOutlineSvg(label: string, outline: paper.PathItem): void {
   console.log(`  → saved ${outPath}`);
 }
 
-/** A foot→boundary "rib": from a bone foot point out to the capsule boundary. */
-type FootRib = {
-  foot: { x: number; y: number };
-  hit: { x: number; y: number };
-};
 
-/** Foot→boundary ribs for one capsule: from the deformed bone's foot point
- *  (sampled at uniform curve-time `step` intervals) to where the bone normal
- *  first meets the capsule boundary on each side. Visualises the foot→boundary
- *  correspondence the warp is built on. Geometry only, in native em coords —
- *  callers style and transform it. */
-function boneFootRibs(
-  clippedPath: paper.PathItem,
-  skeleton: DeformedSkeleton,
-  segments: [number, number][],
-  edge: number,
-  step = 0.1,
-): FootRib[] {
-  const [u, v] = segments[edge];
-  const a = skeleton.points[u],
-    b = skeleton.points[v];
-  const cp = skeleton.controlPoints?.[edge];
-  const bone = new paper.Path({
-    segments: [
-      new paper.Segment(
-        new paper.Point(a.x, a.y),
-        undefined,
-        cp ? new paper.Point(cp[0].x - a.x, cp[0].y - a.y) : undefined,
-      ),
-      new paper.Segment(
-        new paper.Point(b.x, b.y),
-        cp ? new paper.Point(cp[1].x - b.x, cp[1].y - b.y) : undefined,
-        undefined,
-      ),
-    ],
-    insert: false,
-  });
-  const curve = bone.firstCurve;
-  if (!curve) {
-    bone.remove();
-    return [];
-  }
-  const bb = clippedPath.bounds;
-  const reach = bb.width + bb.height + 10; // long enough to cross the capsule
-  const ribs: FootRib[] = [];
-  for (let t = 0; t <= 1 + 1e-9; t += step) {
-    const tc = Math.min(t, 1);
-    const foot = curve.getPointAtTime(tc);
-    const normal = curve.getNormalAtTime(tc);
-    if (!foot || !normal || !isFinite(foot.x) || normal.length < 1e-9) continue;
-    const n = normal.normalize();
-    for (const sgn of [1, -1]) {
-      const far = foot.add(n.multiply(sgn * reach));
-      const ray = new paper.Path({
-        segments: [new paper.Segment(foot), new paper.Segment(far)],
-        insert: false,
-      });
-      const xs = clippedPath.getIntersections(ray);
-      ray.remove();
-      if (xs.length === 0) continue;
-      // Nearest boundary hit on this side (the capsule wall, not a far lobe).
-      let best = xs[0].point,
-        bestD = foot.getDistance(best);
-      for (const cl of xs) {
-        const d = foot.getDistance(cl.point);
-        if (d < bestD) {
-          bestD = d;
-          best = cl.point;
-        }
-      }
-      ribs.push({
-        foot: { x: foot.x, y: foot.y },
-        hit: { x: best.x, y: best.y },
-      });
-    }
-  }
-  bone.remove();
-  return ribs;
+/** True if open segments p1→p2 and p3→p4 cross at an interior point (proper
+ *  intersection; collinear/endpoint touching does not count). */
+function segmentsCross(
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  p4: { x: number; y: number },
+): boolean {
+  const cross = (
+    ox: number,
+    oy: number,
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+  ) => (ax - ox) * (by - oy) - (ay - oy) * (bx - ox);
+  const d1 = cross(p3.x, p3.y, p4.x, p4.y, p1.x, p1.y);
+  const d2 = cross(p3.x, p3.y, p4.x, p4.y, p2.x, p2.y);
+  const d3 = cross(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+  const d4 = cross(p1.x, p1.y, p2.x, p2.y, p4.x, p4.y);
+  return (
+    ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+  );
 }
 
+/** Count rib cross-overs within one capsule, per side: crossings are only tested
+ *  between ribs on the same side of the bone (ribs on opposite sides fan apart
+ *  and never meaningfully cross). `end` selects the tilted endpoint (`point`) or
+ *  the original normal endpoint (`point0`). Returns the total number of crossing
+ *  pairs and how many distinct ribs take part in a crossing. */
+function countRibCrossovers(
+  ribs: Rib[],
+  end: "point" | "point0" = "point",
+): {
+  pairs: number;
+  ribsInvolved: number;
+} {
+  const tip = (r: Rib) => (end === "point0" ? (r.point0 ?? r.point) : r.point);
+  let pairs = 0;
+  const involved = new Set<number>();
+  for (let i = 0; i < ribs.length; i++) {
+    for (let j = i + 1; j < ribs.length; j++) {
+      if (ribs[i].side !== ribs[j].side) continue;
+      if (segmentsCross(ribs[i].foot, tip(ribs[i]), ribs[j].foot, tip(ribs[j]))) {
+        pairs++;
+        involved.add(i);
+        involved.add(j);
+      }
+    }
+  }
+  return { pairs, ribsInvolved: involved.size };
+}
+
+
 /** Write every warped capsule (pre-union) to a single SVG, one hue per edge
- *  (test5 scheme; vertex disks red), plus thin bone-foot→boundary ribs sampled
- *  at curve-time 0.1 intervals. Used for the pre-averaging capsules. */
+ *  (test5 scheme; vertex disks red), plus thin foot→boundary ribs (the faithful
+ *  warp correspondence). `ribsByPrim` is index-aligned with `prims`. */
 function writeCapsulesSvg(
   label: string,
   prims: Primitive[],
   nSegs: number,
   suffix: string,
-  skeleton: DeformedSkeleton,
-  segments: [number, number][],
+  ribsByPrim: Rib[][],
 ): void {
   let bb: paper.Rectangle | null = null;
   for (const p of prims) {
@@ -318,7 +296,8 @@ function writeCapsulesSvg(
   const hue = (i: number) => Math.round((i * 360) / Math.max(1, nSegs));
   const paths: string[] = [];
   const ribs: string[] = [];
-  for (const p of prims) {
+  for (let pi = 0; pi < prims.length; pi++) {
+    const p = prims[pi];
     const d = p.clippedPath?.pathData;
     if (!d) continue;
     const isEdge = p.type === "edge";
@@ -328,12 +307,21 @@ function writeCapsulesSvg(
       `  <path d="${d}" fill="${fill}" fill-opacity="0.22" ` +
         `stroke="${stroke}" stroke-width="1.5" fill-rule="evenodd"/>`,
     );
-    if (isEdge && p.clippedPath) {
-      for (const r of boneFootRibs(p.clippedPath, skeleton, segments, p.elementIdx)) {
+    if (isEdge) {
+      for (const r of ribsByPrim[pi] ?? []) {
+        // Original normal-direction rib (faint grey), then the tilted rib (hue).
+        if (r.point0) {
+          ribs.push(
+            `  <line x1="${r.foot.x.toFixed(2)}" y1="${r.foot.y.toFixed(2)}" ` +
+              `x2="${r.point0.x.toFixed(2)}" y2="${r.point0.y.toFixed(2)}" ` +
+              `stroke="#888" stroke-width="0.3" stroke-opacity="0.5" ` +
+              `stroke-dasharray="0.5 1.5"/>`,
+          );
+        }
         ribs.push(
           `  <line x1="${r.foot.x.toFixed(2)}" y1="${r.foot.y.toFixed(2)}" ` +
-            `x2="${r.hit.x.toFixed(2)}" y2="${r.hit.y.toFixed(2)}" ` +
-            `stroke="${stroke}" stroke-width="0.5" stroke-opacity="0.8" ` +
+            `x2="${r.point.x.toFixed(2)}" y2="${r.point.y.toFixed(2)}" ` +
+            `stroke="${stroke}" stroke-width="0.5" stroke-opacity="0.85" ` +
             `stroke-dasharray="1 1"/>`,
         );
       }
@@ -458,7 +446,7 @@ function renderDeform(
   sharedLinks: BoneLink[],
   suffix: string,
   drawControlNet: boolean,
-  ribs: (FootRib & { stroke: string })[] = [],
+  ribs: (Rib & { stroke: string })[] = [],
 ): void {
   const SIZE = 1000;
   const PAD = 60;
@@ -547,11 +535,11 @@ function renderDeform(
       );
   }
 
-  // Bone-foot → capsule-boundary ribs (pre-averaging capsules), sampled at
-  // curve-time 0.1 intervals. Thin and dashed, matching the preavg capsules.
+  // Foot → warped-boundary ribs (pre-averaging capsules), the faithful warp
+  // correspondence. Thin and dashed, matching the preavg capsules.
   for (const r of ribs) {
     canvas.add(
-      new FabricLine([tx(r.foot.x), ty(r.foot.y), tx(r.hit.x), ty(r.hit.y)], {
+      new FabricLine([tx(r.foot.x), ty(r.foot.y), tx(r.point.x), ty(r.point.y)], {
         stroke: r.stroke,
         strokeWidth: 0.5,
         strokeDashArray: [1, 1],
@@ -908,16 +896,43 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
             ? { ...p, clippedPath: resolveSelfIntersections(p.clippedPath) }
             : p,
         );
-        writeCapsulesSvg(
-          label,
-          warpedPre,
-          nSegs,
-          "_capsules_preavg",
-          edit.skeleton,
-          fitted.segments,
-        );
-        const capRibs: (FootRib & { stroke: string })[] = [];
-        for (const prim of warpedPre) {
+
+        // Faithful foot→boundary ribs straight from the warp (index-aligned with
+        // rig.primitives, hence with warpedPre): each rib connects a deformed bone
+        // foot to the warped image of an original boundary sample (single-edge
+        // warp, so they land on the pre-avg capsule). Sampled per bone at a uniform
+        // arc-length spacing for consistent density regardless of segmentation.
+        const RIB_SPACING = 8; // em units between ribs along the boundary
+        const faithfulRibs = warpedBoundaryRibs(rig, edit.skeleton, RIB_SPACING);
+        // Deterministic anti-crossing tilt experiment: splay converging ribs just
+        // enough not to cross (original kept as point0 for the before/after viz).
+        const tiltedRibs = faithfulRibs.map(resolveRibTilts);
+
+        // Rib cross-over diagnostic: for each pre-avg edge capsule, count crossings
+        // before (normal-direction ribs) vs after the deterministic tilt.
+        const crossoverReport: string[] = [];
+        for (let i = 0; i < warpedPre.length; i++) {
+          const prim = warpedPre[i];
+          if (prim.type !== "edge" || !prim.clippedPath) continue;
+          const ribs = tiltedRibs[i];
+          const before = countRibCrossovers(ribs, "point0").pairs;
+          const after = countRibCrossovers(ribs, "point").pairs;
+          if (before > 0 || after > 0) {
+            crossoverReport.push(
+              `      edge ${prim.elementIdx}: ${before} → ${after} crossing ` +
+                `pair${after === 1 ? "" : "s"} (${ribs.length} ribs)`,
+            );
+          }
+        }
+        if (crossoverReport.length) {
+          console.log(`  ⨯ rib cross-overs (preavg, before → after tilt):`);
+          for (const line of crossoverReport) console.log(line);
+        }
+
+        writeCapsulesSvg(label, warpedPre, nSegs, "_capsules_preavg", tiltedRibs);
+        const capRibs: (Rib & { stroke: string })[] = [];
+        for (let i = 0; i < warpedPre.length; i++) {
+          const prim = warpedPre[i];
           if (!prim.clippedPath) continue;
           capLayers.push({
             item: prim.clippedPath,
@@ -931,12 +946,7 @@ for (const [name, svg] of Object.entries(TEST_PATHS)) {
           });
           if (prim.type === "edge") {
             const stroke = `hsl(${hue(prim.elementIdx)}, 70%, 40%)`;
-            for (const r of boneFootRibs(
-              prim.clippedPath,
-              edit.skeleton,
-              fitted.segments,
-              prim.elementIdx,
-            )) {
+            for (const r of tiltedRibs[i]) {
               capRibs.push({ ...r, stroke });
             }
           }
